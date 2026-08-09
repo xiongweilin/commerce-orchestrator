@@ -1,0 +1,125 @@
+# ============================================================================
+# commerce-orchestrator — Docker Compose 基础设施编排
+#
+# v1 技术选型（明确不引入）：无 Redis / RabbitMQ / Kafka / Elasticsearch / Kubernetes。
+# API 与 worker 共用同一镜像（backend/Dockerfile），仅启动命令不同。
+# 所有长驻服务均 restart: unless-stopped；api/worker 等待 postgres 健康后才启动。
+#
+# 配置约定：
+#   - 应用配置来自项目根目录 .env（env_file: .env；模板见 .env.example，
+#     backend 的 config.py 读取 COMMERCE_ 前缀变量）。
+#   - 容器内数据库主机名固定为 postgres；.env 中的 localhost 值仅用于本地裸机开发，
+#     compose 在这里用 environment 覆盖为服务名。
+#   - POSTGRES_* 由 compose 插值使用（默认 commerce/commerce/commerce），
+#     修改时必须同步调整数据库 URL 与 metabase/odoo 服务配置。
+# ============================================================================
+
+name: commerce-orchestrator
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: commerce-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-commerce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commerce}
+      POSTGRES_DB: ${POSTGRES_DB:-commerce}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 首次初始化（空数据卷）时创建 DBOS/metabase/odoo 数据库并启用 pgcrypto；
+      # docker-entrypoint-initdb.d 只会在数据卷为空时执行一次。
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commerce -d commerce"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  api:
+    build: ./backend
+    image: commerce-orchestrator-backend:local  # api/worker 共用镜像，compose 只构建一次
+    container_name: commerce-api
+    restart: unless-stopped
+    command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: .env
+    environment:
+      # 容器内以服务名 postgres 连接（覆盖 .env 中的 localhost 值）
+      COMMERCE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/${POSTGRES_DB:-commerce}
+      COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/dbos
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build: ./backend
+    image: commerce-orchestrator-backend:local
+    container_name: commerce-worker
+    restart: unless-stopped
+    # 与 api 同一镜像，不同进程：DBOS worker 入口（backend 负责实现 app.worker）
+    command: ["uv", "run", "python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      COMMERCE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/${POSTGRES_DB:-commerce}
+      COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/dbos
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  metabase:
+    image: metabase/metabase:v0.61.2
+    container_name: commerce-metabase
+    restart: unless-stopped
+    # 首次部署时请把 tag 钉到该系列的精确 point tag（当前最新 v0.61.2.10）：
+    #   先执行 `docker manifest inspect metabase/metabase:v0.61.2` 验证存在性，
+    #   再把 image 改为 metabase/metabase:v0.61.2.10 之类，避免浮动 tag 漂移。
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: commerce
+      MB_DB_PASS: commerce
+      MB_DB_HOST: postgres
+      MB_DB_PORT: 5432
+    ports:
+      - "3001:3000"
+    depends_on:
+      - postgres
+
+  # Odoo 19 Community（可选服务，默认不启动）
+  # 用途：P0 运行时验证 Odoo 19 的 JSON-2 API（POST /json/2/<model>/<method>，
+  #       鉴权为 Bearer API key），用于打通订单/库存等集成链路。
+  # 启动：docker compose --profile odoo up -d
+  odoo19:
+    image: odoo:19
+    container_name: commerce-odoo19
+    restart: unless-stopped
+    profiles: ["odoo"]
+    environment:
+      # 复用 POSTGRES_* 凭据连接 postgres（compose 插值，默认 commerce/commerce）
+      HOST: postgres
+      USER: ${POSTGRES_USER:-commerce}
+      PASSWORD: ${POSTGRES_PASSWORD:-commerce}
+      # 与业务库隔离：Odoo 使用独立数据库 odoo（init.sql 创建），
+      # 避免 Odoo 在 commerce 主库中建表干扰业务/DBOS 数据。
+      NAME: odoo
+    ports:
+      - "8069:8069"
+    volumes:
+      - odoo_data:/var/lib/odoo
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
+  odoo_data:

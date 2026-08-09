@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+tests/
+
+# Local data and secrets
+.env
+.env.local
+*.log
+data/

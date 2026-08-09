@@ -1,0 +1,37 @@
+# 根级构建上下文排除
+# 注意：compose 中 backend 镜像的构建上下文是 backend/，实际生效的是 backend/.dockerignore
+#（backend 专项负责）；本文件在从仓库根目录构建（如 docker build -f backend/Dockerfile .）时生效。
+
+# 版本控制
+.git
+.gitignore
+.github
+
+# Python / uv
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+*.egg-info/
+build/
+dist/
+
+# Node / Next.js
+**/node_modules
+**/.next
+**/out
+npm-debug.log*
+
+# 环境与密钥
+.env
+.env.*
+*.pem
+*.key
+
+# 文档与编排（构建镜像不需要）
+docs
+infra
+Makefile
+compose.yaml
+README.md

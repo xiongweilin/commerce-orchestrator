@@ -1,0 +1,661 @@
+"""Shopify Admin GraphQL connector (dev store).
+
+Contract (ADR-0007):
+
+- **Pinned API version** from settings (``COMMERCE_SHOPIFY_API_VERSION``,
+  e.g. ``2026-07``); ``latest`` is never used. Endpoint:
+  ``https://{shop}.myshopify.com/admin/api/{version}/graphql.json``.
+- **Auth**: ``X-Shopify-Access-Token`` request header.
+- **Sync by default** (see ``app.connectors.base``): a sync ``httpx.Client``
+  with a bounded timeout. An async variant is intentionally not shipped in
+  v1; it can be added as a thin wrapper later without changing the method
+  contracts.
+- **Triple error check** on every mutation: HTTP status, top-level GraphQL
+  ``errors``, and the requested mutation's ``userErrors``. Any of them
+  failing means the effect did not succeed.
+- **Idempotency**: ``refundCreate`` supports native idempotency via the
+  ``@idempotent(key:)`` directive (required since API 2026-04). The other
+  mutations have no real idempotency; every operation accepts an
+  ``idempotency_key`` for the caller-level effect ledger (ADR-0004) and
+  attaches it to logs/traces.
+
+Timeout/transport and 5xx failures raise :class:`OutcomeUnknownError` (never
+blind-retried); definitive 4xx failures raise
+:class:`app.core.errors.ExternalSystemError`; expected conflicts return
+``EffectResult(ok=False, status="failed")``.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+
+from app import __version__ as APP_VERSION
+from app.config import Settings, get_settings
+from app.connectors.base import (
+    ConnectorError,
+    EffectResult,
+    OutcomeUnknownError,
+    payload_hash,
+    truncate,
+)
+from app.core.errors import ExternalSystemError
+from app.core.logging import get_logger
+from app.core.telemetry import get_tracer
+
+logger = get_logger("commerce.connectors.shopify")
+
+_CONFLICT_MARKERS = (
+    "has already been taken",
+    "already exists",
+    "already in use",
+    "already published",
+)
+"""Best-effort userErrors substrings that indicate an expected conflict.
+
+Anything not matching these markers is raised as ExternalSystemError; the
+workflow decides how to treat a ``failed`` conflict result.
+"""
+
+_OPEN_FULFILLMENT_ORDER_STATUSES = {"OPEN", "IN_PROGRESS"}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+class ShopifyConnector:
+    """Synchronous Shopify Admin GraphQL connector.
+
+    Construction reads settings and performs no network I/O; the
+    ``httpx.Client`` is created lazily on first request. Pass ``client`` to
+    inject a mock/recorded client in tests.
+    """
+
+    name = "shopify"
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        timeout: float = 15.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.shop_name = self.settings.shopify_shop_name.strip()
+        self.access_token = self.settings.shopify_access_token.strip()
+        self.api_version = self.settings.shopify_api_version.strip() or "2026-07"
+        self.timeout = timeout
+        self._client = client
+        self._owns_client = client is None
+
+    # ------------------------------------------------------------------ #
+    # Configuration and HTTP plumbing
+    # ------------------------------------------------------------------ #
+
+    @property
+    def endpoint(self) -> str:
+        return f"https://{self.shop_name}.myshopify.com/admin/api/{self.api_version}/graphql.json"
+
+    @property
+    def versions_endpoint(self) -> str:
+        return f"https://{self.shop_name}.myshopify.com/admin/api/versions.json"
+
+    def _require_configured(self) -> None:
+        if not self.shop_name or not self.access_token:
+            raise ConnectorError(
+                "Shopify connector is not configured: set COMMERCE_SHOPIFY_SHOP_NAME "
+                "and COMMERCE_SHOPIFY_ACCESS_TOKEN"
+            )
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(
+                timeout=httpx.Timeout(self.timeout),
+                headers=self._request_headers(),
+            )
+        return self._client
+
+    def _request_headers(self) -> dict[str, str]:
+        return {
+            "X-Shopify-Access-Token": self.access_token,
+            "User-Agent": f"commerce-orchestrator/{APP_VERSION}",
+        }
+
+    def close(self) -> None:
+        """Close the owned HTTP client (no-op for injected clients)."""
+        if self._owns_client and self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def _graphql(self, query: str, variables: dict[str, Any], *, operation: str) -> dict[str, Any]:
+        """POST a GraphQL document and return the parsed payload.
+
+        Raises OutcomeUnknownError for ambiguous transport/5xx failures and
+        ExternalSystemError for definitive HTTP failures or malformed JSON.
+        """
+        self._require_configured()
+        tracer = get_tracer()
+        with tracer.start_as_current_span(f"connector.shopify.{operation}") as span:
+            span.set_attribute("shopify.operation", operation)
+            span.set_attribute("shopify.api_version", self.api_version)
+            try:
+                response = self._get_client().post(
+                    self.endpoint,
+                    json={"query": query, "variables": variables},
+                    headers=self._request_headers(),
+                )
+            except httpx.TransportError as exc:
+                span.record_exception(exc)
+                kind = "timeout" if isinstance(exc, httpx.TimeoutException) else "transport error"
+                logger.warning(
+                    "shopify_request_outcome_unknown",
+                    operation=operation,
+                    error_type=kind,
+                    error=str(exc),
+                )
+                raise OutcomeUnknownError(
+                    f"Shopify {operation} failed with {kind} ({type(exc).__name__}); "
+                    "outcome unknown — do not blind-retry, route to reconciliation"
+                ) from exc
+            payload = self._decode_response(response, operation=operation)
+            if payload.get("errors"):
+                detail = "; ".join(str(e.get("message", e)) for e in payload["errors"])
+                raise ExternalSystemError(
+                    f"Shopify GraphQL top-level errors on {operation}: {truncate(detail)}"
+                )
+            return payload
+
+    def _decode_response(self, response: httpx.Response, *, operation: str) -> dict[str, Any]:
+        """Classify the HTTP response into a payload or a raised error."""
+        status = response.status_code
+        if 200 <= status < 300:
+            try:
+                payload = response.json()
+            except json.JSONDecodeError as exc:
+                raise ExternalSystemError(
+                    f"Shopify {operation} returned HTTP {status} with non-JSON body"
+                ) from exc
+            if not isinstance(payload, dict):
+                raise ExternalSystemError(
+                    f"Shopify {operation} returned unexpected JSON shape (expected object)"
+                )
+            return payload
+
+        body = truncate(response.text, 800)
+        if status in (401, 403):
+            raise ExternalSystemError(
+                f"Shopify {operation} authentication/authorization failed (HTTP {status}): {body}"
+            )
+        if status == 404:
+            raise ExternalSystemError(f"Shopify {operation} not found (HTTP 404): {body}")
+        if status == 429:
+            raise ExternalSystemError(
+                f"Shopify {operation} rate limited (HTTP 429); back off before retry: {body}"
+            )
+        if status == 408 or status >= 500:
+            logger.warning("shopify_request_outcome_unknown", operation=operation, status=status)
+            raise OutcomeUnknownError(
+                f"Shopify {operation} returned HTTP {status}; the mutation may have been "
+                "applied before the failure — outcome unknown, route to reconciliation"
+            )
+        raise ExternalSystemError(f"Shopify {operation} failed (HTTP {status}): {body}")
+
+    def _mutation(
+        self,
+        query: str,
+        variables: dict[str, Any],
+        *,
+        operation: str,
+        response_key: str,
+        reference: Callable[[dict[str, Any]], str | None],
+    ) -> EffectResult:
+        """Run a mutation with the triple error check (ADR-0007)."""
+        payload = self._graphql(query, variables, operation=operation)
+        result = (payload.get("data") or {}).get(response_key)
+        if result is None:
+            raise ExternalSystemError(
+                f"Shopify {operation} response missing '{response_key}' payload"
+            )
+        user_errors = result.get("userErrors") or []
+        if user_errors:
+            detail = "; ".join(
+                f"{e.get('field', '?')}: {e.get('message', str(e))}" for e in user_errors
+            )
+            lowered = detail.lower()
+            if any(marker in lowered for marker in _CONFLICT_MARKERS):
+                logger.info(
+                    "shopify_expected_conflict", operation=operation, detail=truncate(detail)
+                )
+                return EffectResult.failed(
+                    error=f"Shopify {operation} conflict: {detail}",
+                    response_hash=payload_hash(payload),
+                )
+            raise ExternalSystemError(f"Shopify {operation} userErrors: {truncate(detail)}")
+        try:
+            remote_reference = reference(result)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ExternalSystemError(
+                f"Shopify {operation} response missing expected reference field: {exc}"
+            ) from exc
+        logger.info(
+            "shopify_effect_succeeded",
+            operation=operation,
+            remote_reference=remote_reference,
+        )
+        return EffectResult.succeeded(
+            remote_reference=remote_reference, response_hash=payload_hash(payload)
+        )
+
+    # ------------------------------------------------------------------ #
+    # Connectivity / auth probe (read-only)
+    # ------------------------------------------------------------------ #
+
+    def probe(self) -> dict[str, Any]:
+        """Check connectivity and auth against the pinned Admin API version.
+
+        GET ``/admin/api/versions.json`` (read-only) and report the
+        ``X-Shopify-API-Version`` response header. Never raises; returns:
+        ``{"ok": bool, "api_version": str, "installed": bool}``.
+        """
+        if not self.shop_name or not self.access_token:
+            return {
+                "ok": False,
+                "api_version": self.api_version,
+                "installed": False,
+            }
+        try:
+            response = self._get_client().get(
+                self.versions_endpoint, headers=self._request_headers()
+            )
+        except httpx.TransportError as exc:
+            logger.warning("shopify_probe_transport_error", error=str(exc))
+            return {
+                "ok": False,
+                "api_version": self.api_version,
+                "installed": False,
+            }
+        served_version = response.headers.get("x-shopify-api-version") or self.api_version
+        if response.status_code == 200:
+            try:
+                body = response.json()
+            except json.JSONDecodeError:
+                body = None
+            if isinstance(body, dict):
+                return {"ok": True, "api_version": served_version, "installed": True}
+        logger.warning(
+            "shopify_probe_failed",
+            status=response.status_code,
+            served_version=served_version,
+        )
+        return {"ok": False, "api_version": served_version, "installed": False}
+
+    # ------------------------------------------------------------------ #
+    # Product operations
+    # ------------------------------------------------------------------ #
+
+    def create_product(
+        self, payload: dict[str, Any], *, idempotency_key: str | None = None
+    ) -> EffectResult:
+        """Create a product (``productCreate``).
+
+        ``payload`` maps to ``ProductCreateInput`` (``title`` is required).
+        The returned reference is the product GID.
+        """
+        if not payload.get("title"):
+            raise ConnectorError("Shopify create_product requires payload['title']")
+        query = """
+            mutation productCreate($product: ProductCreateInput!) {
+              productCreate(product: $product) {
+                product { id handle }
+                userErrors { field message }
+              }
+            }
+        """
+        variables: dict[str, Any] = {"product": payload}
+        return self._mutation(
+            query,
+            variables,
+            operation="product_create",
+            response_key="productCreate",
+            reference=lambda result: result["product"]["id"],
+        )
+
+    def update_product(
+        self, gid: str, payload: dict[str, Any], *, idempotency_key: str | None = None
+    ) -> EffectResult:
+        """Update a product by GID (``productUpdate``).
+
+        ``payload`` maps to ``ProductUpdateInput``; ``idempotency_key`` is
+        logged for caller-level ledger correlation (no native idempotency).
+        """
+        query = """
+            mutation productUpdate(
+              $identifier: ProductUpdateIdentifiers!
+              $product: ProductUpdateInput!
+            ) {
+              productUpdate(identifier: $identifier, product: $product) {
+                product { id }
+                userErrors { field message }
+              }
+            }
+        """
+        variables = {"identifier": {"id": gid}, "product": payload}
+        return self._mutation(
+            query,
+            variables,
+            operation="product_update",
+            response_key="productUpdate",
+            reference=lambda result: result.get("product", {}).get("id") or gid,
+        )
+
+    def publish_product(
+        self,
+        gid: str,
+        *,
+        publication_id: str | None = None,
+        publish_date: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> EffectResult:
+        """Publish a product (``publishablePublish``, 2026-07 shape).
+
+        ``input`` is a ``[PublicationInput!]!`` list; with no
+        ``publication_id`` the default (Online Store) publication is used.
+        ``publish_date`` defaults to now; a future date schedules publishing.
+        """
+        publication: dict[str, Any] = {"publishDate": publish_date or _utc_now_iso()}
+        if publication_id:
+            publication["publicationId"] = publication_id
+        query = """
+            mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+              publishablePublish(id: $id, input: $input) {
+                publishable { ... on Product { id } }
+                userErrors { field message }
+              }
+            }
+        """
+        return self._mutation(
+            query,
+            {"id": gid, "input": [publication]},
+            operation="product_publish",
+            response_key="publishablePublish",
+            reference=lambda result: (result.get("publishable") or {}).get("id") or gid,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Fulfillment and refunds
+    # ------------------------------------------------------------------ #
+
+    def create_fulfillment(
+        self,
+        order_gid: str,
+        tracking: dict[str, Any] | None,
+        location_gid: str | None = None,
+        *,
+        fulfillment_order_gid: str | None = None,
+        notify_customer: bool = False,
+        idempotency_key: str | None = None,
+    ) -> EffectResult:
+        """Fulfill a whole order (``fulfillmentCreate``).
+
+        2026-07 fulfills via fulfillment orders, so when
+        ``fulfillment_order_gid`` is omitted the connector resolves the
+        order's first open fulfillment order (read query) and fulfills all
+        of its line items. ``location_gid`` is accepted for v1 signature
+        compatibility; in 2026-07 the fulfillment order's assigned location
+        is authoritative (a provided gid is logged, not asserted).
+
+        ``tracking``: ``{"company"?, "number"?, "url"?}``.
+        """
+        if fulfillment_order_gid is None:
+            fulfillment_order_gid = self._resolve_fulfillment_order(
+                order_gid, preferred_location_gid=location_gid
+            )
+            if fulfillment_order_gid is None:
+                return EffectResult.failed(
+                    error=(
+                        f"Shopify fulfillment_create: no open fulfillment order for "
+                        f"order {order_gid}"
+                    )
+                )
+        tracking_input: dict[str, Any] | None = None
+        if tracking:
+            tracking_input = {k: v for k, v in tracking.items() if v is not None}
+        fulfillment: dict[str, Any] = {
+            "lineItemsByFulfillmentOrder": [
+                {
+                    "fulfillmentOrderId": fulfillment_order_gid,
+                    "fulfillmentOrderLineItems": [],
+                }
+            ],
+            "notifyCustomer": notify_customer,
+        }
+        if tracking_input:
+            fulfillment["trackingInfo"] = tracking_input
+        query = """
+            mutation fulfillmentCreate($fulfillment: FulfillmentInput!) {
+              fulfillmentCreate(fulfillment: $fulfillment) {
+                fulfillment { id status }
+                userErrors { field message }
+              }
+            }
+        """
+        return self._mutation(
+            query,
+            {"fulfillment": fulfillment},
+            operation="fulfillment_create",
+            response_key="fulfillmentCreate",
+            reference=lambda result: (result.get("fulfillment") or {}).get("id"),
+        )
+
+    def _resolve_fulfillment_order(
+        self, order_gid: str, *, preferred_location_gid: str | None = None
+    ) -> str | None:
+        """Return the first open fulfillment order GID for an order."""
+        query = """
+            query orderFulfillmentOrders($id: ID!) {
+              order(id: $id) {
+                id
+                fulfillmentOrders(first: 10) {
+                  edges {
+                    node {
+                      id
+                      status
+                      location { id }
+                    }
+                  }
+                }
+              }
+            }
+        """
+        payload = self._graphql(query, {"id": order_gid}, operation="resolve_fulfillment_order")
+        order = (payload.get("data") or {}).get("order") or {}
+        for edge in (order.get("fulfillmentOrders") or {}).get("edges") or []:
+            node = edge.get("node") or {}
+            if node.get("status") in _OPEN_FULFILLMENT_ORDER_STATUSES:
+                if preferred_location_gid and node.get("location", {}).get("id") != (
+                    preferred_location_gid
+                ):
+                    logger.info(
+                        "shopify_fulfillment_order_location_mismatch",
+                        preferred_location_gid=preferred_location_gid,
+                        actual_location_gid=node.get("location", {}).get("id"),
+                    )
+                    continue
+                return node.get("id")
+        return None
+
+    def create_refund(
+        self,
+        order_gid: str,
+        amount: str | int | float,
+        *,
+        note: str | None = None,
+        notify: bool = False,
+        refund_line_items: list[dict[str, Any]] | None = None,
+        idempotency_key: str | None = None,
+        allow_real_money: bool = False,
+    ) -> EffectResult:
+        """Create a refund (``refundCreate``, dev store only).
+
+        Safety rail: refuses to run unless ``allow_real_money=True`` is
+        passed explicitly. Native idempotency is REQUIRED by the API since
+        2026-04 (``@idempotent(key:)``), so ``idempotency_key`` must be
+        provided. The transaction is created against the ``manual`` gateway
+        so no real payment is ever moved.
+        """
+        if not allow_real_money:
+            raise ConnectorError(
+                "Shopify create_refund is dev-store-only and never moves real money; "
+                "pass allow_real_money=True explicitly to proceed"
+            )
+        if not idempotency_key:
+            raise ConnectorError(
+                "Shopify refundCreate requires idempotency_key (native @idempotent "
+                "directive, required since API 2026-04)"
+            )
+        refund_input: dict[str, Any] = {
+            "orderId": order_gid,
+            "notify": notify,
+            "transactions": [
+                {
+                    "amount": str(amount),
+                    "kind": "REFUND",
+                    "gateway": "manual",
+                }
+            ],
+        }
+        if note:
+            refund_input["note"] = note
+        if refund_line_items:
+            refund_input["refundLineItems"] = refund_line_items
+        query = """
+            mutation refundCreate($input: RefundInput!, $key: String!)
+              @idempotent(key: $key) {
+              refundCreate(input: $input) {
+                refund { id }
+                userErrors { field message }
+              }
+            }
+        """
+        return self._mutation(
+            query,
+            {"input": refund_input, "key": idempotency_key},
+            operation="refund_create",
+            response_key="refundCreate",
+            reference=lambda result: (result.get("refund") or {}).get("id"),
+        )
+
+    # ------------------------------------------------------------------ #
+    # Read queries (reconciliation and inventory projections)
+    # ------------------------------------------------------------------ #
+
+    def list_orders(
+        self,
+        updated_after: str,
+        first: int = 50,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Incrementally list orders updated after an ISO timestamp.
+
+        Cursor-paginated ``orders`` query sorted by ``UPDATED_AT``; returns
+        ``(nodes, next_cursor)`` where ``next_cursor`` is ``None`` when the
+        page is complete. Used for updated_at-based reconciliation.
+        """
+        query = """
+            query ordersIncremental(
+              $after: String
+              $first: Int!
+              $updatedAfter: DateTime!
+            ) {
+              orders(
+                first: $first
+                after: $after
+                updatedAfter: $updatedAfter
+                sortKey: UPDATED_AT
+              ) {
+                edges {
+                  node {
+                    id
+                    legacyResourceId
+                    name
+                    updatedAt
+                    createdAt
+                    displayFinancialStatus
+                    displayFulfillmentStatus
+                    totalPriceSet {
+                      presentmentMoney { amount currencyCode }
+                    }
+                    lineItems(first: 100) {
+                      edges { node { id title sku quantity } }
+                    }
+                  }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+        """
+        variables = {"after": cursor, "first": first, "updatedAfter": updated_after}
+        payload = self._graphql(query, variables, operation="list_orders")
+        data = payload.get("data") or {}
+        edges = (data.get("orders") or {}).get("edges") or []
+        page_info = (data.get("orders") or {}).get("pageInfo") or {}
+        nodes = [edge["node"] for edge in edges if edge.get("node")]
+        next_cursor = page_info.get("endCursor") if page_info.get("hasNextPage") else None
+        return nodes, next_cursor
+
+    def list_inventory(
+        self, first: int = 50, cursor: str | None = None
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """List inventory levels (``inventoryLevels``) with cursor pagination."""
+        query = """
+            query inventoryLevelsPage($after: String, $first: Int!) {
+              inventoryLevels(first: $first, after: $after) {
+                edges {
+                  node {
+                    id
+                    available
+                    location { id name }
+                    inventoryItem { id sku }
+                    quantities { name quantity }
+                  }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+        """
+        payload = self._graphql(
+            query, {"after": cursor, "first": first}, operation="list_inventory"
+        )
+        data = payload.get("data") or {}
+        edges = (data.get("inventoryLevels") or {}).get("edges") or []
+        page_info = (data.get("inventoryLevels") or {}).get("pageInfo") or {}
+        nodes = [edge["node"] for edge in edges if edge.get("node")]
+        next_cursor = page_info.get("endCursor") if page_info.get("hasNextPage") else None
+        return nodes, next_cursor
+
+    def get_product(self, gid: str) -> dict[str, Any] | None:
+        """Fetch a product by GID; returns ``None`` when it does not exist."""
+        query = """
+            query productById($id: ID!) {
+              product(id: $id) {
+                id
+                handle
+                title
+                productType
+                status
+                variants(first: 10) {
+                  edges { node { id sku title price } }
+                }
+              }
+            }
+        """
+        payload = self._graphql(query, {"id": gid}, operation="get_product")
+        return (payload.get("data") or {}).get("product")
+
+
+__all__ = ["ShopifyConnector"]

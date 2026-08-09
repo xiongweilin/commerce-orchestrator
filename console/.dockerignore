@@ -1,0 +1,10 @@
+# 构建上下文排除（console 镜像只需要源码 + 锁文件）
+node_modules
+.next
+.git
+npm-debug.log*
+.env
+.env.*
+*.md
+Dockerfile
+.dockerignore

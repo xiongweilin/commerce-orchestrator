@@ -1,0 +1,59 @@
+[project]
+name = "commerce-orchestrator"
+version = "0.1.0"
+description = "E-commerce organization internal operations control tower: cross-system workflows, approvals, idempotency, effect ledger and reconciliation over Odoo 19 + Shopify dev store."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+license = { text = "Proprietary" }
+authors = [{ name = "commerce-orchestrator team" }]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.5",
+  "sqlalchemy>=2.0.35",
+  "alembic>=1.13",
+  "psycopg[binary]>=3.2",
+  "dbos>=0.11",
+  "httpx>=0.27",
+  "structlog>=24.4",
+  "prometheus-client>=0.20",
+  "cryptography>=43.0",
+  "pyjwt>=2.9",
+  "uuid6>=2024.7.10",
+  "python-multipart>=0.0.9",
+  "opentelemetry-api>=1.27",
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.dbos]
+# DBOS runtime configuration lives here when `dbos migrate`/`dbos start` is used.
+# Runtime values (database URL, ports) come from environment variables, never secrets in this file.
