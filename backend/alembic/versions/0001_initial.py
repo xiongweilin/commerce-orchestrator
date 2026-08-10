@@ -12,8 +12,9 @@ the constraints and indexes declared by ``app.models``. Idempotent-safe: plain
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "0001_initial"
 down_revision = None
@@ -45,9 +46,7 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("scope", sa.String(length=64), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_role_assignment"),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["user.id"], name="fk_role_assignment_user_id_user"
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["user.id"], name="fk_role_assignment_user_id_user"),
         sa.UniqueConstraint(
             "user_id", "role", "scope", name="uq_role_assignment_user_id_role_scope"
         ),
@@ -68,9 +67,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_workflow_run"),
     )
-    op.create_index(
-        "ix_workflow_run_status_updated_at", "workflow_run", ["status", "updated_at"]
-    )
+    op.create_index("ix_workflow_run_status_updated_at", "workflow_run", ["status", "updated_at"])
 
     op.create_table(
         "work_item",
@@ -208,7 +205,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_feedback_item"),
         sa.ForeignKeyConstraint(
-            ["cluster_id"], ["feedback_cluster.id"], name="fk_feedback_item_cluster_id_feedback_cluster"
+            ["cluster_id"],
+            ["feedback_cluster.id"],
+            name="fk_feedback_item_cluster_id_feedback_cluster",
         ),
     )
 
@@ -380,7 +379,9 @@ def upgrade() -> None:
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id", name="pk_reconciliation_diff"),
         sa.ForeignKeyConstraint(
-            ["run_id"], ["reconciliation_run.id"], name="fk_reconciliation_diff_run_id_reconciliation_run"
+            ["run_id"],
+            ["reconciliation_run.id"],
+            name="fk_reconciliation_diff_run_id_reconciliation_run",
         ),
     )
     op.create_index("ix_reconciliation_diff_status", "reconciliation_diff", ["status"])

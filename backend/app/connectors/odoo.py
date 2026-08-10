@@ -42,8 +42,8 @@ from app.connectors.base import (
     ConnectorError,
     EffectResult,
     OutcomeUnknownError,
-    prefer_ipv4,
     payload_hash,
+    prefer_ipv4,
     truncate,
 )
 from app.core.errors import ExternalSystemError

@@ -34,8 +34,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
 import certifi
+import httpx
 
 from app import __version__ as APP_VERSION
 from app.config import Settings, get_settings
@@ -43,8 +43,8 @@ from app.connectors.base import (
     ConnectorError,
     EffectResult,
     OutcomeUnknownError,
-    prefer_ipv4,
     payload_hash,
+    prefer_ipv4,
     truncate,
 )
 from app.core.errors import ExternalSystemError
@@ -673,13 +673,14 @@ class ShopifyConnector:
         """
         if updated_after:
             query = """
-            query ordersIncrementalPage(
+            query ordersPageFiltered(
               $after: String
               $first: Int!
-              $updatedAfter: DateTime!
+              $query: String!
             ) {
-              ordersIncremental(updatedAfter: $updatedAfter, first: $first, after: $after) {
-                nodes {
+              orders(first: $first, after: $after, sortKey: UPDATED_AT, query: $query) {
+                edges {
+                  node {
                     id
                     legacyResourceId
                     name
@@ -693,12 +694,17 @@ class ShopifyConnector:
                     lineItems(first: 100) {
                       edges { node { id title sku quantity } }
                     }
+                  }
                 }
                 pageInfo { hasNextPage endCursor }
               }
             }
             """
-            variables = {"after": cursor, "first": first, "updatedAfter": updated_after}
+            variables = {
+                "after": cursor,
+                "first": first,
+                "query": f"updated_at:>'{updated_after}'",
+            }
         else:
             query = """
             query ordersPage($after: String, $first: Int!) {
@@ -728,8 +734,9 @@ class ShopifyConnector:
         payload = self._graphql(query, variables, operation="list_orders")
         data = payload.get("data") or {}
         if updated_after:
-            nodes = (data.get("ordersIncremental") or {}).get("nodes") or []
-            page_info = (data.get("ordersIncremental") or {}).get("pageInfo") or {}
+            edges = (data.get("orders") or {}).get("edges") or []
+            nodes = [edge["node"] for edge in edges if edge.get("node")]
+            page_info = (data.get("orders") or {}).get("pageInfo") or {}
         else:
             edges = (data.get("orders") or {}).get("edges") or []
             nodes = [edge["node"] for edge in edges if edge.get("node")]
