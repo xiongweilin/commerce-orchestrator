@@ -103,7 +103,7 @@ uv run dbos migrate                # DBOS 系统表迁移
 ## 常见问题
 
 - **端口占用**：8000（api）或 console 端口被占用时，先 `Get-NetTCPConnection -LocalPort 8000` 定位进程，或改用其他端口。
-- **连接数据库失败**：确认 `docker compose up -d postgres` 已启动，`DATABASE_URL`/`DBOS_SYSTEM_DATABASE_URL` 与 compose 暴露端口一致。
+- **连接数据库失败**：确认 `docker compose up -d postgres` 已启动，`COMMERCE_DATABASE_URL`/`COMMERCE_DBOS_SYSTEM_DATABASE_URL` 与 compose 暴露端口一致。
 - **迁移未跑**：启动 api 前必须 `alembic upgrade head`，否则表缺失报错。
 - **Next.js 构建期联网**：`next/font/google` 等需要在构建期联网；离线环境需预置字体或允许构建期网络。
 - **Windows 注意**：在 PowerShell 中以 `uv run` 前缀执行，避免依赖系统 Python 环境。

@@ -173,6 +173,30 @@
 { "note": "str" }
 ```
 
+### 3.7 GET /v1/sales-orders?status=&limit=&offset=（→ 200）
+
+销售订单列表（运营控制台订单页）。
+
+```json
+{ "items": [ { "workflowId": "uuid?", "orderRef": "str", "shopifyOrderId": "str?", "customerRef": "str?", "status": "str", "currency": "str", "total": "decimal-str", "createdAt": "ISO-8601", "updatedAt": "ISO-8601" } ], "total": 0, "limit": 50, "offset": 0 }
+```
+
+### 3.8 GET /v1/return-cases?status=&limit=&offset=（→ 200）
+
+退货案例列表。
+
+```json
+{ "items": [ { "returnRef": "str", "shopifyOrderId": "str?", "orderRef": "str?", "reason": "str", "status": "str", "refundAmount": "decimal-str?", "currency": "str?", "disposition": "str?", "creditNoteId": "str?", "shopifyRefundGid": "str?", "createdAt": "ISO-8601" } ], "total": 0, "limit": 50, "offset": 0 }
+```
+
+### 3.9 GET /v1/procurements?status=&limit=&offset=（→ 200）
+
+采购订单列表。
+
+```json
+{ "items": [ { "sku": "str", "qty": "decimal-str", "uom": "str", "supplier": "str", "unitCost": "decimal-str", "currency": "str", "status": "str", "odooPoId": "str?", "createdAt": "ISO-8601" } ], "total": 0, "limit": 50, "offset": 0 }
+```
+
 ## 4. POST /v1/webhooks/shopify（→ 200）
 
 Shopify webhook 入口（异步处理）。

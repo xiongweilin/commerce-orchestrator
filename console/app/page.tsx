@@ -60,6 +60,27 @@ export default async function OverviewPage() {
             发起命令
           </Link>
         </div>
+        <div className="card stat-card">
+          <div className="stat-label">销售订单</div>
+          <p className="stat-note">渠道订单与 O2C 状态（GET /v1/sales-orders）</p>
+          <Link className="btn btn-secondary" href="/sales-orders">
+            查看订单
+          </Link>
+        </div>
+        <div className="card stat-card">
+          <div className="stat-label">退货</div>
+          <p className="stat-note">退货案例与退款进度（GET /v1/return-cases）</p>
+          <Link className="btn btn-secondary" href="/return-cases">
+            查看退货
+          </Link>
+        </div>
+        <div className="card stat-card">
+          <div className="stat-label">采购</div>
+          <p className="stat-note">采购订单与收货/账单状态（GET /v1/procurements）</p>
+          <Link className="btn btn-secondary" href="/procurements">
+            查看采购
+          </Link>
+        </div>
       </div>
 
       {error && <ErrorBox error={error} title="后端不可达" />}
