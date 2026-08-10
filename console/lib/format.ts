@@ -19,10 +19,10 @@ export function formatTime(iso?: string | null): string {
   }
 }
 
-/** 截断长 ID，便于列表展示；title 属性可查看完整值。 */
-export function shortId(id: string, max = 8): string {
+/** 截断长 ID（头尾保留），便于列表区分；title 属性可查看完整值。 */
+export function shortId(id: string, max = 8, tail = 4): string {
   if (id.length <= max) return id;
-  return `${id.slice(0, max)}…`;
+  return `${id.slice(0, max)}…${id.slice(-tail)}`;
 }
 
 /** 任意值转为可展示文本（对象做 JSON 序列化）。 */

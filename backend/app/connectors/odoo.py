@@ -248,7 +248,13 @@ class OdooConnector:
                     response_hash=payload_hash(exc.error_body),
                 )
             raise
-        remote_reference = str(odoo_id) if odoo_id is not None else str(result)
+        if odoo_id is not None:
+            remote_reference = str(odoo_id)
+        elif isinstance(result, list) and len(result) == 1:
+            # JSON-2 create returns the new record id list, e.g. [12].
+            remote_reference = str(result[0])
+        else:
+            remote_reference = str(result)
         logger.info("odoo_effect_succeeded", operation=operation, remote_reference=remote_reference)
         return EffectResult.succeeded(
             remote_reference=remote_reference, response_hash=payload_hash(result)
@@ -293,19 +299,26 @@ class OdooConnector:
     def create_product(
         self, values: dict[str, Any], *, idempotency_key: str | None = None
     ) -> EffectResult:
-        """Create a product (``product.template`` create; one variant per SKU)."""
+        """Create a product (``product.template`` create; one variant per SKU).
+
+        Odoo 19 JSON-2 ``create`` takes ``vals_list`` (list of value dicts);
+        a single-record create sends ``{"vals_list": [values]}``.
+        """
         return self._write(
-            "product.template", "create", {"values": values}, operation="product_create"
+            "product.template", "create", {"vals_list": [values]}, operation="product_create"
         )
 
     def update_product(
         self, odoo_id: int, values: dict[str, Any], *, idempotency_key: str | None = None
     ) -> EffectResult:
-        """Update a product (``product.template`` write by record id)."""
+        """Update a product (``product.template`` write by record id).
+
+        Odoo 19 JSON-2 ``write`` takes positional ``ids`` plus ``vals``.
+        """
         return self._write(
             "product.template",
             "write",
-            {"ids": [odoo_id], "values": values},
+            {"ids": [odoo_id], "vals": values},
             operation="product_update",
             odoo_id=odoo_id,
         )
@@ -319,7 +332,7 @@ class OdooConnector:
     ) -> EffectResult:
         """Create a draft sales order (``sale.order`` create)."""
         return self._write(
-            "sale.order", "create", {"values": values}, operation="sale_order_create"
+            "sale.order", "create", {"vals_list": [values]}, operation="sale_order_create"
         )
 
     def confirm_sale_order(
@@ -343,7 +356,7 @@ class OdooConnector:
     ) -> EffectResult:
         """Create a stock move (``stock.move`` create)."""
         return self._write(
-            "stock.move", "create", {"values": values}, operation="stock_move_create"
+            "stock.move", "create", {"vals_list": [values]}, operation="stock_move_create"
         )
 
     def create_picking(
@@ -351,7 +364,7 @@ class OdooConnector:
     ) -> EffectResult:
         """Create a picking (``stock.picking`` create)."""
         return self._write(
-            "stock.picking", "create", {"values": values}, operation="picking_create"
+            "stock.picking", "create", {"vals_list": [values]}, operation="picking_create"
         )
 
     def validate_picking(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
@@ -409,7 +422,9 @@ class OdooConnector:
             values["reason"] = reason
         if extra_values:
             values.update(extra_values)
-        return self._write("stock.quant", "create", {"values": values}, operation="update_quantity")
+        return self._write(
+            "stock.quant", "create", {"vals_list": [values]}, operation="update_quantity"
+        )
 
     # ------------------------------------------------------------------ #
     # Invoices / credit notes / bills
@@ -421,7 +436,9 @@ class OdooConnector:
         """Create a customer invoice (``account.move`` ``move_type`` out_invoice)."""
         body = dict(values)
         body.setdefault("move_type", "out_invoice")
-        return self._write("account.move", "create", {"values": body}, operation="invoice_create")
+        return self._write(
+            "account.move", "create", {"vals_list": [body]}, operation="invoice_create"
+        )
 
     def validate_invoice(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
         """Post an invoice (``account.move`` ``action_post``)."""
@@ -440,7 +457,7 @@ class OdooConnector:
         body = dict(values)
         body.setdefault("move_type", "out_refund")
         return self._write(
-            "account.move", "create", {"values": body}, operation="credit_note_create"
+            "account.move", "create", {"vals_list": [body]}, operation="credit_note_create"
         )
 
     def validate_credit_note(
@@ -459,7 +476,9 @@ class OdooConnector:
         self, values: dict[str, Any], *, idempotency_key: str | None = None
     ) -> EffectResult:
         """Create a purchase order (``purchase.order`` create)."""
-        return self._write("purchase.order", "create", {"values": values}, operation="po_create")
+        return self._write(
+            "purchase.order", "create", {"vals_list": [values]}, operation="po_create"
+        )
 
     def confirm_po(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
         """Confirm a purchase order (``purchase.order`` ``button_confirm``)."""
@@ -477,7 +496,9 @@ class OdooConnector:
         """Create a vendor bill (``account.move`` ``move_type`` in_invoice)."""
         body = dict(values)
         body.setdefault("move_type", "in_invoice")
-        return self._write("account.move", "create", {"values": body}, operation="bill_create")
+        return self._write(
+            "account.move", "create", {"vals_list": [body]}, operation="bill_create"
+        )
 
 
 __all__ = ["OdooApiError", "OdooConnector"]

@@ -92,7 +92,9 @@ services:
       MB_DB_HOST: postgres
       MB_DB_PORT: 5432
     ports:
-      - "3001:3000"
+      # 宿主端口避开 Windows 系统保留段（3001-3100，Hyper-V/WinNAT 预留）：
+      # 本机实测 3001 绑定会 EACCES，故用 3201。
+      - "3201:3000"
     depends_on:
       - postgres
 
@@ -110,6 +112,8 @@ services:
       HOST: postgres
       USER: ${POSTGRES_USER:-commerce}
       PASSWORD: ${POSTGRES_PASSWORD:-commerce}
+      # P0 测试用管理员口令（正式环境必须从 secret 注入）
+      ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD:-admin}
       # 与业务库隔离：Odoo 使用独立数据库 odoo（init.sql 创建），
       # 避免 Odoo 在 commerce 主库中建表干扰业务/DBOS 数据。
       NAME: odoo

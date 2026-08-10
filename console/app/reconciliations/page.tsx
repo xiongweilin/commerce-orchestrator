@@ -10,10 +10,10 @@ import { formatTime, shortId } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-/** summary 的差异数字段名后端尚未固定，兼容几种常见命名。 */
+/** summary 的差异数字段名兼容后端命名（含已实现标准 "diffs"）。 */
 function diffCountOf(summary: Record<string, unknown> | null | undefined): number | null {
   if (!summary) return null;
-  for (const key of ["diffCount", "diff_count", "unmatched", "mismatchCount", "unresolved"]) {
+  for (const key of ["diffs", "diffCount", "diff_count", "unmatched", "mismatchCount", "unresolved"]) {
     const value = summary[key];
     if (typeof value === "number") return value;
   }

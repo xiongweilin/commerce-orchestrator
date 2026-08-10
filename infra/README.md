@@ -74,7 +74,7 @@ docker compose build                      # 重建镜像
 | 服务 | 地址 |
 | --- | --- |
 | API（healthz） | http://localhost:8000/healthz |
-| Metabase | http://localhost:3001 |
+| Metabase | http://localhost:3201 |
 | Odoo 19（需先启用 profile） | http://localhost:8069 |
 
 ### 2. 启用 Odoo 19（可选）
@@ -132,7 +132,7 @@ Get-NetTCPConnection -LocalPort 5432,8000,3001,8069 -State Listen | Select-Objec
 
 ### Metabase 初始化
 
-- 首次启动 Metabase 需要约 30–60 秒初始化（创建 `metabase` 库表、生成管理员流程），访问 http://localhost:3001 时请耐心等待。
+- 首次启动 Metabase 需要约 30–60 秒初始化（创建 `metabase` 库表、生成管理员流程），访问 http://localhost:3201 时请耐心等待。
 - `metabase` 数据库由 `infra/postgres/init.sql` 自动创建；若容器在 init 完成前启动，Metabase 会自动重试连接。
 - 忘记管理员密码：`docker compose exec metabase` 内用 Metabase 的 `reset-password` 命令处理（见 Metabase 官方文档）。
 

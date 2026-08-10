@@ -491,6 +491,14 @@ tbody tr:hover {
   margin-top: 5px;
 }
 
+.field-hint.hint-ok {
+  color: var(--ok, #1a7f37);
+}
+
+.field-hint.hint-bad {
+  color: var(--danger, #c62828);
+}
+
 .form-footer {
   display: flex;
   gap: 8px;

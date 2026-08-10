@@ -19,6 +19,10 @@ npm run build      # 生产构建（输出 .next/standalone，供 Dockerfile 使
 npm start          # 生产启动 http://localhost:3000
 ```
 
+> Windows 注意：本机 3001-3100 端口属于系统保留段（`netsh interface ipv4 show excludedportrange protocol=tcp`），
+> 绑定会报 `EACCES`。开发时请用保留段之外的端口，例如 `npm run dev -- -p 3200` 或
+> `npm start -- -H 127.0.0.1 -p 3200`。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |

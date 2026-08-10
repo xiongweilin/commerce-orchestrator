@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
 import type { AcceptedCommand } from "@/lib/types";
 
@@ -60,6 +60,15 @@ export default function CommandsPage() {
   const [result, setResult] = useState<AcceptedCommand | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const jsonValid = useMemo(() => {
+    try {
+      JSON.parse(payloadText);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [payloadText]);
+
   const handleTypeChange = (value: string) => {
     const next = COMMAND_TYPES.find((command) => command.value === value) ?? COMMAND_TYPES[0];
     setType(next);
@@ -79,6 +88,13 @@ export default function CommandsPage() {
     } catch {
       setError("JSON 格式错误，请检查负载内容。");
       return;
+    }
+
+    if (type.value !== "reconciliation") {
+      const ok = window.confirm(
+        `即将发起命令「${type.label}」。该命令会创建审批工作流并可能触发后续外部操作（上架/采购/退款），确定继续？`,
+      );
+      if (!ok) return;
     }
 
     setSubmitting(true);
@@ -138,6 +154,9 @@ export default function CommandsPage() {
             />
             <span className="field-hint">
               POST {type.endpoint} · 每次提交自动附带新的 Idempotency-Key
+            </span>
+            <span className={`field-hint ${jsonValid ? "hint-ok" : "hint-bad"}`}>
+              {jsonValid ? "JSON 语法有效" : "JSON 语法错误（提交将被拦截）"}
             </span>
           </label>
 

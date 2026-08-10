@@ -221,7 +221,8 @@ def test_odoo_create_product_success() -> None:
     assert result.ok is True
     assert result.remote_reference == "42"
     assert len(requests) == 1
-    assert b'"values"' in requests[0].content
+    # Odoo 19 JSON-2 create signature: vals_list (verified in ADR-0008 P0 gate)
+    assert b'"vals_list"' in requests[0].content
 
 
 def test_odoo_error_body_raises_external_system_error() -> None:

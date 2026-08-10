@@ -3,6 +3,7 @@ import { api, API_BASE } from "@/lib/api";
 import { getServerToken } from "@/lib/server-auth";
 import type { PageEnvelope, WorkflowSummary } from "@/lib/types";
 import ErrorBox, { apiErrorMessage } from "@/components/ErrorBox";
+import HealthStatus from "@/components/HealthStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +76,7 @@ export default async function OverviewPage() {
             {API_BASE}/healthz
           </a>
         </p>
+        <HealthStatus />
         <p className="muted">
           提示：如需认证访问，请在右上角输入 Token（保存在浏览器 localStorage，键
           commerce_token），保存后点“刷新”即可让服务端组件携带该 Token 请求后端。
