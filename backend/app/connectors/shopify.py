@@ -28,6 +28,7 @@ blind-retried); definitive 4xx failures raise
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -48,6 +49,9 @@ from app.core.logging import get_logger
 from app.core.telemetry import get_tracer
 
 logger = get_logger("commerce.connectors.shopify")
+
+_TOKEN_EXCHANGE_MAX_ATTEMPTS = 5
+_TOKEN_EXCHANGE_BACKOFF = 1.0  # seconds; sleeps 1s, 2s, 3s, 4s between attempts
 
 _CONFLICT_MARKERS = (
     "has already been taken",
@@ -88,10 +92,14 @@ class ShopifyConnector:
         self.settings = settings or get_settings()
         self.shop_name = self.settings.shopify_shop_name.strip()
         self.access_token = self.settings.shopify_access_token.strip()
+        self.client_id = self.settings.shopify_client_id.strip()
+        self.client_secret = self.settings.shopify_client_secret.strip()
         self.api_version = self.settings.shopify_api_version.strip() or "2026-07"
         self.timeout = timeout
         self._client = client
         self._owns_client = client is None
+        self._cached_token: str | None = None
+        self._token_expires_at: float | None = None
 
     # ------------------------------------------------------------------ #
     # Configuration and HTTP plumbing
@@ -106,23 +114,113 @@ class ShopifyConnector:
         return f"https://{self.shop_name}.myshopify.com/admin/api/versions.json"
 
     def _require_configured(self) -> None:
-        if not self.shop_name or not self.access_token:
+        if not self.shop_name or not self._has_credentials():
             raise ConnectorError(
                 "Shopify connector is not configured: set COMMERCE_SHOPIFY_SHOP_NAME "
-                "and COMMERCE_SHOPIFY_ACCESS_TOKEN"
+                "and (COMMERCE_SHOPIFY_ACCESS_TOKEN or COMMERCE_SHOPIFY_CLIENT_ID + "
+                "COMMERCE_SHOPIFY_CLIENT_SECRET)"
             )
+
+    def _has_credentials(self) -> bool:
+        return bool(self.access_token or (self.client_id and self.client_secret))
+
+    def exchange_client_credentials_token(self) -> str:
+        """Exchange Client ID + Client Secret for a ~24h Admin API access token.
+
+        Client-credentials grant (Dev Dashboard apps):
+        ``POST https://{shop}.myshopify.com/admin/oauth/access_token`` with
+        ``grant_type=client_credentials``. The returned token is an Admin API
+        access token usable with ``X-Shopify-Access-Token`` (expires_in 86399s).
+
+        Bounded retry: the exchange is a side-effect-free credential fetch.
+        The local egress (v2rayN TUN) can transiently fail TLS (see
+        environment ops manual: single-endpoint timeouts are not proxy
+        failure); retrying an idempotent token request is safe and distinct
+        from re-dispatching a business effect.
+        """
+        if not (self.shop_name and self.client_id and self.client_secret):
+            raise ConnectorError(
+                "Shopify client-credentials exchange requires COMMERCE_SHOPIFY_CLIENT_ID "
+                "and COMMERCE_SHOPIFY_CLIENT_SECRET"
+            )
+        url = f"https://{self.shop_name}.myshopify.com/admin/oauth/access_token"
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+        }
+        last_error: Exception | None = None
+        for attempt in range(1, _TOKEN_EXCHANGE_MAX_ATTEMPTS + 1):
+            try:
+                response = httpx.post(
+                    url,
+                    data=data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=self.timeout,
+                    # 直连 Shopify：系统代理只用于 GitHub 等被阻断域名（AGENTS.md），
+                    # 误走代理会 TLS 握手超时。
+                    trust_env=False,
+                )
+                break
+            except httpx.TransportError as exc:
+                last_error = exc
+                if attempt < _TOKEN_EXCHANGE_MAX_ATTEMPTS:
+                    logger.warning(
+                        "shopify_token_exchange_retry",
+                        attempt=attempt,
+                        error_type=type(exc).__name__,
+                        error=str(exc)[:160],
+                    )
+                    time.sleep(_TOKEN_EXCHANGE_BACKOFF * attempt)
+        else:
+            assert last_error is not None
+            raise OutcomeUnknownError(
+                "Shopify client-credentials exchange failed after "
+                f"{_TOKEN_EXCHANGE_MAX_ATTEMPTS} attempts with transport error "
+                f"({type(last_error).__name__}); outcome unknown — do not blind-retry"
+            ) from last_error
+        if response.status_code != 200:
+            raise ExternalSystemError(
+                f"Shopify client-credentials exchange failed (HTTP "
+                f"{response.status_code}): {truncate(response.text, 400)}"
+            )
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise ExternalSystemError(
+                "Shopify client-credentials exchange returned non-JSON body"
+            ) from exc
+        token = payload.get("access_token")
+        if not token:
+            raise ExternalSystemError("Shopify client-credentials response missing access_token")
+        return str(token)
+
+    def _resolve_access_token(self) -> str:
+        """Return a usable Admin API access token (static or client-credentials)."""
+        if self.access_token:
+            return self.access_token
+        now = time.time()
+        if self._cached_token and self._token_expires_at and now < self._token_expires_at:
+            return self._cached_token
+        token = self.exchange_client_credentials_token()
+        self._cached_token = token
+        # expires_in is 86399s; refresh an hour early.
+        self._token_expires_at = now + (86399 - 3600)
+        logger.info("shopify_client_credentials_token_exchanged")
+        return token
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
             self._client = httpx.Client(
                 timeout=httpx.Timeout(self.timeout),
                 headers=self._request_headers(),
+                trust_env=False,
             )
         return self._client
 
     def _request_headers(self) -> dict[str, str]:
         return {
-            "X-Shopify-Access-Token": self.access_token,
+            "X-Shopify-Access-Token": self._resolve_access_token(),
             "User-Agent": f"commerce-orchestrator/{APP_VERSION}",
         }
 
@@ -262,7 +360,7 @@ class ShopifyConnector:
         ``X-Shopify-API-Version`` response header. Never raises; returns:
         ``{"ok": bool, "api_version": str, "installed": bool}``.
         """
-        if not self.shop_name or not self.access_token:
+        if not self.shop_name or not self._has_credentials():
             return {
                 "ok": False,
                 "api_version": self.api_version,

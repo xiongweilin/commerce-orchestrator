@@ -129,7 +129,10 @@ class OdooConnector:
     def _get_client(self) -> httpx.Client:
         if self._client is None:
             self._client = httpx.Client(
-                timeout=httpx.Timeout(self.timeout), headers=self._request_headers()
+                timeout=httpx.Timeout(self.timeout),
+                headers=self._request_headers(),
+                # 直连目标 Odoo（公网或 tailnet），不经系统代理。
+                trust_env=False,
             )
         return self._client
 
@@ -496,9 +499,7 @@ class OdooConnector:
         """Create a vendor bill (``account.move`` ``move_type`` in_invoice)."""
         body = dict(values)
         body.setdefault("move_type", "in_invoice")
-        return self._write(
-            "account.move", "create", {"vals_list": [body]}, operation="bill_create"
-        )
+        return self._write("account.move", "create", {"vals_list": [body]}, operation="bill_create")
 
 
 __all__ = ["OdooApiError", "OdooConnector"]

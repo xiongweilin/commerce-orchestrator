@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     shopify_api_version: str = "2026-07"
     shopify_shop_name: str = ""
     shopify_access_token: str = ""
+    shopify_client_id: str = ""
+    shopify_client_secret: str = ""
     shopify_webhook_secret: str = ""
 
     # Odoo 19
