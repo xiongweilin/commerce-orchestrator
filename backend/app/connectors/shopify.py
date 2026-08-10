@@ -30,8 +30,8 @@ from __future__ import annotations
 import json
 import ssl
 import time
-from contextlib import suppress
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
