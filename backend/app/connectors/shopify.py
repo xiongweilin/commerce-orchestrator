@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import ssl
 import time
+from contextlib import suppress
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -60,10 +61,8 @@ prefer_ipv4()
 # certifi 包 + Windows 系统证书库合并信任：直连路径偶发仅下发不完整链，
 # 系统库缓存了中间证书，合并后校验最稳（本机实测）。
 _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-try:
+with suppress(Exception):  # pragma: no cover - Windows 以外平台无系统库可加载
     _SSL_CONTEXT.load_default_certs(ssl.Purpose.SERVER_AUTH)
-except Exception:  # pragma: no cover - Windows 以外平台无系统库可加载
-    pass
 
 _TOKEN_EXCHANGE_MAX_ATTEMPTS = 5
 _TOKEN_EXCHANGE_BACKOFF = 1.0  # seconds; sleeps 1s, 2s, 3s, 4s between attempts
