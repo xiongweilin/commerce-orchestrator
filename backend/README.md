@@ -80,6 +80,9 @@ uv run pytest
   effect ledger + 三方对账；无参数时每次新建一笔测试订单。
 - `simulate_feedback_to_catalog.py`：Feedback → 聚类 → AI 候选（draft→candidate→frozen→scored→official，
   AI 仅建议不批准）→ 商品修订审批 → 上架 effect planned；检测到 simulated-v1 候选即跳过（`--force` 重跑）。
+- `simulate_procurement.py`：采购闭环——需求→RFQ→审批（budget_owner 四眼）→收货（warehouse_staff）→
+  账单（accountant ×2 四眼）→ closed；worker 段真实执行 Odoo PO 创建/确认、收货（button_validate）、
+  账单创建+过账，effect ledger 全链路记账，对账 0 差异。
 
 说明：API/后台创建的 Shopify 订单不推送 webhook（Shopify 限制，仅结账流程触发），脚本因此直接驱动本地工作流；
 对账差异一律进入 `MANUAL_RECONCILIATION`，不自动抹平。

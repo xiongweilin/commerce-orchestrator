@@ -375,17 +375,17 @@ class OdooConnector:
         )
 
     def validate_picking(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
-        """Validate a picking (``stock.picking`` ``action_done``)."""
+        """Validate a picking (``stock.picking`` ``button_validate``, Odoo 19)."""
         return self._write(
             "stock.picking",
-            "action_done",
+            "button_validate",
             {"ids": [odoo_id]},
             operation="picking_validate",
             odoo_id=odoo_id,
         )
 
     def receive_transfer(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
-        """Validate an incoming transfer / receipt (``stock.picking`` ``action_done``).
+        """Validate an incoming transfer / receipt (``stock.picking`` ``button_validate``).
 
         Single narrow call; over/under-receipt wizard handling is out of
         scope here — the caller must pass a picking whose quantities are

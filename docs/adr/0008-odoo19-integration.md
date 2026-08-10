@@ -44,6 +44,16 @@ Odoo 19 是权威账本，需集成商品、库存、订单、财务等写入路
 5. **货币/税**：Odoo 默认 USD，Shopify CNY 映射待正式处理（演示按数值 99 记价）；公司默认 15% 销售税使订单/发票合计 113.85（行单价 99，`amount_total` 含税）。
 6. **端到端记录**：partner `Shopify-Test-Customer` id=6；商品 `SKU-YIFU-01`/衣服 template+product id=5（参考价 99，Goods+storable）；`stock.quant` id=1（WH/Stock on-hand 11，id=2 为 Inventory adjustment 残差 -11）；sale.order id=1 `S00001`（state=sale，`invoice_status=invoiced`，ref #1001，合计 113.85 USD）；account.move id=1 `INV/2026/00001`（state=posted，payment_state=not_paid，invoice_origin=S00001）。P0 测试商品（id 1/2/3）已清理。
 
+### P3 补充 2（2026-08-10，采购闭环实测）
+
+- **收货方法名**：`stock.picking` 的过账方法是 `button_validate`（Odoo 19；旧 `action_done` 返回 404
+  "The method 'stock.picking.action_done' does not exist"），连接器 `validate_picking`/`receive_transfer` 已改用。
+- **账单过账需日期**：`account.move/action_post` 对 `in_invoice`/`in_refund` 要求 `invoice_date`，
+  缺失报 422 "The Bill/Refund date is required to validate this document"。
+- **采购闭环实测**：`purchase.order/create` + `button_confirm` → 自动生成收据 picking →
+  `stock.picking/button_validate` 收货 → `account.move`（`in_invoice` + `invoice_line_ids` + `invoice_date`）
+  创建并过账——全链路通过，对账 0 差异。
+
 ## References
 
 - <https://www.odoo.com/documentation/19.0/developer/reference/external_api.html>
