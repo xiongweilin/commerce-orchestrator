@@ -9,6 +9,8 @@ never be blindly re-dispatched: it must go through the reconciliation path.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
+from typing import Any
 
 from sqlalchemy import select
 
@@ -90,6 +92,7 @@ def mark_effect(
     remote_reference: str | None = None,
     response_hash: str | None = None,
     error_detail: str | None = None,
+    context: Mapping[str, Any] | None = None,
 ) -> EffectLedgerEntry:
     """Transition an effect ledger entry to a new status.
 
@@ -106,11 +109,13 @@ def mark_effect(
         raise ValidationError(f"unknown effect status: {status}")
 
     from_state = entry.status.value
-    context = {
+    transition_context: dict[str, Any] = {
         "operation": f"{entry.target_system}.{entry.operation}",
         "attempts": entry.attempt,
     }
-    ok, reason = can_transition("EffectLedgerEntry", from_state, status, context)
+    if context:
+        transition_context.update(context)
+    ok, reason = can_transition("EffectLedgerEntry", from_state, status, transition_context)
     if not ok:
         raise ConflictError(f"effect {intent_id} {from_state} -> {status}: {reason}")
 

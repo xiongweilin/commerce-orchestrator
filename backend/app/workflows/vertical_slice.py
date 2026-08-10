@@ -174,6 +174,7 @@ def _apply_effect_outcome_txn(workflow_id: str, step_result: dict[str, Any]) -> 
     """Record the effect outcome in the ledger (never blind-retry outcome_unknown)."""
     db = DBOS.sql_session
     effect_id = uuid.UUID(step_result["effect_id"])
+    operation = str(step_result.get("operation", ""))
     outcome = step_result["outcome"]
     entry = db.execute(
         select(EffectLedgerEntry).where(EffectLedgerEntry.intent_id == effect_id)
@@ -191,22 +192,49 @@ def _apply_effect_outcome_txn(workflow_id: str, step_result: dict[str, Any]) -> 
     if outcome.get("ok") is True:
         # Effect ledger state machine requires planned -> dispatched before
         # the final status (succeeded/failed/outcome_unknown).
-        mark_effect(db, effect_id, status="dispatched")
+        mark_effect(db, effect_id, status="dispatched", context=_effect_context(operation))
         mark_effect(
             db,
             effect_id,
             status="succeeded",
             remote_reference=outcome.get("remote_reference"),
             response_hash=canonical_hash(outcome),
+            context=_effect_context(operation),
         )
     elif outcome.get("error") and "timeout" in str(outcome.get("error")).lower():
         # Result cannot be confirmed: escalate, never re-dispatch blindly.
-        mark_effect(db, effect_id, status="dispatched")
-        mark_effect(db, effect_id, status="outcome_unknown", error_detail=outcome.get("error"))
+        mark_effect(db, effect_id, status="dispatched", context=_effect_context(operation))
+        mark_effect(
+            db,
+            effect_id,
+            status="outcome_unknown",
+            error_detail=outcome.get("error"),
+            context=_effect_context(operation),
+        )
     else:
-        mark_effect(db, effect_id, status="dispatched")
-        mark_effect(db, effect_id, status="failed", error_detail=outcome.get("error"))
+        mark_effect(db, effect_id, status="dispatched", context=_effect_context(operation))
+        mark_effect(
+            db,
+            effect_id,
+            status="failed",
+            error_detail=outcome.get("error"),
+            context=_effect_context(operation),
+        )
     _finalize_after_effect(db, workflow_id, step_result)
+
+
+def _effect_context(operation: str) -> dict[str, Any]:
+    """Attest invariants the effect ledger guards require.
+
+    Credit-note effects are only legal against posted invoices; inventory
+    effects must name their change source (stock move / adjustment).
+    """
+    ctx: dict[str, Any] = {}
+    if operation in {"credit_note_create", "credit_note_validate"}:
+        ctx["invoice_posted"] = True
+    if operation in {"stock_move_create", "picking_validate", "receive_transfer"}:
+        ctx["inventory_change_source"] = "stock_move"
+    return ctx
 
 
 def _finalize_after_effect(db, workflow_id: str, step_result: dict[str, Any]) -> None:

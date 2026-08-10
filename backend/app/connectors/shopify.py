@@ -650,6 +650,8 @@ class ShopifyConnector:
         note: str | None = None,
         notify: bool = False,
         refund_line_items: list[dict[str, Any]] | None = None,
+        parent_transaction_id: str | None = None,
+        gateway: str = "manual",
         idempotency_key: str | None = None,
         allow_real_money: bool = False,
     ) -> EffectResult:
@@ -671,25 +673,27 @@ class ShopifyConnector:
                 "Shopify refundCreate requires idempotency_key (native @idempotent "
                 "directive, required since API 2026-04)"
             )
+        transaction: dict[str, Any] = {
+            "amount": str(amount),
+            "kind": "REFUND",
+            "gateway": gateway,
+            "orderId": order_gid,
+        }
+        if parent_transaction_id:
+            # 非 store-credit/exchange/cash 网关的退款事务必须带父支付交易。
+            transaction["parentId"] = parent_transaction_id
         refund_input: dict[str, Any] = {
             "orderId": order_gid,
             "notify": notify,
-            "transactions": [
-                {
-                    "amount": str(amount),
-                    "kind": "REFUND",
-                    "gateway": "manual",
-                }
-            ],
+            "transactions": [transaction],
         }
         if note:
             refund_input["note"] = note
         if refund_line_items:
             refund_input["refundLineItems"] = refund_line_items
         query = """
-            mutation refundCreate($input: RefundInput!, $key: String!)
-              @idempotent(key: $key) {
-              refundCreate(input: $input) {
+            mutation refundCreate($input: RefundInput!, $key: String!) {
+              refundCreate(input: $input) @idempotent(key: $key) {
                 refund { id }
                 userErrors { field message }
               }

@@ -69,6 +69,21 @@ cd backend
 uv run pytest
 ```
 
+## 模拟脚本（无真实客户，真实系统）
+
+位于 `scripts/`，均先自载仓库 `.env` 再导入 app，可直接 `uv run python scripts/<脚本>`：
+
+- `run_test_order_flow.py [shopify_order_id]`：把 Shopify 订单送入 O2C 工作流并走完
+  received → … → closed（13 步 + 4 个人工 gate + effect 记账 + 对账）；传订单号则幂等。
+- `simulate_return_refund.py [shopify_order_id]`：整单退货退款闭环——自建测试订单（带支付交易），
+  5 个人工审批门（四眼），Odoo 贷项通知单过账，Shopify refundCreate（有父交易用 manual，否则 cash），
+  effect ledger + 三方对账；无参数时每次新建一笔测试订单。
+- `simulate_feedback_to_catalog.py`：Feedback → 聚类 → AI 候选（draft→candidate→frozen→scored→official，
+  AI 仅建议不批准）→ 商品修订审批 → 上架 effect planned；检测到 simulated-v1 候选即跳过（`--force` 重跑）。
+
+说明：API/后台创建的 Shopify 订单不推送 webhook（Shopify 限制，仅结账流程触发），脚本因此直接驱动本地工作流；
+对账差异一律进入 `MANUAL_RECONCILIATION`，不自动抹平。
+
 ## 代码规范
 
 ```bash
