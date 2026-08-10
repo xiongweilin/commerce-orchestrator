@@ -42,6 +42,7 @@ from app.connectors.base import (
     ConnectorError,
     EffectResult,
     OutcomeUnknownError,
+    prefer_ipv4,
     payload_hash,
     truncate,
 )
@@ -50,6 +51,9 @@ from app.core.logging import get_logger
 from app.core.telemetry import get_tracer
 
 logger = get_logger("commerce.connectors.odoo")
+
+# 与 Shopify 连接器一致：本机 TUN IPv6 出口异常，DNS 解析优先 IPv4。
+prefer_ipv4()
 
 _CONFLICT_MARKERS = (
     "already exists",

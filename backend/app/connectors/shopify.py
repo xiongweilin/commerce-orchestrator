@@ -28,12 +28,14 @@ blind-retried); definitive 4xx failures raise
 from __future__ import annotations
 
 import json
+import ssl
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import certifi
 
 from app import __version__ as APP_VERSION
 from app.config import Settings, get_settings
@@ -41,6 +43,7 @@ from app.connectors.base import (
     ConnectorError,
     EffectResult,
     OutcomeUnknownError,
+    prefer_ipv4,
     payload_hash,
     truncate,
 )
@@ -49,6 +52,18 @@ from app.core.logging import get_logger
 from app.core.telemetry import get_tracer
 
 logger = get_logger("commerce.connectors.shopify")
+
+# 本机 v2rayN TUN 的 IPv6 出口异常（环境运维手册记录），IPv4 直连稳定：
+# 连接器进程内 DNS 解析优先 IPv4。
+prefer_ipv4()
+
+# certifi 包 + Windows 系统证书库合并信任：直连路径偶发仅下发不完整链，
+# 系统库缓存了中间证书，合并后校验最稳（本机实测）。
+_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+try:
+    _SSL_CONTEXT.load_default_certs(ssl.Purpose.SERVER_AUTH)
+except Exception:  # pragma: no cover - Windows 以外平台无系统库可加载
+    pass
 
 _TOKEN_EXCHANGE_MAX_ATTEMPTS = 5
 _TOKEN_EXCHANGE_BACKOFF = 1.0  # seconds; sleeps 1s, 2s, 3s, 4s between attempts
@@ -160,6 +175,7 @@ class ShopifyConnector:
                     # 直连 Shopify：系统代理只用于 GitHub 等被阻断域名（AGENTS.md），
                     # 误走代理会 TLS 握手超时。
                     trust_env=False,
+                    verify=_SSL_CONTEXT,
                 )
                 break
             except httpx.TransportError as exc:
@@ -215,6 +231,7 @@ class ShopifyConnector:
                 timeout=httpx.Timeout(self.timeout),
                 headers=self._request_headers(),
                 trust_env=False,
+                verify=_SSL_CONTEXT,
             )
         return self._client
 
@@ -356,8 +373,8 @@ class ShopifyConnector:
     def probe(self) -> dict[str, Any]:
         """Check connectivity and auth against the pinned Admin API version.
 
-        GET ``/admin/api/versions.json`` (read-only) and report the
-        ``X-Shopify-API-Version`` response header. Never raises; returns:
+        Runs a minimal read-only GraphQL query (``shop { name }``) against
+        the pinned API version. Never raises; returns:
         ``{"ok": bool, "api_version": str, "installed": bool}``.
         """
         if not self.shop_name or not self._has_credentials():
@@ -367,30 +384,20 @@ class ShopifyConnector:
                 "installed": False,
             }
         try:
-            response = self._get_client().get(
-                self.versions_endpoint, headers=self._request_headers()
-            )
-        except httpx.TransportError as exc:
-            logger.warning("shopify_probe_transport_error", error=str(exc))
+            payload = self._graphql("query { shop { name } }", {}, operation="probe")
+        except (OutcomeUnknownError, ExternalSystemError) as exc:
+            logger.warning("shopify_probe_failed", error=exc.detail)
             return {
                 "ok": False,
                 "api_version": self.api_version,
                 "installed": False,
             }
-        served_version = response.headers.get("x-shopify-api-version") or self.api_version
-        if response.status_code == 200:
-            try:
-                body = response.json()
-            except json.JSONDecodeError:
-                body = None
-            if isinstance(body, dict):
-                return {"ok": True, "api_version": served_version, "installed": True}
-        logger.warning(
-            "shopify_probe_failed",
-            status=response.status_code,
-            served_version=served_version,
-        )
-        return {"ok": False, "api_version": served_version, "installed": False}
+        shop = (payload.get("data") or {}).get("shop")
+        return {
+            "ok": bool(shop),
+            "api_version": self.api_version,
+            "installed": bool(shop),
+        }
 
     # ------------------------------------------------------------------ #
     # Product operations
@@ -654,7 +661,7 @@ class ShopifyConnector:
 
     def list_orders(
         self,
-        updated_after: str,
+        updated_after: str | None,
         first: int = 50,
         cursor: str | None = None,
     ) -> tuple[list[dict[str, Any]], str | None]:
@@ -664,18 +671,38 @@ class ShopifyConnector:
         ``(nodes, next_cursor)`` where ``next_cursor`` is ``None`` when the
         page is complete. Used for updated_at-based reconciliation.
         """
-        query = """
-            query ordersIncremental(
+        if updated_after:
+            query = """
+            query ordersIncrementalPage(
               $after: String
               $first: Int!
               $updatedAfter: DateTime!
             ) {
-              orders(
-                first: $first
-                after: $after
-                updatedAfter: $updatedAfter
-                sortKey: UPDATED_AT
-              ) {
+              ordersIncremental(updatedAfter: $updatedAfter, first: $first, after: $after) {
+                nodes {
+                    id
+                    legacyResourceId
+                    name
+                    updatedAt
+                    createdAt
+                    displayFinancialStatus
+                    displayFulfillmentStatus
+                    totalPriceSet {
+                      presentmentMoney { amount currencyCode }
+                    }
+                    lineItems(first: 100) {
+                      edges { node { id title sku quantity } }
+                    }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+            """
+            variables = {"after": cursor, "first": first, "updatedAfter": updated_after}
+        else:
+            query = """
+            query ordersPage($after: String, $first: Int!) {
+              orders(first: $first, after: $after, sortKey: UPDATED_AT) {
                 edges {
                   node {
                     id
@@ -696,13 +723,17 @@ class ShopifyConnector:
                 pageInfo { hasNextPage endCursor }
               }
             }
-        """
-        variables = {"after": cursor, "first": first, "updatedAfter": updated_after}
+            """
+            variables = {"after": cursor, "first": first}
         payload = self._graphql(query, variables, operation="list_orders")
         data = payload.get("data") or {}
-        edges = (data.get("orders") or {}).get("edges") or []
-        page_info = (data.get("orders") or {}).get("pageInfo") or {}
-        nodes = [edge["node"] for edge in edges if edge.get("node")]
+        if updated_after:
+            nodes = (data.get("ordersIncremental") or {}).get("nodes") or []
+            page_info = (data.get("ordersIncremental") or {}).get("pageInfo") or {}
+        else:
+            edges = (data.get("orders") or {}).get("edges") or []
+            nodes = [edge["node"] for edge in edges if edge.get("node")]
+            page_info = (data.get("orders") or {}).get("pageInfo") or {}
         next_cursor = page_info.get("endCursor") if page_info.get("hasNextPage") else None
         return nodes, next_cursor
 

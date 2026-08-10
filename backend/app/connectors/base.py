@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -34,6 +35,33 @@ from app.core.errors import ExternalSystemError
 from app.models.effect import EffectStatus
 
 EFFECT_STATUSES: frozenset[str] = frozenset(status.value for status in EffectStatus)
+
+_ORIG_GETADDRINFO = socket.getaddrinfo
+
+
+def _prefer_ipv4_getaddrinfo(*args: Any, **kwargs: Any):
+    """Resolve hostnames preferring IPv4 (fallback to the original result).
+
+    On this Windows host v2rayN's sing-box TUN has a broken IPv6 egress
+    (see 环境运维手册: TUN IPv6 故障记录): DNS returns the AAAA record
+    first and the IPv6 path dies with ``SSL: UNEXPECTED_EOF_WHILE_READING``
+    while IPv4 works. Preferring AF_INET for connector traffic keeps
+    Shopify/Odoo calls stable without touching the system network config.
+    """
+    result = _ORIG_GETADDRINFO(*args, **kwargs)
+    try:
+        ipv4 = [entry for entry in result if entry[0] == socket.AF_INET]
+    except Exception:
+        return result
+    return ipv4 or result
+
+
+def prefer_ipv4() -> None:
+    """Install the IPv4-first resolver for this process (idempotent)."""
+    if socket.getaddrinfo is not _prefer_ipv4_getaddrinfo:
+        socket.getaddrinfo = _prefer_ipv4_getaddrinfo
+
+
 """Exact effect status vocabulary shared with the ledger."""
 
 _TRUNCATE_LIMIT = 2000
