@@ -38,6 +38,9 @@ Shopify 是首个外部渠道，涉及产品发布、更新、履约与退款效
    （`projection` 表，owner=`shopify_webhook`）。
 4. **2026-07 查询差异**：`orders` 连接不接受 `updatedAfter`，且不存在 `ordersIncremental` 根查询；
    增量改用 `orders(query: "updated_at:>…")` 过滤（连接器已实现）。
+   变体写入差异：`ProductUpdateInput` 不含 `variants`；变体字段（如 `sku`）经
+   `productVariantsBulkUpdate` + `inventoryItem.sku` 更新（2026-08-10 实测：改 SKU 后 Shopify 即时推送
+   `products/update` webhook，形成"写→渠道→webhook→`catalog.revision_drafted`"双向闭环）。
 5. **本机网络注意**（环境运维手册佐证）：Windows 侧 v2rayN 为 7890 代理模式（无 TUN），直连 Shopify 时 DNS 优先返回
    IPv6 而 IPv6 出口 EOF——连接器进程内**优先 IPv4** 解析；证书校验用 certifi + Windows 系统库**合并信任**；
    v2rayN 白名单已加 `domain:myshopify.com` 直连规则（备份索引已更新）。

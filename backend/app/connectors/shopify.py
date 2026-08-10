@@ -457,6 +457,42 @@ class ShopifyConnector:
             reference=lambda result: result.get("product", {}).get("id") or gid,
         )
 
+    def bulk_update_variants(
+        self,
+        product_gid: str,
+        variants: list[dict[str, Any]],
+        *,
+        idempotency_key: str | None = None,
+    ) -> EffectResult:
+        """Update product variants (``productVariantsBulkUpdate``, 2026-07).
+
+        Since API 2026-07, ``ProductUpdateInput`` no longer accepts
+        ``variants``; variant fields (sku, price, inventoryQuantity...) are
+        updated via ``productVariantsBulkUpdate`` with ``variantUpdates``.
+        """
+        query = """
+            mutation productVariantsBulkUpdate(
+              $productId: ID!
+              $variants: [ProductVariantsBulkInput!]!
+            ) {
+              productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                productVariants { id sku price }
+                userErrors { field message }
+              }
+            }
+        """
+        return self._mutation(
+            query,
+            {"productId": product_gid, "variants": variants},
+            operation="product_variants_bulk_update",
+            response_key="productVariantsBulkUpdate",
+            reference=lambda result: (
+                (result.get("productVariants") or [{}])[0].get("id")
+                if result.get("productVariants")
+                else None
+            ),
+        )
+
     def publish_product(
         self,
         gid: str,
