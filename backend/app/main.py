@@ -158,7 +158,10 @@ def create_app() -> FastAPI:
     _register_error_handlers(app)
     app.include_router(v1.commands.router)
     app.include_router(v1.decisions.router)
+    app.include_router(v1.procurements.router)
     app.include_router(v1.reconciliations.router)
+    app.include_router(v1.return_cases.router)
+    app.include_router(v1.sales_orders.router)
     app.include_router(v1.workflows.router)
     app.include_router(v1.webhooks.router)
 

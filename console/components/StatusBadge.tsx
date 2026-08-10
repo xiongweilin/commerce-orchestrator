@@ -1,7 +1,33 @@
 export type StatusTone = "info" | "success" | "warning" | "danger" | "neutral" | "highlight";
 
 const STATUS_META: Record<string, { label: string; tone: StatusTone }> = {
+  // 销售订单
+  received: { label: "已收货", tone: "info" },
+  validated: { label: "已校验", tone: "info" },
   accepted: { label: "已受理", tone: "info" },
+  odo_drafted: { label: "Odoo 草稿", tone: "neutral" },
+  confirmed: { label: "已确认", tone: "info" },
+  reserved: { label: "已预留", tone: "info" },
+  picking: { label: "拣货中", tone: "warning" },
+  shipped: { label: "已发货", tone: "success" },
+  invoiced: { label: "已开票", tone: "success" },
+  // 退货
+  requested: { label: "已申请", tone: "info" },
+  eligibility_review: { label: "资格审核", tone: "warning" },
+  authorized: { label: "已授权", tone: "info" },
+  inspected: { label: "已检验", tone: "info" },
+  disposition_approved: { label: "处置已批准", tone: "success" },
+  credit_note_posted: { label: "贷项已过账", tone: "success" },
+  refund_pending: { label: "退款处理中", tone: "warning" },
+  refund_succeeded: { label: "退款成功", tone: "success" },
+  // 采购
+  demand_detected: { label: "需求已识别", tone: "info" },
+  rfq_draft: { label: "询价草稿", tone: "neutral" },
+  pending_approval: { label: "待审批", tone: "warning" },
+  po_confirmed: { label: "PO 已确认", tone: "success" },
+  partially_received: { label: "部分收货", tone: "warning" },
+  bill_posted: { label: "账单已过账", tone: "success" },
+  // 通用流程状态
   queued: { label: "排队中", tone: "neutral" },
   pending: { label: "待处理", tone: "warning" },
   running: { label: "进行中", tone: "info" },
@@ -20,6 +46,8 @@ const STATUS_META: Record<string, { label: string; tone: StatusTone }> = {
   cancelled: { label: "已取消", tone: "neutral" },
   canceled: { label: "已取消", tone: "neutral" },
   created: { label: "已创建", tone: "neutral" },
+  closed: { label: "已关闭", tone: "neutral" },
+  in_payment: { label: "收付款中", tone: "warning" },
   manual_reconciliation: { label: "人工对账", tone: "highlight" },
   unmatched: { label: "不一致", tone: "warning" },
   difference: { label: "有差异", tone: "warning" },

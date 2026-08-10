@@ -22,6 +22,9 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           <nav className="nav" aria-label="主导航">
             <NavLink href="/">概览</NavLink>
             <NavLink href="/workflows">工作流</NavLink>
+            <NavLink href="/sales-orders">订单</NavLink>
+            <NavLink href="/return-cases">退货</NavLink>
+            <NavLink href="/procurements">采购</NavLink>
             <NavLink href="/approvals">审批</NavLink>
             <NavLink href="/reconciliations">对账</NavLink>
             <NavLink href="/commands">命令</NavLink>

@@ -20,6 +20,44 @@ export interface WorkflowSummary {
   updatedAt: string;
 }
 
+export interface SalesOrderSummary {
+  workflowId: string | null;
+  orderRef: string;
+  shopifyOrderId: string | null;
+  customerRef: string | null;
+  status: string;
+  currency: string;
+  total: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReturnCaseSummary {
+  returnRef: string;
+  shopifyOrderId: string | null;
+  orderRef: string | null;
+  reason: string | null;
+  status: string;
+  refundAmount: string | null;
+  currency: string | null;
+  disposition: string | null;
+  creditNoteId: string | null;
+  shopifyRefundGid: string | null;
+  createdAt: string;
+}
+
+export interface ProcurementOrderSummary {
+  sku: string;
+  qty: string;
+  uom: string;
+  supplier: string;
+  unitCost: string;
+  currency: string;
+  status: string;
+  odooPoId: string | null;
+  createdAt: string;
+}
+
 export interface WorkflowEvent {
   eventType: string;
   occurredAt: string;
