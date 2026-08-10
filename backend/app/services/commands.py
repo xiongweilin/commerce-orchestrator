@@ -40,7 +40,7 @@ from app.models.catalog import CatalogRevision, CatalogRevisionStatus
 from app.models.effect import EffectStatus
 from app.models.listing import ListingPublication, ListingStatus
 from app.models.messaging import IdempotencyRecord
-from app.models.order import SalesOrderStatus
+from app.models.order import SalesOrder, SalesOrderStatus
 from app.models.procurement import ProcurementOrder, ProcurementStatus
 from app.models.returns import ReturnCase, ReturnStatus
 from app.models.workflow import WorkflowRun, WorkflowRunStatus, WorkItem
@@ -862,6 +862,170 @@ def _approve_return_refund(db, run: WorkflowRun, item, user_id) -> dict[str, Any
     return {"caseId": str(case.id), "effectId": str(effect.intent_id)}
 
 
+# ---------------------------------------------------------------------------
+# Order-to-cash continuations (mirror of app.workflows.vertical_slice's
+# order_to_cash_workflow gates, driven through the approval service so the
+# run can be completed without a live DBOS worker).
+# ---------------------------------------------------------------------------
+
+
+def _order_for_run(db, run: WorkflowRun) -> SalesOrder | None:
+    """Resolve the sales order owned by an order-to-cash run."""
+    shopify_id = (run.input_json or {}).get("id")
+    if shopify_id is not None:
+        order = db.execute(
+            select(SalesOrder).where(SalesOrder.shopify_order_id == str(shopify_id))
+        ).scalar_one_or_none()
+        if order is not None:
+            return order
+    return db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1)).scalars().first()
+
+
+def _record_order_effect(
+    db,
+    run: WorkflowRun,
+    target_system: str,
+    operation: str,
+) -> str:
+    """Record a planned external effect for an order-to-cash run (idempotent).
+
+    The intent id is a deterministic UUID5 over ``(run, operation)`` so a
+    re-run of the flow replays the same ledger row instead of duplicating it.
+    Odoo effects are recorded ``planned`` only -- execution belongs to the
+    Odoo integration agent / worker (ADR-0004, effect ledger contract).
+    """
+    intent_id = uuid.uuid5(
+        uuid.NAMESPACE_URL, f"order-to-cash:{run.id}:{target_system}.{operation}"
+    )
+    entry = record_effect(
+        db,
+        intent_id=intent_id,
+        target_system=target_system,
+        operation=operation,
+        idempotency_key=f"order-to-cash:{run.id}:{target_system}.{operation}",
+        approval_ref=run.id,
+        request_hash=canonical_hash({"order_run": str(run.id), "operation": operation}),
+    )
+    return str(entry.intent_id)
+
+
+def _approve_order_reserve(db, run: WorkflowRun, item, user_id) -> dict[str, Any]:
+    order = _order_for_run(db, run)
+    if order is None:
+        raise NotFoundError("sales order not found for workflow run")
+    advance_entity(
+        db,
+        order,
+        "SalesOrder",
+        "reserved",
+        correlation_id=run.correlation_id,
+        context={"auto": False, "reservation_source": "stock_move"},
+        actor_user_id=user_id,
+    )
+    item_next = create_work_item(
+        db,
+        workflow_id=run.id,
+        kind="approval",
+        title=f"Approve picking and shipping for {order.order_ref}",
+        required_roles=["warehouse_staff"],
+        payload={
+            "order_ref": order.order_ref,
+            "proposed_by_user_id": str(user_id),
+            "next_step": "ship",
+        },
+        expected_version=run.version,
+    )
+    run.status = WorkflowRunStatus.AWAITING_APPROVAL
+    return {"orderRef": order.order_ref, "workItemId": str(item_next.id)}
+
+
+def _approve_order_ship(db, run: WorkflowRun, item, user_id) -> dict[str, Any]:
+    order = _order_for_run(db, run)
+    if order is None:
+        raise NotFoundError("sales order not found for workflow run")
+    for state in ("picking", "shipped"):
+        advance_entity(
+            db,
+            order,
+            "SalesOrder",
+            state,
+            correlation_id=run.correlation_id,
+            context={"auto": False},
+            actor_user_id=user_id,
+        )
+    for operation in ("picking_create", "picking_validate"):
+        _record_order_effect(db, run, "odoo", operation)
+    _record_order_effect(db, run, "shopify", "fulfillment_create")
+    item_next = create_work_item(
+        db,
+        workflow_id=run.id,
+        kind="approval",
+        title=f"Approve invoice posting for {order.order_ref}",
+        required_roles=["accountant"],
+        payload={
+            "order_ref": order.order_ref,
+            "four_eyes_area": "accounting",
+            "proposed_by_user_id": str(user_id),
+            "next_step": "invoice",
+        },
+        expected_version=run.version,
+    )
+    run.status = WorkflowRunStatus.AWAITING_APPROVAL
+    return {"orderRef": order.order_ref, "workItemId": str(item_next.id)}
+
+
+def _approve_order_invoice(db, run: WorkflowRun, item, user_id) -> dict[str, Any]:
+    order = _order_for_run(db, run)
+    if order is None:
+        raise NotFoundError("sales order not found for workflow run")
+    for state in ("invoiced", "in_payment"):
+        advance_entity(
+            db,
+            order,
+            "SalesOrder",
+            state,
+            correlation_id=run.correlation_id,
+            context={"auto": False},
+            actor_user_id=user_id,
+        )
+    for operation in ("invoice_create", "invoice_validate"):
+        _record_order_effect(db, run, "odoo", operation)
+    item_next = create_work_item(
+        db,
+        workflow_id=run.id,
+        kind="approval",
+        title=f"Reconcile and close order {order.order_ref}",
+        required_roles=["accountant"],
+        payload={
+            "order_ref": order.order_ref,
+            "four_eyes_area": "accounting",
+            "proposed_by_user_id": str(user_id),
+            "next_step": "close",
+        },
+        expected_version=run.version,
+    )
+    run.status = WorkflowRunStatus.AWAITING_APPROVAL
+    return {"orderRef": order.order_ref, "workItemId": str(item_next.id)}
+
+
+def _approve_order_close(db, run: WorkflowRun, item, user_id) -> dict[str, Any]:
+    order = _order_for_run(db, run)
+    if order is None:
+        raise NotFoundError("sales order not found for workflow run")
+    for state in ("reconciled", "closed"):
+        advance_entity(
+            db,
+            order,
+            "SalesOrder",
+            state,
+            correlation_id=run.correlation_id,
+            context={"auto": False},
+            actor_user_id=user_id,
+        )
+    _complete_run(db, run, extras={"orderRef": order.order_ref})
+    return {"orderRef": order.order_ref, "status": "completed"}
+
+
 register_next_step("catalog-revision", "approve", _approve_catalog_revision)
 register_next_step("listing-publication", "approve", _approve_listing_publication)
 register_next_step("procurement", "approve_po", _approve_procurement)
@@ -873,6 +1037,10 @@ register_next_step("return", "confirm_receipt", _confirm_return_received)
 register_next_step("return", "approve_disposition", _approve_return_disposition)
 register_next_step("return", "approve_credit_note", _approve_return_credit_note)
 register_next_step("return", "approve_refund", _approve_return_refund)
+register_next_step("order-to-cash", "reserve", _approve_order_reserve)
+register_next_step("order-to-cash", "ship", _approve_order_ship)
+register_next_step("order-to-cash", "invoice", _approve_order_invoice)
+register_next_step("order-to-cash", "close", _approve_order_close)
 
 
 def dispatch_command(

@@ -189,6 +189,9 @@ def _apply_effect_outcome_txn(workflow_id: str, step_result: dict[str, Any]) -> 
         _finalize_after_effect(db, workflow_id, step_result)
         return
     if outcome.get("ok") is True:
+        # Effect ledger state machine requires planned -> dispatched before
+        # the final status (succeeded/failed/outcome_unknown).
+        mark_effect(db, effect_id, status="dispatched")
         mark_effect(
             db,
             effect_id,
@@ -198,8 +201,10 @@ def _apply_effect_outcome_txn(workflow_id: str, step_result: dict[str, Any]) -> 
         )
     elif outcome.get("error") and "timeout" in str(outcome.get("error")).lower():
         # Result cannot be confirmed: escalate, never re-dispatch blindly.
+        mark_effect(db, effect_id, status="dispatched")
         mark_effect(db, effect_id, status="outcome_unknown", error_detail=outcome.get("error"))
     else:
+        mark_effect(db, effect_id, status="dispatched")
         mark_effect(db, effect_id, status="failed", error_detail=outcome.get("error"))
     _finalize_after_effect(db, workflow_id, step_result)
 

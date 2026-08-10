@@ -34,7 +34,9 @@ from app.services.audit import record_audit
 
 logger = get_logger("commerce.reconciliation")
 
-SUPPORTED_DOMAINS = frozenset(("effect", "order", "procurement", "return", "catalog", "listing"))
+SUPPORTED_DOMAINS = frozenset(
+    ("effect", "order", "procurement", "return", "catalog", "listing", "shopify")
+)
 
 
 def _local_rows(db, domain: str) -> list[dict[str, Any]]:
@@ -123,6 +125,27 @@ def _local_rows(db, domain: str) -> list[dict[str, Any]]:
                     "status": row.status.value,
                     "sku": row.sku,
                     "shopify_product_gid": row.shopify_product_gid,
+                },
+            }
+            for row in rows
+        ]
+    if domain == "shopify":
+        # Shopify-side view of local state: every mirrored sales order,
+        # keyed by its Shopify order name so it pairs with the connector's
+        # ``orders.name`` rows.  The state vocabulary is the local O2C
+        # pipeline state; Shopify's ``displayFinancialStatus`` (e.g. PAID)
+        # is compared as-is, so the semantic difference surfaces as a
+        # MANUAL_RECONCILIATION diff rather than being auto-smoothed.
+        rows = db.execute(select(SalesOrder).order_by(SalesOrder.order_ref)).scalars()
+        return [
+            {
+                "entity_type": "sales_order",
+                "entity_id": row.order_ref,
+                "state": row.status.value,
+                "expected": {
+                    "status": row.status.value,
+                    "shopify_order_id": row.shopify_order_id,
+                    "total": str(row.total),
                 },
             }
             for row in rows

@@ -403,34 +403,60 @@ class OdooConnector:
         self,
         product_id: int,
         location_id: int,
-        quantity_delta: int | float,
+        quantity: int | float,
         *,
-        reason: str | None = None,
         extra_values: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> EffectResult:
-        """Stock adjustment with reason (single ``stock.quant`` create).
+        """Set the absolute on-hand quantity (P3-verified, Odoo 19 Community).
 
-        Creates one ``stock.quant`` carrying ``inventory_diff_quantity`` and
-        an optional ``reason``, in a single call/transaction. NOTE: the
-        exact apply semantics on Odoo 19 Community (whether the diff applies
-        at create for non-tracking products, and the availability of the
-        ``reason`` field) must be confirmed in the ADR-0008 P0 gate; if the
-        deployed instance needs a separate apply step, add a minimal
-        integration-module method (single call) rather than chaining JSON-2
-        calls.
+        P3 finding (2026-08-10, see ADR-0008 实测记录): ``stock.quant`` has no
+        ``reason`` field, and ``inventory_diff_quantity`` is a readonly stored
+        computed field whose value is silently dropped on ``create`` (on-hand
+        unchanged). The supported atomic path is a single ``stock.quant`` write
+        of the computed-with-inverse ``inventory_quantity_auto_apply`` with
+        ``context: {"inventory_mode": True}``: the inverse sets the counted
+        quantity and calls ``action_apply_inventory`` in the same server-side
+        transaction (one JSON-2 call = one atomic effect).
+
+        ``inventory_mode`` requires the calling user to have
+        ``stock.group_stock_user`` (admin implies it); production API keys must
+        carry that group. This method resolves the target quant with a read-only
+        search first (creating an inert empty quant placeholder only if none
+        exists), then performs the single atomic write above. Re-applying the
+        current quantity is a no-op on the server side (inverse skips equal
+        values), so the call is idempotent.
         """
-        values: dict[str, Any] = {
-            "product_id": product_id,
-            "location_id": location_id,
-            "inventory_diff_quantity": quantity_delta,
-        }
-        if reason:
-            values["reason"] = reason
+        quants = self._post(
+            "stock.quant",
+            "search_read",
+            {
+                "domain": [
+                    ["product_id", "=", product_id],
+                    ["location_id", "=", location_id],
+                ],
+                "fields": ["id"],
+                "limit": 1,
+            },
+        )
+        if quants:
+            quant_id = int(quants[0]["id"])
+        else:
+            created = self._post(
+                "stock.quant",
+                "create",
+                {"vals_list": [{"product_id": product_id, "location_id": location_id}]},
+            )
+            quant_id = int(created[0])
+        values: dict[str, Any] = {"inventory_quantity_auto_apply": quantity}
         if extra_values:
             values.update(extra_values)
         return self._write(
-            "stock.quant", "create", {"vals_list": [values]}, operation="update_quantity"
+            "stock.quant",
+            "write",
+            {"ids": [quant_id], "vals": values, "context": {"inventory_mode": True}},
+            operation="update_quantity",
+            odoo_id=quant_id,
         )
 
     # ------------------------------------------------------------------ #

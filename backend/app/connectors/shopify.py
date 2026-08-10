@@ -211,18 +211,31 @@ class ShopifyConnector:
         return str(token)
 
     def _resolve_access_token(self) -> str:
-        """Return a usable Admin API access token (static or client-credentials)."""
+        """Return a usable Admin API access token (client-credentials preferred).
+
+        The Dev Dashboard client-credentials grant is the documented auth path
+        for this deployment (ADR-0007); the static
+        ``COMMERCE_SHOPIFY_ACCESS_TOKEN`` is only a fallback for setups
+        without client credentials.  When both are configured, prefer the
+        exchange so a stale static token cannot silently break every call.
+        """
+        if self.client_id and self.client_secret:
+            now = time.time()
+            if self._cached_token and self._token_expires_at and now < self._token_expires_at:
+                return self._cached_token
+            token = self.exchange_client_credentials_token()
+            self._cached_token = token
+            # expires_in is 86399s; refresh an hour early.
+            self._token_expires_at = now + (86399 - 3600)
+            logger.info("shopify_client_credentials_token_exchanged")
+            return token
         if self.access_token:
             return self.access_token
-        now = time.time()
-        if self._cached_token and self._token_expires_at and now < self._token_expires_at:
-            return self._cached_token
-        token = self.exchange_client_credentials_token()
-        self._cached_token = token
-        # expires_in is 86399s; refresh an hour early.
-        self._token_expires_at = now + (86399 - 3600)
-        logger.info("shopify_client_credentials_token_exchanged")
-        return token
+        raise ConnectorError(
+            "Shopify connector has no usable access token: set "
+            "COMMERCE_SHOPIFY_ACCESS_TOKEN or COMMERCE_SHOPIFY_CLIENT_ID + "
+            "COMMERCE_SHOPIFY_CLIENT_SECRET"
+        )
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
@@ -780,32 +793,84 @@ class ShopifyConnector:
         return nodes, next_cursor
 
     def list_inventory(
-        self, first: int = 50, cursor: str | None = None
+        self, first: int = 5, cursor: str | None = None
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """List inventory levels (``inventoryLevels``) with cursor pagination."""
+        """List variant inventory levels with cursor pagination (2026-07).
+
+        Since API 2026-07 the top-level ``inventoryLevels`` query was
+        removed; inventory is read through ``product -> variants ->
+        inventoryItem.inventoryLevels``.  ``available`` is read from the
+        ``quantities(names: ["available"])`` list (the legacy
+        ``InventoryLevel.available`` field no longer exists).  Returns
+        ``(nodes, next_cursor)``; each node carries the variant GID, SKU,
+        inventory item / level / location ids and the available quantity.
+
+        ``first`` bounds the products page (clamped to 1..5) so the nested
+        ``variants -> inventoryItem -> inventoryLevels`` fan-out stays under
+        the single-query cost limit; larger stores are read with the cursor.
+        """
+        page = max(1, min(int(first), 5))
         query = """
             query inventoryLevelsPage($after: String, $first: Int!) {
-              inventoryLevels(first: $first, after: $after) {
+              products(first: $first, after: $after) {
                 edges {
                   node {
                     id
-                    available
-                    location { id name }
-                    inventoryItem { id sku }
-                    quantities { name quantity }
+                    variants(first: 10) {
+                      edges {
+                        node {
+                          id
+                          sku
+                          inventoryItem {
+                            id
+                            sku
+                            inventoryLevels(first: 5) {
+                              edges {
+                                node {
+                                  id
+                                  location { id }
+                                  quantities(names: ["available"]) { name quantity }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
                   }
                 }
                 pageInfo { hasNextPage endCursor }
               }
             }
         """
-        payload = self._graphql(
-            query, {"after": cursor, "first": first}, operation="list_inventory"
-        )
+        payload = self._graphql(query, {"after": cursor, "first": page}, operation="list_inventory")
         data = payload.get("data") or {}
-        edges = (data.get("inventoryLevels") or {}).get("edges") or []
-        page_info = (data.get("inventoryLevels") or {}).get("pageInfo") or {}
-        nodes = [edge["node"] for edge in edges if edge.get("node")]
+        edges = (data.get("products") or {}).get("edges") or []
+        page_info = (data.get("products") or {}).get("pageInfo") or {}
+        nodes: list[dict[str, Any]] = []
+        for edge in edges:
+            product = edge.get("node") or {}
+            for variant_edge in (product.get("variants") or {}).get("edges") or []:
+                variant = variant_edge.get("node") or {}
+                inventory_item = variant.get("inventoryItem") or {}
+                for level_edge in (inventory_item.get("inventoryLevels") or {}).get("edges") or []:
+                    level = level_edge.get("node") or {}
+                    available: int | None = None
+                    for q in level.get("quantities") or []:
+                        if q.get("name") == "available":
+                            available = q.get("quantity")
+                    nodes.append(
+                        {
+                            "id": variant.get("id"),
+                            "variant_id": variant.get("id"),
+                            "sku": variant.get("sku") or inventory_item.get("sku"),
+                            "inventory_item_id": inventory_item.get("id"),
+                            "inventory_level_id": level.get("id"),
+                            "location_id": (level.get("location") or {}).get("id"),
+                            "available": available,
+                            "quantities": level.get("quantities") or [],
+                        }
+                    )
         next_cursor = page_info.get("endCursor") if page_info.get("hasNextPage") else None
         return nodes, next_cursor
 
@@ -827,6 +892,41 @@ class ShopifyConnector:
         """
         payload = self._graphql(query, {"id": gid}, operation="get_product")
         return (payload.get("data") or {}).get("product")
+
+    def get_product_publish_status(self, gid: str) -> dict[str, Any] | None:
+        """Read a product's publication state (2026-07 shape).
+
+        Returns ``None`` when the product does not exist, otherwise
+        ``{"id", "publishedAt", "isPublished", "publicationIds"}`` where
+        ``publicationIds`` is the list of ``gid://shopify/Publication/...``
+        ids the product is published to.
+        """
+        query = """
+            query productPublishStatus($id: ID!) {
+              product(id: $id) {
+                id
+                publishedAt
+                resourcePublications(first: 25) {
+                  edges { node { publication { id } } }
+                }
+              }
+            }
+        """
+        payload = self._graphql(query, {"id": gid}, operation="get_product_publish_status")
+        product = (payload.get("data") or {}).get("product")
+        if product is None:
+            return None
+        publication_ids = [
+            edge.get("node", {}).get("publication", {}).get("id")
+            for edge in ((product.get("resourcePublications") or {}).get("edges") or [])
+            if edge.get("node", {}).get("publication", {}).get("id")
+        ]
+        return {
+            "id": product.get("id"),
+            "publishedAt": product.get("publishedAt"),
+            "isPublished": bool(product.get("publishedAt")),
+            "publicationIds": publication_ids,
+        }
 
 
 __all__ = ["ShopifyConnector"]

@@ -41,6 +41,16 @@ Shopify 是首个外部渠道，涉及产品发布、更新、履约与退款效
    变体写入差异：`ProductUpdateInput` 不含 `variants`；变体字段（如 `sku`）经
    `productVariantsBulkUpdate` + `inventoryItem.sku` 更新（2026-08-10 实测：改 SKU 后 Shopify 即时推送
    `products/update` webhook，形成"写→渠道→webhook→`catalog.revision_drafted`"双向闭环）。
+   新建商品推送的是 `products/create`（与 `products/update` 分开订阅）。
+5. **订单创建与 webhook**：`POST /admin/api/{v}/orders.json` 可直接创建正式订单（需 `write_orders`，
+   无需草稿权限），但 **Shopify 对 API/后台创建的订单不推送 `orders/create` webhook**（webhook 仅由结账流程
+   触发的订单产生）——实测创建 #1001（PAID）后无投递。因此 API 建单场景需直接驱动本地 O2C 工作流
+   （backend/scripts/run_test_order_flow.py 已封装：摄入→13 步状态机→对账，幂等）。
+6. **货币**：开发店默认币种为 JPY（REST 建单返回 JPY）；Odoo 演示为 USD，映射与税率待正式处理。
+   对账（domains=['shopify']）会把"本地 closed vs 渠道 PAID"之类差异记为 MANUAL_RECONCILIATION，不自动抹平。
+7. **productVariantsBulkUpdate 形状**：2026-07 输入类型 `ProductVariantsBulkInput` 无 `sku` 字段，
+   SKU 位于 `inventoryItem.sku`（已实测）。发布用 `publishablePublish` + publication id
+   （Online Store `gid://shopify/Publication/{id}`）。
 5. **本机网络注意**（环境运维手册佐证）：Windows 侧 v2rayN 为 7890 代理模式（无 TUN），直连 Shopify 时 DNS 优先返回
    IPv6 而 IPv6 出口 EOF——连接器进程内**优先 IPv4** 解析；证书校验用 certifi + Windows 系统库**合并信任**；
    v2rayN 白名单已加 `domain:myshopify.com` 直连规则（备份索引已更新）。
