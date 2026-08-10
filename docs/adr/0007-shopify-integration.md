@@ -51,6 +51,23 @@ Shopify 是首个外部渠道，涉及产品发布、更新、履约与退款效
 7. **productVariantsBulkUpdate 形状**：2026-07 输入类型 `ProductVariantsBulkInput` 无 `sku` 字段，
    SKU 位于 `inventoryItem.sku`（已实测）。发布用 `publishablePublish` + publication id
    （Online Store `gid://shopify/Publication/{id}`）。
+
+## 决定（2026-08-11）：开发店前台结账不可用 → 采用 API 驱动 + 合成 webhook 验证
+
+- **事实**：开发店（metratio.myshopify.com）前台可浏览/加购，但结账返回
+  "此商店尚未进行接收订单设置 / Checkout unavailable"。联网研究（shopify.dev/help 与社区）未找到
+  官方依据把该报错归因于支付网关/登录/域名/配送；官方明确**真实订单需客户商店与付费计划**，
+  dev store 仅支持测试订单。用户决定**不为此启用付费计划**。
+- **替代方式（已落地并验证）**：
+  1. 订单创建走 **Admin API**（`POST /orders.json`，write_orders 即可，无需前台/付费）；
+  2. O2C 工作流由 [run_test_order_flow.py](backend/scripts/run_test_order_flow.py) 直接驱动
+     （received→…→closed，4 个人工门 + effect 记账 + 对账）；
+  3. **webhook 接收链路**用合成 HMAC 载荷端到端验证（公网端点 → HMAC 校验 → 按
+     `X-Shopify-Webhook-Id` 去重 → 加密留存 → `order.received`/`return.case_requested` 事件 →
+     order-to-cash/return-to-refund 工作流）——与真实投递处理路径完全一致；
+  4. 退货/退款走 `simulate_return_refund.py`（Odoo 贷项通知单 + Shopify refundCreate 实测成功）。
+- **边界**：`orders/create` 的真实渠道触发（结账流程产生）在无付费计划下不可达，作为已知限制记录；
+  webhook 处理代码与接收链路已按上述方式充分验证，正式店切换后无需改动处理逻辑。
 5. **本机网络注意**（环境运维手册佐证）：Windows 侧 v2rayN 为 7890 代理模式（无 TUN），直连 Shopify 时 DNS 优先返回
    IPv6 而 IPv6 出口 EOF——连接器进程内**优先 IPv4** 解析；证书校验用 certifi + Windows 系统库**合并信任**；
    v2rayN 白名单已加 `domain:myshopify.com` 直连规则（备份索引已更新）。
