@@ -18,8 +18,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# 先只拷贝依赖清单，最大化层缓存
-COPY pyproject.toml uv.lock ./
+# 先只拷贝依赖清单，最大化层缓存（README.md 是 hatchling 构建所需的 readme 文件）
+COPY pyproject.toml uv.lock README.md ./
 # 仅安装非 dev 依赖（--frozen 严格按 uv.lock，不重新解析）
 RUN uv sync --frozen --no-dev --no-install-project
 
@@ -35,7 +35,12 @@ FROM python:3.12-slim AS runtime
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    # runtime 的 venv 由 builder 按 uv.lock 完整构建并原样拷贝，无需（也不应）在启动时重新同步；
+    # UV_NO_SYNC=1 让 `uv run` 跳过 sync/重建，避免无网络/无写权限时启动失败
+    UV_NO_SYNC=1 \
+    # 非 root 用户 app 对 /app 无写权限，uv 缓存放到 /tmp（容器内可写）
+    UV_CACHE_DIR="/tmp/uv-cache"
 
 # curl 供 compose 健康检查使用（http://localhost:8000/healthz）
 RUN apt-get update \
@@ -46,6 +51,12 @@ RUN apt-get update \
 RUN groupadd --system app && useradd --system --gid app --no-create-home --home-dir /app app
 
 WORKDIR /app
+
+# uv 可执行文件：compose 的 api/worker 启动命令都是 `uv run ...`，runtime 必须包含 uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
+
+# pyproject.toml + uv.lock + README.md 供 `uv run` 做项目发现（README 为 hatchling 构建兜底）
+COPY pyproject.toml uv.lock README.md ./
 
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/app /app/app

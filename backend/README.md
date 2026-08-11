@@ -50,6 +50,9 @@ backend/
 | `COMMERCE_ODOO_API_KEY` | 空 | Odoo API Key |
 | `COMMERCE_ODOO_DB` | 空 | Odoo 数据库名 |
 | `COMMERCE_ODOO_USERNAME` | 空 | Odoo 用户名 |
+| `COMMERCE_DIFY_BASE_URL` | `http://127.0.0.1:18080` | Dify 服务基础地址（本机部署） |
+| `COMMERCE_DIFY_WORKFLOW_ID` | 空 | 已发布的 Dify workflow id（P6 候选生成） |
+| `COMMERCE_DIFY_API_KEY` | 空 | Dify 应用 API 密钥（敏感） |
 | `COMMERCE_OTLP_ENDPOINT` | 空 | OTLP 追踪端点；为空则遥测为 no-op |
 | `COMMERCE_RAW_PAYLOAD_RETENTION_DAYS` | `30` | 原始载荷加密保留天数 |
 
@@ -79,7 +82,10 @@ uv run pytest
   5 个人工审批门（四眼），Odoo 贷项通知单过账，Shopify refundCreate（有父交易用 manual，否则 cash），
   effect ledger + 三方对账；无参数时每次新建一笔测试订单。
 - `simulate_feedback_to_catalog.py`：Feedback → 聚类 → AI 候选（draft→candidate→frozen→scored→official，
-  AI 仅建议不批准）→ 商品修订审批 → 上架 effect planned；检测到 simulated-v1 候选即跳过（`--force` 重跑）。
+  AI 仅建议不批准）→ 商品修订审批 → 上架 effect planned；默认用 `model_id="simulated-v1"` 的本地模拟候选，
+  检测到同模型候选即跳过（`--force` 重跑）。传 `--real-llm` 且已配置 `COMMERCE_DIFY_WORKFLOW_ID` /
+  `COMMERCE_DIFY_API_KEY` 时，改由 Dify 工作流（`backend/app/connectors/dify.py` 的 DifyConnector）
+  基于脱敏反馈生成候选的 `proposal_json`（`model_id` 记为 `dify:<workflow_id>`，AI 只建议不批准）。
 - `simulate_procurement.py`：采购闭环——需求→RFQ→审批（budget_owner 四眼）→收货（warehouse_staff）→
   账单（accountant ×2 四眼）→ closed；worker 段真实执行 Odoo PO 创建/确认、收货（button_validate）、
   账单创建+过账，effect ledger 全链路记账，对账 0 差异。

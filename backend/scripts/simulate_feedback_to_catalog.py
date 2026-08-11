@@ -1,4 +1,4 @@
-"""P6 模拟：Feedback → 聚类 → AI 候选 → 商品修订审批（无真实客户）。
+"""P6：Feedback → 聚类 → AI 候选 → 商品修订审批（无真实客户）。
 
 流程：创建 3 条脱敏反馈（product_quality/content_accuracy/availability）
 → 聚类（clustered）→ AI 候选 CatalogChangeCandidate（draft→candidate→frozen→scored→official，
@@ -6,8 +6,14 @@ AI 仅建议不批准，元数据含 sanitizer/model/prompt/rule 版本与 propo
 → 反馈项提升为 promoted_to_catalog_change
 → dispatch catalog-revision（SKU-YIFU-01）→ catalog_owner 审批 → 渠道上架 effect planned。
 
-幂等：检测到 model_id="simulated-v1" 的候选即跳过（--force 重跑）。
-用法：uv run python scripts/simulate_feedback_to_catalog.py
+候选生成：默认本地模拟（model_id="simulated-v1"）；传 `--real-llm` 且已配置
+COMMERCE_DIFY_WORKFLOW_ID / COMMERCE_DIFY_API_KEY 时，改由 Dify 工作流生成
+proposal_json（model_id 记为 "dify:<workflow_id>"，prompt_version/rule_version 沿用）。
+
+幂等：检测到目标 model_id（simulated-v1 或 dify:<workflow_id>）的候选即跳过（--force 重跑）。
+用法：
+  uv run python scripts/simulate_feedback_to_catalog.py                # 模拟候选
+  uv run python scripts/simulate_feedback_to_catalog.py --real-llm     # Dify 真实 LLM 候选
 """
 # ruff: noqa: E402  # 必须先读 .env 再导入 app 模块（Settings 校验）
 
@@ -59,6 +65,8 @@ from app.models.workflow import WorkflowRun
 from app.services.commands import dispatch_command
 from app.services.work_items import submit_decision
 
+REAL_LLM_FLAG = "--real-llm"
+
 SIM_FEEDBACK = [
     {
         "external_ref": "FB-SIM-001",
@@ -95,10 +103,16 @@ def main() -> None:
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     db = Session()
     try:
+        real_llm = REAL_LLM_FLAG in sys.argv and bool(os.environ.get("COMMERCE_DIFY_WORKFLOW_ID"))
+        if REAL_LLM_FLAG in sys.argv and not os.environ.get("COMMERCE_DIFY_WORKFLOW_ID"):
+            print("WARN: --real-llm 已传但未设置 COMMERCE_DIFY_WORKFLOW_ID，回退到 simulated-v1")
+        target_model_id = (
+            f"dify:{os.environ['COMMERCE_DIFY_WORKFLOW_ID']}" if real_llm else "simulated-v1"
+        )
         existing = (
             db.execute(
                 select(CatalogChangeCandidate).where(
-                    CatalogChangeCandidate.model_id == "simulated-v1"
+                    CatalogChangeCandidate.model_id == target_model_id
                 )
             )
             .scalars()
@@ -106,7 +120,8 @@ def main() -> None:
         )
         if existing is not None and "--force" not in sys.argv:
             print(
-                f"SKIP: 已存在模拟候选（candidate {existing.id}，status={existing.status.value}）"
+                f"SKIP: 已存在 {target_model_id} 候选（candidate {existing.id}，"
+                f"status={existing.status.value}）"
             )
             return
 
@@ -145,19 +160,34 @@ def main() -> None:
             i.status = FeedbackStatus.CLUSTERED
         print("cluster:", cluster.id, cluster.title)
 
-        # 3) AI 候选（模拟元数据；AI 只建议不批准）
-        proposal_json = json.dumps(PROPOSAL, sort_keys=True, ensure_ascii=False).encode()
+        # 3) AI 候选（AI 只建议不批准；默认 simulated-v1，--real-llm 走 Dify 工作流）
+        if real_llm:
+            from app.connectors.dify import DifyConnector
+
+            feedback_text = "；".join(fb["text"] for fb in SIM_FEEDBACK)
+            connector = DifyConnector()
+            proposal = connector.generate_catalog_suggestion(
+                feedback_text,
+                sku="SKU-YIFU-01",
+            )
+            connector.close()
+            aggregation = "dify"
+            print("Dify 建议已生成:", json.dumps(proposal, ensure_ascii=False))
+        else:
+            proposal = PROPOSAL
+            aggregation = "simulated"
+        proposal_json = json.dumps(proposal, sort_keys=True, ensure_ascii=False).encode()
         candidate = CatalogChangeCandidate(
             id=uuid.uuid4(),
             source_refs=[{"id": str(i.id), "type": "feedback"} for i in items],
             source_revision="sim-feedback-v1",
             sanitizer_version="san-1.0",
-            model_id="simulated-v1",
+            model_id=target_model_id,
             prompt_version="sim-p1",
             rule_version="sim-r1",
             proposal_hash=hashlib.sha256(proposal_json).hexdigest(),
-            evidence={"cluster_id": str(cluster.id), "aggregation": "simulated"},
-            proposal_json=PROPOSAL,
+            evidence={"cluster_id": str(cluster.id), "aggregation": aggregation},
+            proposal_json=proposal,
             status=CatalogCandidateStatus.CANDIDATE,
         )
         db.add(candidate)
@@ -214,11 +244,11 @@ def main() -> None:
             key=str(uuid.uuid4()),
             command_type="catalog-revision",
             payload={
-                "sku": "SKU-YIFU-01",
-                "title": PROPOSAL["title"],
-                "category": PROPOSAL["category"],
-                "description": PROPOSAL["description"],
-                "proposed": PROPOSAL,
+                "sku": proposal.get("sku") or "SKU-YIFU-01",
+                "title": proposal.get("title") or PROPOSAL["title"],
+                "category": proposal.get("category") or PROPOSAL["category"],
+                "description": proposal.get("description") or PROPOSAL["description"],
+                "proposed": proposal,
                 "source_refs": [{"id": str(candidate.id), "type": "catalog_change_candidate"}],
                 "source_revision": "sim-feedback-v1",
                 "evidence": {"candidate_id": str(candidate.id)},

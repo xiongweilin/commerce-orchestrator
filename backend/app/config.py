@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     odoo_db: str = ""
     odoo_username: str = ""
 
+    # Dify workflow LLM（P6：LLM 只生成建议，不批准不执行）
+    dify_base_url: str = "http://127.0.0.1:18080"
+    dify_workflow_id: str = ""
+    dify_api_key: str = ""
+
     # Observability
     otlp_endpoint: str = ""
     raw_payload_retention_days: int = 30
