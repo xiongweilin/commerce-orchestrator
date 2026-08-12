@@ -26,6 +26,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 # 应用源码 + alembic 迁移树
 COPY app/ ./app/
 COPY alembic/ ./alembic/
+# Alembic 配置：migrate 服务在 /app 下执行 `uv run alembic upgrade head`，
+# 必须把 alembic.ini 一并装入镜像（alembic 以当前工作目录定位配置文件）。
+COPY alembic.ini ./
 
 # 安装项目本身（editable），保证 `uv run uvicorn ...` / `uv run python -m app.worker` 可用
 RUN uv sync --frozen --no-dev
@@ -57,6 +60,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
 
 # pyproject.toml + uv.lock + README.md 供 `uv run` 做项目发现（README 为 hatchling 构建兜底）
 COPY pyproject.toml uv.lock README.md ./
+# Alembic 配置文件（runtime 阶段同样需要，供 migrate 服务使用）
+COPY alembic.ini ./
 
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/app /app/app

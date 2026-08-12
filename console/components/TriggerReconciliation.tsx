@@ -3,13 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
-import type { AcceptedCommand } from "@/lib/types";
+import type { AcceptedResponse } from "@/lib/types";
 
 /** 发起对账按钮：POST /v1/reconciliations（携带新的 Idempotency-Key）。 */
 export default function TriggerReconciliation() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<AcceptedCommand | null>(null);
+  const [result, setResult] = useState<AcceptedResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleClick = async () => {
@@ -17,7 +17,7 @@ export default function TriggerReconciliation() {
     setError(null);
     setResult(null);
     try {
-      const res = await api.post<AcceptedCommand>(
+      const res = await api.post<AcceptedResponse>(
         "/v1/reconciliations",
         { scope: "reconciliation" },
         { idempotencyKey: newIdempotencyKey() },

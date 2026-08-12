@@ -6,7 +6,18 @@ import datetime as dt
 import enum
 import uuid
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import utc_now
@@ -18,6 +29,7 @@ class WorkflowRunStatus(enum.StrEnum):
     RUNNING = "running"
     AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
+    NEEDS_RECONCILIATION = "needs_reconciliation"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
@@ -46,10 +58,27 @@ class WorkItemDecisionType(enum.StrEnum):
 
 class WorkflowRun(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "workflow_run"
-    __table_args__ = (Index("ix_workflow_run_status_updated_at", "status", "updated_at"),)
+    __table_args__ = (
+        Index("ix_workflow_run_status_updated_at", "status", "updated_at"),
+        # Optimistic-lock CAS lookup: WHERE id = ? AND version = ?.
+        Index("ix_workflow_run_id_version", "id", "version"),
+    )
 
     workflow_type: Mapped[str] = mapped_column(String(64), nullable=False)
     workflow_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # "dbos" for new v2 workflows; "legacy_inline" default keeps pre-existing
+    # code paths that create runs without this column on the legacy engine.
+    orchestration_engine: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="legacy_inline"
+    )
+    dbos_workflow_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    initiated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    started_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[WorkflowRunStatus] = mapped_column(
         Enum(
             WorkflowRunStatus,
@@ -73,6 +102,8 @@ class WorkItem(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     __table_args__ = (
         Index("ix_work_item_status_expires_at", "status", "expires_at"),
         Index("ix_work_item_workflow_id", "workflow_id"),
+        # Optimistic-lock CAS lookup: WHERE id = ? AND version = ?.
+        Index("ix_work_item_id_version", "id", "version"),
     )
 
     workflow_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workflow_run.id"), nullable=False)
@@ -83,6 +114,7 @@ class WorkItem(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     required_roles: Mapped[list | None] = mapped_column(JSON, nullable=True)
     assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[WorkItemStatus] = mapped_column(
         Enum(WorkItemStatus, native_enum=False, length=32, values_callable=enum_values),
@@ -100,6 +132,11 @@ class WorkItemDecision(UUIDPkMixin, Base):
     """Append-only record of every decision submitted on a work item."""
 
     __tablename__ = "work_item_decision"
+    __table_args__ = (
+        # One work item can have only one final decision; concurrent approvals
+        # must race and lose (409) instead of writing a second row.
+        UniqueConstraint("work_item_id", name="uq_work_item_decision_work_item_id"),
+    )
 
     work_item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work_item.id"), nullable=False)
     decision: Mapped[WorkItemDecisionType] = mapped_column(

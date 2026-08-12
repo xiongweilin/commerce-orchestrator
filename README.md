@@ -42,8 +42,9 @@ flowchart LR
 | 后端 | Python 3.12 / FastAPI / Pydantic / SQLAlchemy 2 / Alembic / uv | API 与 worker 同镜像、不同进程 |
 | 长流程引擎 | DBOS OSS + 独立 PostgreSQL | 工作流从最后完成步骤恢复；step 至少一次、事务恰好一次 |
 | 渠道集成 | Shopify Admin GraphQL（冻结版本 2026-07）；Odoo 19 External JSON-2 API | 详见 ADR-0007 / ADR-0008 |
-| 前端 | Next.js（React） + TypeScript | 运营控制台 |
-| 可观测性 | OpenTelemetry / Prometheus / Grafana | correlationId 贯穿 |
+| 前端 | Next.js（React） + TypeScript | 运营控制台；BFF 安全会话（HttpOnly cookie + CSRF + allowlist 代理，ADR-0014） |
+| 可观测性 | OpenTelemetry / Prometheus / Grafana / Alertmanager | correlationId 贯穿；10 条告警带 runbook 链接，影子环境只投递本地 receiver |
+| 健康/运维 | `/livez` `/readyz` `/healthz` `/v1/me` `/v1/ops/*` | readiness 含 DB/Alembic/adapter/worker heartbeat；ops 仅 system_admin |
 | 编排 | Docker Compose | v1 不引入 Redis / RabbitMQ / Kafka / ES / K8s |
 
 依赖快照以 `backend/uv.lock` 为准（fastapi 0.141.1、uvicorn 0.52.1、pydantic 2.13.4、sqlalchemy 2.0.51、alembic 1.19.1、psycopg 3.3.4、structlog 26.1.0、pyjwt 2.13.0、cryptography 49.0.0、uuid6 2025.0.1、OTEL 1.44.x、dbos 2.29）。
@@ -70,7 +71,7 @@ commerce-orchestrator/
     ├── glossary.md      # 领域术语表
     ├── architecture.md  # 总体架构与信任边界
     ├── development.md   # 开发与契约变更流程
-    ├── adr/             # 架构决策记录（0001-0010+）
+    ├── adr/             # 架构决策记录（0001-0014）
     ├── runbooks/        # 运维手册（环境/备份/对账）
     └── contracts/       # 契约唯一事实源（API/事件/数据所有权）
 ```
@@ -80,10 +81,12 @@ commerce-orchestrator/
 **方式一：Docker Compose 全栈（推荐联调/演示）**
 
 ```bash
-docker compose up -d
+docker compose up -d     # 空数据卷自动：postgres → db-bootstrap → migrate → api+worker → console+监控
 ```
 
 服务清单、健康检查与数据目录见 [infra/README.md](infra/README.md)。
+
+Odoo 19 默认不启动：`docker compose --profile odoo up -d`。
 
 **方式二：本地开发**
 
@@ -104,6 +107,8 @@ npm run dev
 ```
 
 环境变量：全部来自环境（`backend/.env` 或进程环境），样例见 `.env.example`；真实密钥禁止入库。
+
+> P7 整改后新命令统一走 **API 受理（accept）→ inbox relay → DBOS v2 workflow → typed effect seam → canonical 对账** 的单一主线；worker bootstrap/DBOS launch 失败非零退出（fail-closed）。详见 ADR-0011/0012/0013。
 
 ## 领域事实所有权
 
@@ -127,17 +132,20 @@ npm run dev
 
 - **AI 候选**：`draft → candidate → frozen → scored → official | rejected → deprecated`；冻结后不可修改原候选。
 - **Effect**：`planned → dispatched → succeeded | failed | outcome_unknown → reconciled | manual_reconciliation`。
-- **工作流**：`accepted → completed | failed | cancelled`。
+- **工作流**：`accepted → running → awaiting_approval → running → completed | needs_reconciliation | failed | cancelled`；`needs_reconciliation` 非失败终态（outcome_unknown/跨系统差异需人工处置）。
+- **inbox relay**：`pending → processing → processed | failed`（lease 30s / 指数退避 ≤10 次 / 启动回收过期 lease）。
 - **目录修订**：`catalog.revision_drafted → normalized → validated → approved → official → superseded`。
 
 ## v1 明确不做
 
 - 不依赖 DBOS Conductor，不做多节点调度；未来需要时评估 Temporal/Hatchet，不自研控制面。
 - 不引入 Redis / RabbitMQ / Kafka / Elasticsearch / K8s。
-- 不做 last-writer-wins 冲突合并；对账差异禁止自动抹平。
+- 不做 last-writer-wins 冲突合并；对账差异禁止自动抹平；**skipped 域不算成功**（缺 reader 的必需域使整个 run failed）。
 - 仅 Shopify 开发店一个外部渠道。
 - Odoo External JSON-2 API 未在真实 Community 容器实测前，不进入写入阶段；不扩大 XML-RPC / `/jsonrpc` 依赖。
 - AI 不自动批准或执行任何效果。
+- 不自动反向补偿：`outcome_unknown` 不盲目重发，进 `needs_reconciliation` 人工处置；发票只能贷项通知单修正、库存只能 stock move/adjustment 改变。
+- 控制台不再把 JWT 放入 `localStorage`；浏览器只访问同源 BFF。
 - 不做动态定价、实时价格引擎、多渠道聚合。
 - 不新增自研队列或自研控制面。
 
@@ -154,8 +162,8 @@ npm run dev
 | [docs/glossary.md](docs/glossary.md) | 领域术语表（中文术语 + 英文 identifier） |
 | [docs/architecture.md](docs/architecture.md) | 总体架构、信任边界、可靠性模型、首条纵向切片 21 步 |
 | [docs/development.md](docs/development.md) | 开发约定、契约变更流程、ADR 流程 |
-| [docs/adr/](docs/adr/) | 架构决策记录（0001-0010） |
-| [docs/runbooks/](docs/runbooks/) | 运维手册（dev-environment / backup-restore / reconciliation-drift） |
+| [docs/adr/](docs/adr/) | 架构决策记录（0001-0014；0011-0014 为 P7 整改新增） |
+| [docs/runbooks/](docs/runbooks/) | 运维手册（dev-environment / backup-restore / reconciliation-drift / worker-failure / privacy-cleanup / alerting） |
 | [docs/contracts/](docs/contracts/) | **契约唯一事实源**（api-contract / event-contract / data-ownership） |
 | backend/README.md | 后端开发说明 |
 | console/README.md | 控制台开发说明 |

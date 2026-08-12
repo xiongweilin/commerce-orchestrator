@@ -10,9 +10,43 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.api.deps import require_roles
 from app.core.errors import PermissionDeniedError
+from app.models.workflow import WorkItem
+from app.services.commands import dispatch_command
+
+
+def _seed_procurement_work_item(db, actor_user_id) -> tuple[str, str, int]:
+    """Create a procurement run and its first work item via the service layer.
+
+    The API command path is accept-only for DBOS v2 runs (WP4); without a
+    live worker no work item would exist for the decision endpoints.  Seeding
+    through ``dispatch_command`` (the legacy inline engine) exercises the
+    decision HTTP contract independently of the command endpoint's engine.
+    """
+    result = dispatch_command(
+        db,
+        scope=f"seed-{uuid.uuid4()}",
+        key=f"key-{uuid.uuid4()}",
+        command_type="procurement",
+        payload={
+            "sku": "SKU-API-D",
+            "qty": "1",
+            "supplier": "ACME",
+            "unit_cost": "1.00",
+        },
+        actor_user_id=actor_user_id,
+    )
+    workflow_id = result["workflowId"]
+    item = (
+        db.execute(select(WorkItem).where(WorkItem.workflow_id == uuid.UUID(workflow_id)))
+        .scalars()
+        .one()
+    )
+    db.commit()
+    return workflow_id, str(item.id), item.expected_version or 1
 
 
 def assert_error_envelope(body: dict) -> None:
@@ -117,19 +151,23 @@ def test_same_key_different_body_is_409(client: TestClient, make_user, auth_head
 def test_all_command_endpoints_accept(client: TestClient, make_user, auth_headers) -> None:
     user_id = make_user(["catalog_owner", "procurement_lead", "customer_service"])
     auth = auth_headers(user_id, ["catalog_owner"])
+    # Reconciliation trigger is accountant / system_admin only (计划 §四.2).
+    accountant_id = make_user(["accountant"])
+    accountant_auth = auth_headers(accountant_id, ["accountant"])
     cases = [
-        ("/v1/catalog-revisions", {"sku": "SKU-C1"}),
-        ("/v1/listing-publications", {"sku": "SKU-L1", "channel": "shopify"}),
+        ("/v1/catalog-revisions", {"sku": "SKU-C1"}, auth),
+        ("/v1/listing-publications", {"sku": "SKU-L1", "channel": "shopify"}, auth),
         (
             "/v1/procurements",
             {"sku": "SKU-P1", "qty": "5", "supplier": "ACME", "unit_cost": "2.00"},
+            auth,
         ),
-        ("/v1/returns", {"customer_ref": "cust-1", "reason": "damaged"}),
-        ("/v1/reconciliations", {"run_type": "daily"}),
+        ("/v1/returns", {"customer_ref": "cust-1", "reason": "damaged"}, auth),
+        ("/v1/reconciliations", {"run_type": "daily"}, accountant_auth),
     ]
-    for idx, (path, payload) in enumerate(cases):
+    for idx, (path, payload, headers) in enumerate(cases):
         response = client.post(
-            path, json=payload, headers={**auth, "Idempotency-Key": f"accept-{idx}"}
+            path, json=payload, headers={**headers, "Idempotency-Key": f"accept-{idx}"}
         )
         assert response.status_code == 202, path
         body = response.json()
@@ -137,25 +175,21 @@ def test_all_command_endpoints_accept(client: TestClient, make_user, auth_header
         assert uuid.UUID(body["workflowId"])
 
 
-def test_decision_version_conflict_is_409(client: TestClient, make_user, auth_headers) -> None:
+def test_decision_version_conflict_is_409(
+    client: TestClient, make_user, auth_headers, db
+) -> None:
     proposer = make_user(["procurement_lead"])
     budget_owner = make_user(["budget_owner"])
-    auth = auth_headers(proposer, ["procurement_lead"])
 
-    created = client.post(
-        "/v1/procurements",
-        json={"sku": "SKU-D1", "qty": "1", "supplier": "ACME", "unit_cost": "1.00"},
-        headers={**auth, "Idempotency-Key": "decision-key-1"},
-    )
-    assert created.status_code == 202
-    workflow_id = created.json()["workflowId"]
-    detail = client.get(f"/v1/workflows/{workflow_id}", headers=auth).json()
-    work_item_id = detail["workItems"][0]["workItemId"]
+    workflow_id, work_item_id, _ = _seed_procurement_work_item(db, proposer)
 
     stale = client.post(
         f"/v1/work-items/{work_item_id}/decisions",
         json={"decision": "approve", "expectedWorkflowVersion": 999},
-        headers=auth_headers(budget_owner, ["budget_owner"]),
+        headers={
+            **auth_headers(budget_owner, ["budget_owner"]),
+            "Idempotency-Key": "decision-key-1",
+        },
     )
     assert stale.status_code == 409
     body = stale.json()
@@ -163,24 +197,21 @@ def test_decision_version_conflict_is_409(client: TestClient, make_user, auth_he
     assert body["error"]["code"] == "workflow_version_conflict"
 
 
-def test_decision_wrong_role_is_403(client: TestClient, make_user, auth_headers) -> None:
+def test_decision_wrong_role_is_403(
+    client: TestClient, make_user, auth_headers, db
+) -> None:
     proposer = make_user(["procurement_lead"])
     warehouse = make_user(["warehouse_staff"])
-    auth = auth_headers(proposer, ["procurement_lead"])
 
-    created = client.post(
-        "/v1/procurements",
-        json={"sku": "SKU-D2", "qty": "1", "supplier": "ACME", "unit_cost": "1.00"},
-        headers={**auth, "Idempotency-Key": "decision-key-2"},
-    )
-    workflow_id = created.json()["workflowId"]
-    detail = client.get(f"/v1/workflows/{workflow_id}", headers=auth).json()
-    work_item_id = detail["workItems"][0]["workItemId"]
+    _, work_item_id, expected_version = _seed_procurement_work_item(db, proposer)
 
     denied = client.post(
         f"/v1/work-items/{work_item_id}/decisions",
-        json={"decision": "approve", "expectedWorkflowVersion": 1},
-        headers=auth_headers(warehouse, ["warehouse_staff"]),
+        json={"decision": "approve", "expectedWorkflowVersion": expected_version},
+        headers={
+            **auth_headers(warehouse, ["warehouse_staff"]),
+            "Idempotency-Key": "decision-key-2",
+        },
     )
     assert denied.status_code == 403
     body = denied.json()
@@ -188,40 +219,44 @@ def test_decision_wrong_role_is_403(client: TestClient, make_user, auth_headers)
     assert body["error"]["code"] == "permission_denied"
 
 
-def test_decision_approve_flow(client: TestClient, make_user, auth_headers) -> None:
+def test_decision_approve_flow(
+    client: TestClient, make_user, auth_headers, db
+) -> None:
     proposer = make_user(["procurement_lead"])
     budget_owner = make_user(["budget_owner"])
-    auth = auth_headers(proposer, ["procurement_lead"])
 
-    created = client.post(
-        "/v1/procurements",
-        json={"sku": "SKU-D3", "qty": "1", "supplier": "ACME", "unit_cost": "1.00"},
-        headers={**auth, "Idempotency-Key": "decision-key-3"},
+    workflow_id, work_item_id, expected_version = _seed_procurement_work_item(
+        db, proposer
     )
-    workflow_id = created.json()["workflowId"]
-    detail = client.get(f"/v1/workflows/{workflow_id}", headers=auth).json()
-    work_item_id = detail["workItems"][0]["workItemId"]
-    expected_version = detail["workItems"][0]["expectedVersion"]
 
     approved = client.post(
         f"/v1/work-items/{work_item_id}/decisions",
         json={"decision": "approve", "reason": "ok", "expectedWorkflowVersion": expected_version},
-        headers=auth_headers(budget_owner, ["budget_owner"]),
+        headers={
+            **auth_headers(budget_owner, ["budget_owner"]),
+            "Idempotency-Key": "decision-key-3",
+        },
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
     assert approved.json()["workflowId"] == workflow_id
 
 
-def test_get_workflow_documented_shape(client: TestClient, make_user, auth_headers) -> None:
-    user_id = make_user(["catalog_owner"])
-    auth = auth_headers(user_id, ["catalog_owner"])
-    created = client.post(
-        "/v1/catalog-revisions",
-        json={"sku": "SKU-SHAPE", "title": "Shaped"},
-        headers={**auth, "Idempotency-Key": "shape-key"},
+def test_get_workflow_documented_shape(
+    client: TestClient, make_user, auth_headers, db
+) -> None:
+    owner = make_user(["catalog_owner"])
+    auth = auth_headers(owner, ["catalog_owner"])
+    result = dispatch_command(
+        db,
+        scope=f"shape-{uuid.uuid4()}",
+        key=f"key-{uuid.uuid4()}",
+        command_type="catalog-revision",
+        payload={"sku": "SKU-SHAPE", "title": "Shaped"},
+        actor_user_id=owner,
     )
-    workflow_id = created.json()["workflowId"]
+    workflow_id = result["workflowId"]
+    db.commit()
     response = client.get(f"/v1/workflows/{workflow_id}", headers=auth)
     assert response.status_code == 200
     body = response.json()

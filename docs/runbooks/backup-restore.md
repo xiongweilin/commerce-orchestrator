@@ -4,6 +4,10 @@
 
 为 Odoo 19（权威账本）建立 **DB + filestore 基线备份**，并在**每批 Odoo 模块安装前**建立新基线；**先恢复验证，再进入下一批**，防止不可逆的模块迁移事故。
 
+> P7 起备份范围扩大：除 Odoo 外，业务主库 `commerce` 与 DBOS 系统库 `dbos`
+> （以及监控/告警配置）纳入同一备份与隔离恢复流程；影子启动门禁（计划 §六.4 第 4 项）
+> 要求 backup/restore 演练通过。
+
 ## 原则
 
 - 每批模块安装前：建基线 → 恢复验证 → 通过后才安装下一批。
@@ -62,3 +66,17 @@ sha256sum backups/odoo_*_YYYYMMDD_HHMM.* > backups/BACKUP_MANIFEST.txt
 - 备份/恢复路径涉及容器内外映射时，先确认数据目录挂载点（以 infra/ 为准）。
 - 生产实例上，基线前先停止写入批次相关的 cron/外部写入，避免半状态备份。
 - 所有备份文件放入备份目录并纳入权限控制；本 runbook 只描述流程，不存放任何凭据。
+
+## P7 验收要求（影子门禁第 4 项）
+
+1. **备份范围**：`commerce`（业务库）、`dbos`（DBOS 系统库）、Odoo 库 `odoo`
+   （DB + filestore）分别 `pg_dump -Fc`；监控/告警配置以 git 为备份。
+2. **隔离恢复演练**：在独立容器/目录恢复，不得覆盖运行实例；恢复后验证：
+   - `alembic current` 等于 head（或按备份时刻记录并重跑 `migrate`）；
+   - API `/livez`、`/readyz` 恢复为 200（worker 心跳恢复后）；
+   - 关键业务计数与备份清单一致；inbox/outbox 无半状态积压；
+   - 恢复后跑一次对账验证账实一致（差异清零才算演练通过）。
+3. **证据留存**：备份可读性校验（`pg_restore --list` + sha256 manifest）、
+   演练结果记录到台账；四周影子期每次备份/恢复演练证据归档。
+4. **不可逆清理前置**：明文 PII 清空类操作必须在备份验证与回滚期结束后执行
+   （见 [privacy-cleanup.md](privacy-cleanup.md)）。

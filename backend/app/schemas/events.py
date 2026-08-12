@@ -85,6 +85,7 @@ RETURN_EVENTS = (
 
 WORKFLOW_EVENTS = (
     "workflow.accepted",
+    "workflow.decision_recorded",
     "workflow.completed",
     "workflow.failed",
     "workflow.cancelled",
@@ -181,6 +182,10 @@ class EventEnvelope(BaseModel):
     producer: str
     schemaVersion: str = "1.0"
     payload: dict[str, Any] = Field(default_factory=dict)
+    # Optional W3C trace context propagated through the outbox/inbox pipeline
+    # (P7 observability; the worker extracts these when creating spans).
+    traceparent: str | None = None
+    tracestate: str | None = None
 
 
 Envelope = EventEnvelope

@@ -2,16 +2,28 @@
 # commerce-orchestrator — Docker Compose 基础设施编排
 #
 # v1 技术选型（明确不引入）：无 Redis / RabbitMQ / Kafka / Elasticsearch / Kubernetes。
-# API 与 worker 共用同一镜像（backend/Dockerfile），仅启动命令不同。
-# 所有长驻服务均 restart: unless-stopped；api/worker 等待 postgres 健康后才启动。
+# API 与 worker 共用同一镜像（backend/Dockerfile），仅启动命令不同；
+# console 使用 console/Dockerfile；alert-receiver 使用 infra/alert-receiver/Dockerfile。
+#
+# 启动顺序（P7 整改计划「五.1」）：
+#   postgres healthy
+#   → db-bootstrap completed（幂等角色/权限引导，infra/postgres/bootstrap.sql）
+#   → migrate completed（uv run alembic upgrade head，以 commerce_migrator 角色执行 DDL）
+#   → api + worker（并行）
+#   → api/worker ready（healthcheck 通过）
+#   → console + prometheus + grafana + alertmanager + alert-receiver + metabase
 #
 # 配置约定：
 #   - 应用配置来自项目根目录 .env（env_file: .env；模板见 .env.example，
 #     backend 的 config.py 读取 COMMERCE_ 前缀变量）。
 #   - 容器内数据库主机名固定为 postgres；.env 中的 localhost 值仅用于本地裸机开发，
 #     compose 在这里用 environment 覆盖为服务名。
-#   - POSTGRES_* 由 compose 插值使用（默认 commerce/commerce/commerce），
-#     修改时必须同步调整数据库 URL 与 metabase/odoo 服务配置。
+#   - 数据库最小权限：api 用 commerce_api 角色、worker 用 commerce_worker 角色、
+#     migrate 用 commerce_migrator 角色、DBOS 系统库用 dbos_app、Metabase 应用库用
+#     metabase_app、Odoo 库用 odoo_app。角色与口令（开发占位符）由
+#     infra/postgres/bootstrap.sql 幂等创建，与下面的 URL 一一对应；
+#     影子/生产环境必须通过 secret 注入真实口令，禁止提交真实值。
+#   - PostgreSQL/Odoo/Prometheus/Grafana 等默认只绑定 127.0.0.1 或 Compose 内网。
 # ============================================================================
 
 name: commerce-orchestrator
@@ -26,18 +38,54 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commerce}
       POSTGRES_DB: ${POSTGRES_DB:-commerce}
     ports:
-      - "5432:5432"
+      # P7：默认只绑定本机回环，避免暴露到局域网
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # 首次初始化（空数据卷）时创建 DBOS/metabase/odoo 数据库并启用 pgcrypto；
       # docker-entrypoint-initdb.d 只会在数据卷为空时执行一次。
+      # 角色/权限引导由 db-bootstrap 服务执行 bootstrap.sql（幂等，覆盖非空卷升级）。
       - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U commerce -d commerce"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-commerce} -d ${POSTGRES_DB:-commerce}"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 5s
+
+  # 一次性引导：幂等创建最小权限角色、移交应用库所有权、设置默认权限。
+  # 必须在 migrate 之前成功退出（service_completed_successfully）。
+  db-bootstrap:
+    image: postgres:16-alpine
+    container_name: commerce-db-bootstrap
+    restart: "no"
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/sql/bootstrap.sql"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-commerce}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-commerce}
+      PGDATABASE: ${POSTGRES_DB:-commerce}
+    volumes:
+      - ./infra/postgres/bootstrap.sql:/sql/bootstrap.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 一次性迁移：以 commerce_migrator 角色执行 Alembic DDL（uv run alembic upgrade head）。
+  # API/worker 启动时不自行改 schema。
+  migrate:
+    build: ./backend
+    image: commerce-orchestrator-backend:local
+    container_name: commerce-migrate
+    restart: "no"
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+    env_file: .env
+    environment:
+      # 覆盖 .env 中的 localhost 值；DDL 角色 commerce_migrator
+      COMMERCE_DATABASE_URL: postgresql+psycopg://commerce_migrator:commerce_migrator@postgres:5432/${POSTGRES_DB:-commerce}
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
 
   api:
     build: ./backend
@@ -47,20 +95,25 @@ services:
     command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     env_file: .env
     environment:
-      # 容器内以服务名 postgres 连接（覆盖 .env 中的 localhost 值）
-      COMMERCE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/${POSTGRES_DB:-commerce}
-      COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/dbos
+      # 容器内以服务名 postgres 连接；API 使用最小权限角色 commerce_api
+      COMMERCE_DATABASE_URL: postgresql+psycopg://commerce_api:commerce_api@postgres:5432/${POSTGRES_DB:-commerce}
+      # WP4 显式字段：API 专用数据库 URL（与 COMMERCE_DATABASE_URL 一致，保持既有代码可读）
+      COMMERCE_API_DATABASE_URL: postgresql+psycopg://commerce_api:commerce_api@postgres:5432/${POSTGRES_DB:-commerce}
+      # DBOS 系统库由 dbos_app 角色独占
+      COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://dbos_app:dbos_app@postgres:5432/dbos
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # P7 顺序要求 api "ready"（DB、Alembic head、adapter 配置、worker heartbeat）。
+    # /readyz 由 WP6 实现；若 WP6 未落地，可临时回退 /healthz。
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 15s
+      retries: 12
+      start_period: 20s
 
   worker:
     build: ./backend
@@ -71,11 +124,135 @@ services:
     command: ["uv", "run", "python", "-m", "app.worker"]
     env_file: .env
     environment:
-      COMMERCE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/${POSTGRES_DB:-commerce}
-      COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/dbos
+      # worker 使用独立角色 commerce_worker（workflow/domain/effect/reconciliation 写权限）
+      COMMERCE_DATABASE_URL: postgresql+psycopg://commerce_worker:commerce_worker@postgres:5432/${POSTGRES_DB:-commerce}
+      COMMERCE_WORKER_DATABASE_URL: postgresql+psycopg://commerce_worker:commerce_worker@postgres:5432/${POSTGRES_DB:-commerce}
+      COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://dbos_app:dbos_app@postgres:5432/dbos
     depends_on:
-      postgres:
+      migrate:
+        condition: service_completed_successfully
+    # worker 独立 Docker healthcheck：
+    #   1) 主进程存活（uv run 为 PID 1；WP4 保证 bootstrap/DBOS launch 失败时进程非零退出，
+    #      不再落入 idle loop）
+    #   2) postgres 可达
+    # 待 WP4 在 worker 进程内暴露 HTTP 探针/metrics（约定端口 9101）后，可替换为本探针。
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1 && python -c \"import socket; socket.create_connection(('postgres', 5432), timeout=3).close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  console:
+    build: ./console
+    image: commerce-orchestrator-console:local
+    container_name: commerce-console
+    restart: unless-stopped
+    environment:
+      # 服务端私有后端地址（BFF 代理用；WP2 落地）
+      COMMERCE_API_BASE: http://api:8000
+      # CSRF/Origin 校验用的控制台源（宿主访问地址，与宿主端口一致）
+      COMMERCE_CONSOLE_ORIGIN: http://localhost:${CONSOLE_PORT:-3200}
+    ports:
+      # 宿主端口避开 Windows 系统保留段（3001-3100，Hyper-V/WinNAT 预留）
+      - "127.0.0.1:${CONSOLE_PORT:-3200}:3000"
+    depends_on:
+      api:
         condition: service_healthy
+      worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: commerce-prometheus
+    restart: unless-stopped
+    # 官方镜像默认以 nobody 运行；命名卷首次创建为 root 属主，需以 root 写 TSDB。
+    user: "0:0"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: commerce-grafana
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      # 预置 datasource（Prometheus）与 dashboard（P7 六块）
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+
+  # 影子环境告警出口：Alertmanager 只投递到仓库内本地 receiver
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: commerce-alertmanager
+    restart: unless-stopped
+    user: "0:0"
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./infra/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    depends_on:
+      alert-receiver:
+        condition: service_started
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+
+  # 本地 alert receiver（infra/alert-receiver）：只记录 alert 名称/级别/runbook URL，
+  # 不记录业务 payload；生产外部通知渠道留待切换阶段指定。
+  alert-receiver:
+    build: ./infra/alert-receiver
+    image: commerce-orchestrator-alert-receiver:local
+    container_name: commerce-alert-receiver
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ALERT_RECEIVER_PORT:-9116}:9116"
+    volumes:
+      - alert-logs:/var/lib/alerts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9116/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   metabase:
     image: metabase/metabase:v0.61.2
@@ -87,16 +264,21 @@ services:
     environment:
       MB_DB_TYPE: postgres
       MB_DB_DBNAME: metabase
-      MB_DB_USER: commerce
-      MB_DB_PASS: commerce
+      # Metabase 自身应用库使用独立角色 metabase_app（不得用 owner/app 写账号连业务库）；
+      # 业务库连接在 Metabase 管理界面中配置，使用 commerce_readonly（仅 SELECT）。
+      MB_DB_USER: ${METABASE_DB_USER:-metabase_app}
+      MB_DB_PASS: ${METABASE_DB_PASSWORD:-metabase_app}
       MB_DB_HOST: postgres
       MB_DB_PORT: 5432
     ports:
       # 宿主端口避开 Windows 系统保留段（3001-3100，Hyper-V/WinNAT 预留）：
       # 本机实测 3001 绑定会 EACCES，故用 3201。
-      - "3201:3000"
+      - "127.0.0.1:${METABASE_PORT:-3201}:3000"
     depends_on:
-      - postgres
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
 
   # Odoo 19 Community（可选服务，默认不启动）
   # 用途：P0 运行时验证 Odoo 19 的 JSON-2 API（POST /json/2/<model>/<method>，
@@ -108,22 +290,27 @@ services:
     restart: unless-stopped
     profiles: ["odoo"]
     environment:
-      # 复用 POSTGRES_* 凭据连接 postgres（compose 插值，默认 commerce/commerce）
+      # 使用独立角色 odoo_app 连接 odoo 库（由 bootstrap.sql 创建/授权）
       HOST: postgres
-      USER: ${POSTGRES_USER:-commerce}
-      PASSWORD: ${POSTGRES_PASSWORD:-commerce}
+      USER: ${ODOO_DB_USER:-odoo_app}
+      PASSWORD: ${ODOO_DB_PASSWORD:-odoo_app}
       # P0 测试用管理员口令（正式环境必须从 secret 注入）
       ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD:-admin}
       # 与业务库隔离：Odoo 使用独立数据库 odoo（init.sql 创建），
       # 避免 Odoo 在 commerce 主库中建表干扰业务/DBOS 数据。
       NAME: odoo
     ports:
-      - "8069:8069"
+      - "127.0.0.1:8069:8069"
     volumes:
       - odoo_data:/var/lib/odoo
     depends_on:
-      - postgres
+      db-bootstrap:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
   odoo_data:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:
+  alert-logs:

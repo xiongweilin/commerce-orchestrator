@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import NavLink from "@/components/NavLink";
-import TokenInput from "@/components/TokenInput";
+import SessionManager from "@/components/SessionManager";
+import { getServerUser } from "@/lib/server-auth";
 
 export const metadata: Metadata = {
   title: "运营控制台",
@@ -10,7 +11,9 @@ export const metadata: Metadata = {
   icons: [{ url: "/favicon.svg", type: "image/svg+xml" }],
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const user = await getServerUser();
+  const isSystemAdmin = user?.roles?.includes("system_admin") === true;
   return (
     <html lang="zh-CN">
       <body>
@@ -28,9 +31,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
             <NavLink href="/approvals">审批</NavLink>
             <NavLink href="/reconciliations">对账</NavLink>
             <NavLink href="/commands">命令</NavLink>
+            {isSystemAdmin && <NavLink href="/ops/inbox">运维收件箱</NavLink>}
           </nav>
           <div className="header-right">
-            <TokenInput />
+            <SessionManager />
           </div>
         </header>
         <main className="main">{children}</main>

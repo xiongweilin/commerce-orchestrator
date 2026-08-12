@@ -18,6 +18,8 @@
 | `producer` | string | 是 | 产生方域名，见第 5 节 |
 | `schemaVersion` | int | 是 | 事件 payload schema 版本，起始 1 |
 | `payload` | object | 是 | 业务负载（按类型定义） |
+| `traceparent` | string? | 否 | W3C trace context（`00-<trace-id>-<span-id>-01`）；API ingress 创建 span 后随 outbox 事件传播，worker 提取并为其建 span |
+| `tracestate` | string? | 否 | W3C trace context 附加状态（vendor 字段，随 `traceparent` 一起透传） |
 
 ## 2. 事件类型清单（命名不可改动）
 
@@ -47,7 +49,23 @@
 
 ### workflow
 
-`workflow.accepted` · `workflow.completed` · `workflow.failed` · `workflow.cancelled`
+`workflow.accepted` · `workflow.decision_recorded` · `workflow.completed` · `workflow.failed` · `workflow.cancelled`
+
+#### `workflow.decision_recorded` payload
+
+审批决定落库后由工作流域发出，worker 以 `DBOS.send(destination=workflow_id, topic=work_item_id, idempotency_key=decision_id)` 送达对应 workflow（durable decision messaging，ADR-0011）。字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `workflow_id` | uuid | 目标 workflow run id（= DBOS workflow id） |
+| `work_item_id` | uuid | 决定所属 work item id（= DBOS.send topic） |
+| `decision_id` | uuid | `WorkItemDecision` id（= DBOS.send idempotency key，防重复送达） |
+| `decision` | string | `approve \| reject \| confirm \| cancel` |
+| `actor_user_id` | uuid | 审批人 |
+| `reason` | string? | 审批备注 |
+| `submitted_version` | int | 提交时携带的版本（`expectedWorkflowVersion`） |
+
+投递语义：`DBOS.send` 幂等，重复 relay 不产生第二条业务流程；决策早于 `DBOS.recv` 时 workflow 仍能正确收到。
 
 ### effect
 

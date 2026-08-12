@@ -1,9 +1,10 @@
 """POST /v1/* write-command endpoints.
 
 Every endpoint requires an ``Idempotency-Key`` header (missing header is a
-422 ``validation_error``) and delegates to the shared idempotent command
-dispatcher in ``app.services.commands``, returning 202 Accepted with the
-dispatcher's ``{workflowId, status, statusUrl}`` result.
+422 ``validation_error``) and delegates to the WP4 ``accept_command`` facade
+in ``app.services.workflows``, returning 202 Accepted with the
+``{workflowId, status, statusUrl}`` result. Command initiation follows the
+strict domain RBAC matrix (整改计划 §四.2).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_correlation_id, get_current_user, get_session
+from app.api.deps import get_correlation_id, get_current_user, get_session, require_roles
 from app.core.uuid7 import uuid7
 from app.schemas.base import IDEMPOTENCY_KEY_HEADER, AcceptedResponse
 from app.schemas.commands import (
@@ -24,33 +25,32 @@ from app.schemas.commands import (
     ReconciliationCreate,
     ReturnCreate,
 )
-from app.services.commands import dispatch_command
+from app.services.rbac import COMMAND_INITIATE_ROLES
+from app.services.workflows import accept_command
 
 router = APIRouter(prefix="/v1", tags=["commands"])
 
 
 def _accept(
-    db: Session,
     *,
-    scope: str,
+    command,
     command_type: str,
-    payload: dict,
     key: str,
     actor_user_id: uuid.UUID,
+    db: Session,
 ) -> AcceptedResponse:
     """Dispatch a write command and shape the 202 acceptance response."""
-    result = dispatch_command(
-        db,
-        scope=scope,
-        key=key,
-        command_type=command_type,
-        payload=payload,
-        actor_user_id=actor_user_id,
+    result = accept_command(
+        command=command,
+        actor=actor_user_id,
+        idempotency_key=key,
         correlation_id=get_correlation_id() or str(uuid7()),
+        db=db,
+        command_type=command_type,
     )
     # The wire contract always reports the asynchronous acceptance status;
     # the internal run status is observable via GET /v1/workflows/{id}.
-    return AcceptedResponse.model_validate({**result, "status": "accepted"})
+    return AcceptedResponse.model_validate(result.model_dump())
 
 
 @router.post(
@@ -63,15 +63,15 @@ def create_catalog_revision(
     idempotency_key: Annotated[str, Header(alias=IDEMPOTENCY_KEY_HEADER)],
     db: Annotated[Session, Depends(get_session)],
     actor_user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+    _authorized: Annotated[bool, Depends(require_roles("catalog_owner"))],
 ) -> AcceptedResponse:
     """Submit a catalog revision (Catalog-PIM domain)."""
     return _accept(
-        db,
-        scope="catalog-revision",
+        command=body,
         command_type="catalog-revision",
-        payload=body.model_dump(mode="json"),
         key=idempotency_key,
         actor_user_id=actor_user_id,
+        db=db,
     )
 
 
@@ -85,15 +85,15 @@ def create_listing_publication(
     idempotency_key: Annotated[str, Header(alias=IDEMPOTENCY_KEY_HEADER)],
     db: Annotated[Session, Depends(get_session)],
     actor_user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+    _authorized: Annotated[bool, Depends(require_roles("catalog_owner"))],
 ) -> AcceptedResponse:
     """Create a listing publication plan (first channel: Shopify)."""
     return _accept(
-        db,
-        scope="listing-publication",
+        command=body,
         command_type="listing-publication",
-        payload=body.model_dump(mode="json"),
         key=idempotency_key,
         actor_user_id=actor_user_id,
+        db=db,
     )
 
 
@@ -107,15 +107,15 @@ def create_procurement(
     idempotency_key: Annotated[str, Header(alias=IDEMPOTENCY_KEY_HEADER)],
     db: Annotated[Session, Depends(get_session)],
     actor_user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+    _authorized: Annotated[bool, Depends(require_roles("procurement_lead"))],
 ) -> AcceptedResponse:
     """Create a procurement order (demand_detected)."""
     return _accept(
-        db,
-        scope="procurement",
+        command=body,
         command_type="procurement",
-        payload=body.model_dump(mode="json"),
         key=idempotency_key,
         actor_user_id=actor_user_id,
+        db=db,
     )
 
 
@@ -129,15 +129,15 @@ def create_return(
     idempotency_key: Annotated[str, Header(alias=IDEMPOTENCY_KEY_HEADER)],
     db: Annotated[Session, Depends(get_session)],
     actor_user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+    _authorized: Annotated[bool, Depends(require_roles("customer_service"))],
 ) -> AcceptedResponse:
     """Register a customer return case."""
     return _accept(
-        db,
-        scope="return",
+        command=body,
         command_type="return",
-        payload=body.model_dump(mode="json"),
         key=idempotency_key,
         actor_user_id=actor_user_id,
+        db=db,
     )
 
 
@@ -151,13 +151,20 @@ def create_reconciliation(
     idempotency_key: Annotated[str, Header(alias=IDEMPOTENCY_KEY_HEADER)],
     db: Annotated[Session, Depends(get_session)],
     actor_user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+    _authorized: Annotated[
+        bool, Depends(require_roles(*COMMAND_INITIATE_ROLES["reconciliation"]))
+    ],
 ) -> AcceptedResponse:
-    """Trigger a reconciliation run."""
+    """Trigger a reconciliation run.
+
+    Strict domain RBAC (整改计划 §四.2): only ``accountant`` / ``system_admin``
+    may trigger a reconciliation run; diff resolve and reads are enforced on
+    the reconciliation router.
+    """
     return _accept(
-        db,
-        scope="reconciliation",
+        command=body,
         command_type="reconciliation",
-        payload=body.model_dump(mode="json"),
         key=idempotency_key,
         actor_user_id=actor_user_id,
+        db=db,
     )

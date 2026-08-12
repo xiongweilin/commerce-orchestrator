@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "gen:types": "node scripts/gen-types.mjs"
   },
   "dependencies": {
     "next": "^16.2.0",

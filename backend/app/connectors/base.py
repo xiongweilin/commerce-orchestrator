@@ -98,7 +98,11 @@ class EffectResult:
     ``ok`` is a convenience mirror of the status: ``True`` only for
     ``succeeded``. ``remote_reference`` is the external system's stable id
     (Shopify GID / Odoo record id) when known; ``response_hash`` is the
-    canonical digest of the response payload.
+    canonical digest of the response payload. ``replayed`` is ``True`` when
+    the operation was skipped because the target state already exists (the
+    read-back idempotency strategies in the connectors); the seam maps it to
+    ``EffectSucceeded(replayed=True)`` so the workflow can observe the replay
+    without treating it as a fresh external write.
     """
 
     ok: bool
@@ -106,6 +110,7 @@ class EffectResult:
     status: str
     error: str | None
     response_hash: str | None
+    replayed: bool = False
 
     def __post_init__(self) -> None:
         if self.status not in EFFECT_STATUSES:
@@ -117,7 +122,13 @@ class EffectResult:
             raise ValueError("EffectResult.ok must mirror status == 'succeeded'")
 
     @classmethod
-    def succeeded(cls, remote_reference: str | None, response_hash: str | None) -> EffectResult:
+    def succeeded(
+        cls,
+        remote_reference: str | None,
+        response_hash: str | None,
+        *,
+        replayed: bool = False,
+    ) -> EffectResult:
         """Build a success result."""
         return cls(
             ok=True,
@@ -125,6 +136,7 @@ class EffectResult:
             status="succeeded",
             error=None,
             response_hash=response_hash,
+            replayed=replayed,
         )
 
     @classmethod

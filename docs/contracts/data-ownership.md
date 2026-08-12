@@ -15,7 +15,7 @@
 | Inventory | 库存量 | Odoo 19（权威）+ 投影 | 仅 stock move / adjustment | 禁止直接改库存字段 |
 | Sales-Purchase | 订单、PO、收货发货 | Odoo 19（权威）+ 流程表 | 渠道/采购流程受控写入 | 四眼原则 |
 | Finance | 发票/账单/贷项通知单 | Odoo 19（权威账本） | accountant 过账 | 已过账发票只能贷项通知单修正 |
-| Workflow Control | workflows / work items / events / outbox / inbox / idempotency / effect ledger | orchestrator PostgreSQL | 系统写入 | DBOS OSS + PostgreSQL |
+| Workflow Control | workflows / work items / events / outbox / inbox / idempotency / effect ledger / runtime_heartbeat / sensitive_payload | orchestrator PostgreSQL | 系统写入 | DBOS OSS + PostgreSQL |
 | Metabase | 只读运营投影 | 投影库（可重建） | 只读消费事件 | 非权威，禁止回写 |
 
 ## 2. 字段级 owner 规则
@@ -29,6 +29,7 @@
 - **已过账发票只能通过贷项通知单（credit note）修正**，禁止直接修改发票/账单记录。
 - **库存只能通过 stock move / inventory adjustment 改变**，禁止直接改写库存字段。
 - **AI 只生成建议**：不批准、不执行、不写业务权威字段；建议写入候选表并携带全部证据元数据（ADR-0009）。
+- **客户引用伪匿名**：需要匹配但无需还原的 customer ref 用 `COMMERCE_PII_HASH_KEY` 做 HMAC-SHA256，存储带 `pii:` 前缀（如 `pii:<hex>`）；明文只存在于加密 vault（`sensitive_payload`），不得写入日志/指标/普通 JSON。
 
 ## 3. 审批边界（服务端强制）
 
@@ -52,3 +53,31 @@
 - 投影仅用于读取与展示（如 Metabase、console）；消费方不得回写投影。
 - 投影更新来自事件（event-contract.md），按 `eventId` 去重，乱序以 `observedAt`/`sourceRevision` 判定新旧。
 - 对账差异一律进入 `MANUAL_RECONCILIATION`，禁止自动抹平（runbooks/reconciliation-drift.md）。
+
+## 5. 敏感数据字段契约与保留（P7 §五.3，ADR-0014）
+
+### 5.1 sensitive_payload（加密 vault）
+
+原始 webhook、敏感 shipping/customer payload 统一加密存储（Fernet，密钥 `COMMERCE_ENCRYPTION_KEY`），默认保留 30 天：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | uuid | 记录 id |
+| `purpose` | string | 用途（`customer_ref` / `shipping` / 其它） |
+| `classification` | string | 分类（如 `PII`） |
+| `owner` | string | 事实 owner（如 `commerce`） |
+| `source_type` | string | 来源类型（如 `sales_order` / `return_case`） |
+| `source_id` | string | 来源行 id |
+| `ciphertext` | text | 加密后的密文；**不保存明文** |
+| `key_version` | string | 加密密钥版本（当前 `v1`） |
+| `expires_at` | datetime? | 过期时间 = 写入时间 + `privacy_retention_days`（默认 30 天） |
+| `deleted_at` | datetime? | tombstone：清理后置位 |
+| `created_at` | datetime | 创建时间 |
+
+### 5.2 最小字段与保留策略
+
+- workflow input、outbox payload 只保存最小字段；敏感部分以 `sensitivePayloadId`（或 `pii:` HMAC 标记）引用，不保存完整 webhook。
+- 后台 backfill：对旧 `SalesOrder.customer_ref`、shipping JSON、`ReturnCase.customer_ref` 做加密替换（幂等，已带 `pii:`/`sensitivePayloadId` 的行跳过）。
+- 清理 job 每日执行（worker 内）：到期后**先清 `ciphertext`，再写 `deleted_at` tombstone**；记录删除数量/失败数量/最老过期年龄指标（`cleanup_deleted_total` / `cleanup_errors_total` / `cleanup_overdue_age_seconds`）。
+- **审计不记录内容**：日志、trace、指标、告警均不得输出明文 PII、原始请求体或 token；Dify 只接收脱敏反馈。
+- 明文 PII 列的不可逆清空（计划三.1 第 7 步）在备份验证与回滚期结束后、经单独明确批准执行；不创建 `.bak`/时间戳文档副本。

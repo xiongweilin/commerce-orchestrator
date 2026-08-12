@@ -1,0 +1,101 @@
+# P7 告警规则（整改计划「五.4」告警表）
+#
+# 指标名为 WP4/WP5/WP6 落地契约（见 WP3-REPORT 指标清单）；规则在指标未落地时
+# 不产生数据、不误报，落地后自动生效。
+# runbook_url 为仓库内相对路径；WP8 需补充对应 runbook（worker-failure /
+# privacy-cleanup / approval-expiry / alerting），提升到生产前替换为仓库真实 URL。
+
+groups:
+  - name: commerce.rules
+    rules:
+      - alert: WorkerUnavailable
+        expr: time() - commerce_worker_heartbeat_timestamp_seconds > 30
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "worker heartbeat 超过 30 秒未更新"
+          runbook_url: "docs/runbooks/worker-failure.md"
+
+      - alert: InboxBacklog
+        expr: commerce_inbox_oldest_age_seconds > 120
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "inbox 最老事件年龄超过 120 秒"
+          runbook_url: "docs/runbooks/worker-failure.md"
+
+      - alert: FailedInbox
+        expr: commerce_inbox_events{status="failed"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "存在 failed 状态的 inbox 事件"
+          runbook_url: "docs/runbooks/worker-failure.md"
+
+      - alert: OutcomeUnknown
+        expr: increase(commerce_outcome_unknown_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "资金/库存 effect 出现 outcome_unknown"
+          runbook_url: "docs/runbooks/reconciliation-drift.md"
+
+      - alert: ApiErrors5xx
+        expr: |
+          (sum(rate(commerce_http_requests_total{status=~"5.."}[5m])))
+            / clamp_min(sum(rate(commerce_http_requests_total[5m])), 1e-6) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 5xx 占比持续 5 分钟超过 1%"
+          runbook_url: "docs/runbooks/dev-environment.md"
+
+      - alert: ApiLatencyP99
+        expr: histogram_quantile(0.99, sum(rate(commerce_http_request_duration_seconds_bucket[10m])) by (le)) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p99 延迟持续 10 分钟超过 500ms"
+          runbook_url: "docs/runbooks/dev-environment.md"
+
+      - alert: ReconciliationIncomplete
+        expr: commerce_reconciliation_failed_domains > 0 or commerce_reconciliation_skipped_domains > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "对账存在 failed/skipped 域"
+          runbook_url: "docs/runbooks/reconciliation-drift.md"
+
+      - alert: ReconciliationDrift
+        expr: commerce_reconciliation_diffs_total > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "存在未解决的对账差异"
+          runbook_url: "docs/runbooks/reconciliation-drift.md"
+
+      - alert: CleanupOverdue
+        expr: commerce_cleanup_overdue_age_seconds > 86400
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "过期敏感 payload 超过 24 小时未删除"
+          runbook_url: "docs/runbooks/privacy-cleanup.md"
+
+      - alert: ApprovalExpiryRisk
+        expr: commerce_work_item_oldest_age_seconds > 29 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "pending work item 超过 29 天，临近 30 天审批到期"
+          runbook_url: "docs/runbooks/alerting.md"

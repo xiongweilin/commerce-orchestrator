@@ -19,11 +19,13 @@ proposal_json（model_id 记为 "dify:<workflow_id>"，prompt_version/rule_versi
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
 import pathlib
 import sys
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -62,7 +64,7 @@ from app.models.feedback import (
 )
 from app.models.identity import Role, RoleAssignment, User
 from app.models.workflow import WorkflowRun
-from app.services.commands import dispatch_command
+from app.services.commands import accept_command
 from app.services.work_items import submit_decision
 
 REAL_LLM_FLAG = "--real-llm"
@@ -99,12 +101,21 @@ PROPOSAL = {
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--live", action="store_true", help="执行真实命令受理（开发店/沙盒）")
+    parser.add_argument("--force", action="store_true", help="重跑已存在的候选")
+    parser.add_argument("--real-llm", action="store_true", help="使用 Dify 真实 LLM")
+    args, _ = parser.parse_known_args()
+    if not args.live:
+        print("DRY-RUN：未传 --live，只演示反馈/聚类/候选生成，不发起真实命令。")
+        print("用法：uv run python scripts/simulate_feedback_to_catalog.py --live [--real-llm]")
+        return
     engine = create_engine(os.environ["COMMERCE_DATABASE_URL"])
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     db = Session()
     try:
-        real_llm = REAL_LLM_FLAG in sys.argv and bool(os.environ.get("COMMERCE_DIFY_WORKFLOW_ID"))
-        if REAL_LLM_FLAG in sys.argv and not os.environ.get("COMMERCE_DIFY_WORKFLOW_ID"):
+        real_llm = args.real_llm and bool(os.environ.get("COMMERCE_DIFY_WORKFLOW_ID"))
+        if args.real_llm and not os.environ.get("COMMERCE_DIFY_WORKFLOW_ID"):
             print("WARN: --real-llm 已传但未设置 COMMERCE_DIFY_WORKFLOW_ID，回退到 simulated-v1")
         target_model_id = (
             f"dify:{os.environ['COMMERCE_DIFY_WORKFLOW_ID']}" if real_llm else "simulated-v1"
@@ -118,7 +129,7 @@ def main() -> None:
             .scalars()
             .first()
         )
-        if existing is not None and "--force" not in sys.argv:
+        if existing is not None and not args.force:
             print(
                 f"SKIP: 已存在 {target_model_id} 候选（candidate {existing.id}，"
                 f"status={existing.status.value}）"
@@ -238,44 +249,51 @@ def main() -> None:
             db.add(RoleAssignment(user_id=approver.id, role=Role.CATALOG_OWNER, scope="*"))
         db.commit()
 
-        result = dispatch_command(
+        accepted = accept_command(
             db,
-            scope="catalog-revision",
-            key=str(uuid.uuid4()),
-            command_type="catalog-revision",
-            payload={
-                "sku": proposal.get("sku") or "SKU-YIFU-01",
-                "title": proposal.get("title") or PROPOSAL["title"],
-                "category": proposal.get("category") or PROPOSAL["category"],
-                "description": proposal.get("description") or PROPOSAL["description"],
-                "proposed": proposal,
-                "source_refs": [{"id": str(candidate.id), "type": "catalog_change_candidate"}],
-                "source_revision": "sim-feedback-v1",
-                "evidence": {"candidate_id": str(candidate.id)},
+            command={
+                "type": "catalog-revision",
+                "payload": {
+                    "sku": proposal.get("sku") or "SKU-YIFU-01",
+                    "title": proposal.get("title") or PROPOSAL["title"],
+                    "category": proposal.get("category") or PROPOSAL["category"],
+                    "description": proposal.get("description") or PROPOSAL["description"],
+                    "proposed": proposal,
+                    "source_refs": [
+                        {"id": str(candidate.id), "type": "catalog_change_candidate"}
+                    ],
+                    "source_revision": "sim-feedback-v1",
+                    "evidence": {"candidate_id": str(candidate.id)},
+                },
             },
             actor_user_id=proposer.id,
+            idempotency_key=f"sim-fb-{uuid.uuid4()}",
             correlation_id=str(uuid7()),
         )
         db.commit()
-        run = db.get(WorkflowRun, uuid.UUID(result["workflowId"]))
-        print("catalog-revision dispatched:", run.id, "status", run.status.value)
+        run = db.get(WorkflowRun, accepted.workflow_id)
+        print("catalog-revision accepted:", run.id, "status", run.status.value)
 
-        # 审批（catalog_owner）
+        # 审批（catalog_owner；v2 主线下由 worker 创建 work item，轮询等待）
         from app.models.workflow import WorkItem, WorkItemStatus
 
-        item = (
-            db.execute(
-                select(WorkItem)
-                .where(
-                    WorkItem.workflow_id == run.id,
-                    WorkItem.status == WorkItemStatus.PENDING,
+        for _ in range(20):
+            item = (
+                db.execute(
+                    select(WorkItem)
+                    .where(
+                        WorkItem.workflow_id == run.id,
+                        WorkItem.status == WorkItemStatus.PENDING,
+                    )
+                    .order_by(WorkItem.created_at)
+                    .limit(1)
                 )
-                .order_by(WorkItem.created_at)
-                .limit(1)
+                .scalars()
+                .first()
             )
-            .scalars()
-            .first()
-        )
+            if item is not None:
+                break
+            time.sleep(1.0)
         if item is not None:
             dec = submit_decision(
                 db,

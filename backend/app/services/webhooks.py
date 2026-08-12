@@ -10,6 +10,7 @@ domain workflow state machine (a :class:`WorkflowRun`).
 from __future__ import annotations
 
 import base64
+import json
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -28,6 +29,7 @@ from app.models.projections import Projection
 from app.models.returns import ReturnCase, ReturnStatus
 from app.models.workflow import WorkflowRun, WorkflowRunStatus
 from app.services.outbox_inbox import emit_event
+from app.services.privacy import hmac_ref, store_sensitive_payload
 
 logger = get_logger("commerce.webhooks")
 
@@ -79,15 +81,33 @@ def _start_domain_entity(
     """
     if topic == "orders/create":
         customer = payload.get("customer") if isinstance(payload.get("customer"), dict) else {}
+        email = str(customer.get("email") or "") or None
+        # Plan 5.2 / data-ownership §5: never persist a plaintext email or
+        # shipping address in a business column. The customer ref column
+        # carries a pseudonymous HMAC marker; plaintext lives only in the
+        # encrypted sensitive-payload vault (30-day retention, tombstone).
+        customer_ref = hmac_ref(email) if email else None
+        shipping = payload.get("shipping_address")
+        if isinstance(shipping, dict) and shipping.get("address1"):
+            vault = store_sensitive_payload(
+                db,
+                purpose="shopify_shipping_address",
+                classification="PII",
+                owner="shopify_webhook",
+                source_type="sales_order",
+                source_id=str(payload.get("id") or ""),
+                plaintext=json.dumps(shipping, ensure_ascii=False),
+            )
+            shipping = {"sensitivePayloadId": str(vault.id)}
         order = SalesOrder(
             order_ref=payload.get("name") or f"SHOPIFY-{payload.get('id') or uuid7()}",
             shopify_order_id=str(payload["id"]) if payload.get("id") else None,
-            customer_ref=str(customer.get("email") or "") or None,
+            customer_ref=customer_ref,
             status=SalesOrderStatus.RECEIVED,
             currency=str(payload.get("currency") or "CNY"),
             total=Decimal(str(payload.get("total_price") or "0")),
             items=payload.get("line_items") or [],
-            shipping=payload.get("shipping_address"),
+            shipping=shipping,
         )
         db.add(order)
         db.flush()

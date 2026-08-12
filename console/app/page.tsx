@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { api, API_BASE } from "@/lib/api";
+import { api } from "@/lib/api";
 import { getServerToken } from "@/lib/server-auth";
 import type { PageEnvelope, WorkflowSummary } from "@/lib/types";
 import ErrorBox, { apiErrorMessage } from "@/components/ErrorBox";
-import HealthStatus from "@/components/HealthStatus";
+import HealthCards from "@/components/HealthCards";
 
 export const dynamic = "force-dynamic";
 
@@ -87,20 +87,11 @@ export default async function OverviewPage() {
 
       <div className="card">
         <h2>系统状态</h2>
-        <p>
-          后端 API 地址：<code>{API_BASE}</code>
-          （可通过环境变量 <code>NEXT_PUBLIC_API_BASE</code> 覆盖，修改后需重新构建）。
-        </p>
-        <p>
-          健康检查端点：
-          <a href={`${API_BASE}/healthz`} target="_blank" rel="noreferrer">
-            {API_BASE}/healthz
-          </a>
-        </p>
-        <HealthStatus />
+        <HealthCards />
         <p className="muted">
-          提示：如需认证访问，请在右上角输入 Token（保存在浏览器 localStorage，键
-          commerce_token），保存后点“刷新”即可让服务端组件携带该 Token 请求后端。
+          数据源：GET /readyz 与 GET /v1/ops/runtime（worker/inbox/effect/reconciliation 健康卡片）。
+          后端 /readyz、/livez、/v1/ops/* 由 WP6 在 Wave 2 实现；联调前对应卡片显示「待 WP6 联调」。
+          认证采用同源 BFF HttpOnly 会话（右上角登录），不再使用 localStorage。
         </p>
       </div>
     </div>

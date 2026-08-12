@@ -6,7 +6,17 @@ import datetime as dt
 import enum
 import uuid
 
-from sqlalchemy import JSON, DateTime, Enum, Index, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import utc_now
@@ -22,6 +32,7 @@ class OutboxStatus(enum.StrEnum):
 
 class InboxStatus(enum.StrEnum):
     PENDING = "pending"
+    PROCESSING = "processing"
     PROCESSED = "processed"
     FAILED = "failed"
 
@@ -34,10 +45,15 @@ class IdempotencyRecord(Base):
     scope: Mapped[str] = mapped_column(String(64), nullable=False)
     key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    # Vocabulary fixed to processing | completed (legacy 'pending'/'done'
+    # values are normalized by migration 0004).
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="processing")
     result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
 
@@ -76,6 +92,15 @@ class InboxEvent(Base):
     __tablename__ = "inbox_event"
     __table_args__ = (
         UniqueConstraint("consumer", "event_id", name="uq_inbox_event_consumer_event_id"),
+        # Worker claim scan: consumer + actionable + retry/backoff ordering.
+        Index(
+            "ix_inbox_event_consumer_status_next_attempt_at",
+            "consumer",
+            "status",
+            "next_attempt_at",
+        ),
+        # Generic claim/backoff scan across consumers.
+        Index("ix_inbox_event_status_next_attempt_at", "status", "next_attempt_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
@@ -88,6 +113,17 @@ class InboxEvent(Base):
         Enum(InboxStatus, native_enum=False, length=32, values_callable=enum_values),
         nullable=False,
         default=InboxStatus.PENDING,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lease_until: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

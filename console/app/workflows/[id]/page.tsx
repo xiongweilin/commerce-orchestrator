@@ -13,12 +13,12 @@ export const dynamic = "force-dynamic";
 
 function TimelineItem({ event }: { event: WorkflowEvent }) {
   const extras = Object.entries(event).filter(
-    ([key]) => key !== "eventType" && key !== "occurredAt",
+    ([key]) => key !== "type" && key !== "occurredAt",
   );
   return (
     <li className="timeline-item">
       <div className="timeline-head">
-        <span className="timeline-type">{event.eventType}</span>
+        <span className="timeline-type">{event.type}</span>
         <span className="timeline-time">{formatTime(event.occurredAt)}</span>
       </div>
       {extras.length > 0 && (
@@ -40,6 +40,8 @@ function EffectRow({ effect }: { effect: WorkflowEffect }) {
         <StatusBadge status={effect.status} />
       </td>
       <td className="mono">{effect.remoteReference ?? "—"}</td>
+      <td>{effect.attempt ?? "—"}</td>
+      <td title={effect.errorDetail ?? undefined}>{effect.errorDetail ?? "—"}</td>
     </tr>
   );
 }
@@ -162,6 +164,8 @@ export default async function WorkflowDetailPage({
                   <th>操作（operation）</th>
                   <th>状态</th>
                   <th>远端引用（remoteReference）</th>
+                  <th>尝试次数（attempt）</th>
+                  <th>错误详情（errorDetail）</th>
                 </tr>
               </thead>
               <tbody>
@@ -197,7 +201,9 @@ export default async function WorkflowDetailPage({
                 {item.status.toLowerCase() === "pending" ? (
                   <DecisionForm
                     workItemId={item.workItemId}
-                    expectedWorkflowVersion={item.expectedWorkflowVersion}
+                    expectedWorkflowVersion={
+                      item.expectedWorkflowVersion ?? item.expectedVersion ?? 1
+                    }
                   />
                 ) : null}
               </div>

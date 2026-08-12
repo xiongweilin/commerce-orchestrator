@@ -70,3 +70,11 @@ jobs:
 
       - name: Validate compose file
         run: docker compose config -q
+
+      - name: Assert required service topology
+        run: |
+          set -euo pipefail
+          services="$(docker compose config --services)"
+          for s in postgres db-bootstrap migrate api worker console prometheus grafana alertmanager alert-receiver metabase; do
+            echo "$services" | grep -qxF "$s" || { echo "missing service: $s"; exit 1; }
+          done

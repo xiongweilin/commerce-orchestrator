@@ -19,6 +19,10 @@ def _shopify_settings(**overrides) -> Settings:
         "encryption_key": "x",
         "shopify_shop_name": "test-shop",
         "shopify_access_token": "shpat_abc123",
+        # Explicitly empty: a real root `.env` must never inject client
+        # credentials and trigger a client-credentials token exchange.
+        "shopify_client_id": "",
+        "shopify_client_secret": "",
         "shopify_api_version": "2026-07",
     }
     base.update(overrides)
