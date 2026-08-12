@@ -5,7 +5,7 @@ import type { OpsRuntimeResponse, ReadyzResponse } from "@/lib/types";
 /**
  * 概览页健康卡片（服务端组件）：worker / inbox / effect / reconciliation。
  * 数据源：GET /readyz（数据库、迁移、adapter 配置、worker heartbeat）与
- * GET /v1/ops/runtime（运行信息）。两者均已实现（WP6 落地）；
+ * GET /v1/ops/runtime（运行信息）。两者均已实现；
  * 后端不可达或字段缺失时卡片显示「未知」。
  */
 

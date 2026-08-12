@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 /**
  * Failed inbox 查看 + retry 页面（仅 system_admin，计划 §2.2 / §四.2）。
  * GET /v1/ops/inbox?status=failed；retry 必须携带 Idempotency-Key。
- * 后端 ops 接口已实现（WP6 落地）；未就绪时列表显示错误提示。
+ * 后端 ops 接口已实现；未就绪时列表显示错误提示。
  */
 export default async function OpsInboxPage() {
   const user = await getServerUser();

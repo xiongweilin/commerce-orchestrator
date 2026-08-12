@@ -15,7 +15,7 @@ const NOT_READY_CODES = new Set([
 
 /**
  * 失败 inbox 重试按钮：POST /v1/ops/inbox/{id}/retry（必须携带 Idempotency-Key，计划 §2.2）。
- * 后端 ops 接口已实现（WP6 落地）；未就绪（404/405/501）时提示接口错误。
+ * 后端 ops 接口已实现；未就绪（404/405/501）时提示接口错误。
  */
 export default function RetryInboxButton({ eventId }: { eventId: string }) {
   const router = useRouter();

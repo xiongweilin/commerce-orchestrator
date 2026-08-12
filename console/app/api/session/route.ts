@@ -2,7 +2,7 @@
  * POST /api/session：接收一次 JWT，调用后端 /v1/me 验证后设置 HttpOnly 会话 + CSRF cookie。
  * DELETE /api/session：清除会话。
  *
- * 后端 /v1/me 已实现（WP6 落地）：本接口以 2xx 视为验证通过。
+ * 后端 /v1/me 已实现：本接口以 2xx 视为验证通过。
  * 开发模式可用 COMMERCE_SESSION_MOCK=1 跳过 /v1/me（仅 NODE_ENV !== "production" 时生效）。
  */
 
