@@ -42,7 +42,7 @@ npm run gen:types  # 从后端 OpenAPI 生成 TypeScript 类型（lib/generated/
 - 服务端组件经 `lib/server-auth.ts` 读取 HttpOnly 会话并直连 `COMMERCE_API_BASE`。
 - `DELETE /api/session` 退出并清除两个 cookie。
 
-> 后端 `/v1/me` 已实现（WP6 落地）；开发模式可用 `COMMERCE_SESSION_MOCK=1` 临时跳过后端验证（仅 `NODE_ENV !== "production"` 时生效）。
+> 后端 `/v1/me` 已实现；开发模式可用 `COMMERCE_SESSION_MOCK=1` 临时跳过后端验证（仅 `NODE_ENV !== "production"` 时生效）。
 
 ## 页面
 
@@ -94,5 +94,5 @@ console/
 - 工作流列表的状态筛选集合为计划 §二.1 的七个状态：`accepted / running / awaiting_approval / completed / needs_reconciliation / failed / cancelled`。
 - 对账差异的 resolve 接口可能尚未接线：后端返回 404/405/501 或对应错误码时，页面显示“接口未就绪”提示而不是崩溃。
 - 工作流事件契约字段为 `type`（不再使用 `eventType`）；审批决策提交 `expectedWorkflowVersion`（兼容读取 legacy `expectedVersion`）。
-- 后端 `/v1/me`、`/readyz`、`/livez`、`/v1/ops/*` 均已实现（WP6 落地）；后端不可达时对应卡片显示「未知」。
+- 后端 `/v1/me`、`/readyz`、`/livez`、`/v1/ops/*` 均已实现；后端不可达时对应卡片显示「未知」。
 - 所有数据页均为动态渲染（`force-dynamic`），构建时不请求后端；后端不可达时页面显示错误提示而不是构建失败。

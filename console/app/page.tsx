@@ -90,7 +90,7 @@ export default async function OverviewPage() {
         <HealthCards />
         <p className="muted">
           数据源：GET /readyz 与 GET /v1/ops/runtime（worker/inbox/effect/reconciliation 健康卡片）。
-          后端 /readyz、/livez、/v1/ops/* 均已实现（WP6 落地）；后端不可达时对应卡片显示「未知」。
+          后端 /readyz、/livez、/v1/ops/* 均已实现；后端不可达时对应卡片显示「未知」。
           认证采用同源 BFF HttpOnly 会话（右上角登录），不再使用 localStorage。
         </p>
       </div>
