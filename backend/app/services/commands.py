@@ -22,6 +22,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -53,6 +54,14 @@ from app.services.state_machines import can_transition
 logger = get_logger("commerce.commands")
 
 COMMAND_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {}
+
+# New commands are accepted as DBOS v2 workflows (orchestration_engine="dbos",
+# workflow_version=2).  The legacy inline path (dispatch_command) stays as the
+# compatibility adapter that finishes in-flight legacy_inline runs.
+DBOS_WORKFLOW_VERSION = 2
+DBOS_ORCHESTRATION_ENGINE = "dbos"
+ACCEPTED_EVENT_CONSUMER = "worker"
+IDEMPOTENCY_SCOPE_COMMAND = "command"
 
 # Machine name -> entity status enum (status columns are StrEnum-backed).
 _STATUS_ENUMS: dict[str, type] = {
@@ -218,6 +227,19 @@ def _run_result(run: WorkflowRun, extras: dict[str, Any] | None = None) -> dict[
 
 
 def _complete_run(db, run: WorkflowRun, *, extras: dict[str, Any] | None = None) -> None:
+    """Finalise a run as completed.
+
+    For DBOS v2 runs the terminal transition is owned by the workflow driver
+    (``app.workflows.definitions._complete_txn``): the v1 continuation (e.g.
+    the closing gate) only records the result here and leaves the run in
+    ``running`` so planned effects are executed first and outcome_unknown /
+    failed can still settle on the run (plan 二.4 execution order).  Legacy
+    inline runs keep the immediate completion.
+    """
+    if run.orchestration_engine == "dbos":
+        run.result_json = _run_result(run, extras)
+        db.flush()
+        return
     run.status = WorkflowRunStatus.COMPLETED
     run.result_json = _run_result(run, extras)
     emit_event(
@@ -455,7 +477,14 @@ def reconciliation_entry(
 ) -> dict[str, Any]:
     run_type = str(payload.get("run_type") or "daily")
     domains = [str(d) for d in (payload.get("domains") or ["effect"])]
-    rec_run = run_reconciliation(db, run_type=run_type, domains=domains, connectors=None)
+    from app.services.reconciliation import default_readers
+
+    rec_run = run_reconciliation(
+        db,
+        run_type=run_type,
+        domains=domains,
+        readers=default_readers(),
+    )
     _complete_run(
         db,
         run,
@@ -1098,7 +1127,7 @@ def dispatch_command(
             scope=scope,
             key=key,
             request_hash=request_hash,
-            status="done",
+            status="completed",
             result_json=result,
         )
     )
@@ -1106,8 +1135,150 @@ def dispatch_command(
     return {**result, "replayed": False}
 
 
+@dataclass(frozen=True)
+class AcceptedCommand:
+    """Result of accepting a write command as a DBOS v2 workflow run."""
+
+    workflow_id: uuid.UUID
+    workflow_type: str
+    status: str = "accepted"
+    status_url: str = ""
+    workflow_version: int = DBOS_WORKFLOW_VERSION
+    orchestration_engine: str = DBOS_ORCHESTRATION_ENGINE
+    replayed: bool = False
+    correlation_id: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Wire-shaped acceptance payload (statusUrl/status contract)."""
+        return {
+            "workflowId": str(self.workflow_id),
+            "type": self.workflow_type,
+            "status": self.status,
+            "statusUrl": self.status_url,
+            "workflowVersion": self.workflow_version,
+            "orchestrationEngine": self.orchestration_engine,
+            "replayed": self.replayed,
+            "correlationId": self.correlation_id,
+        }
+
+
+def accept_command(
+    db,
+    *,
+    command: Mapping[str, Any],
+    actor_user_id: Any = None,
+    idempotency_key: str | None = None,
+    correlation_id: str | None = None,
+) -> AcceptedCommand:
+    """Accept a write command as a DBOS v2 workflow run (P7 二.1).
+
+    Only creates the :class:`WorkflowRun` (``orchestration_engine='dbos'``,
+    ``workflow_version=2``), a minimal input and the ``workflow.accepted``
+    inbox event for the worker.  No domain state migration and no external
+    effects run here: the worker starts the v2 definition which performs the
+    domain entry (plan: accept only, never advance).
+
+    Idempotency: ``(scope='command', key=idempotency_key)`` replays the stored
+    result for the same body and raises :class:`IdempotencyConflictError` for
+    a different body.
+    """
+    if not idempotency_key:
+        raise ValidationError("idempotency_key is required to accept a command")
+    if not isinstance(command, Mapping):
+        raise ValidationError("command must be a mapping with 'type' and 'payload'")
+    command_type = str(command.get("type") or "")
+    payload = dict(command.get("payload") or {})
+    if command_type not in COMMAND_HANDLERS:
+        raise ValidationError(f"unknown command type: {command_type}")
+
+    request_hash = canonical_hash(payload)
+    existing = db.execute(
+        select(IdempotencyRecord).where(
+            IdempotencyRecord.scope == IDEMPOTENCY_SCOPE_COMMAND,
+            IdempotencyRecord.key == idempotency_key,
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise IdempotencyConflictError(
+                f"idempotency key {idempotency_key!r} was already used "
+                "with a different request body"
+            )
+        stored = existing.result_json or {}
+        return AcceptedCommand(
+            workflow_id=uuid.UUID(stored["workflowId"]),
+            workflow_type=command_type,
+            status="accepted",
+            status_url=stored.get("statusUrl", f"/v1/workflows/{stored['workflowId']}"),
+            workflow_version=int(stored.get("workflowVersion", DBOS_WORKFLOW_VERSION)),
+            orchestration_engine=str(
+                stored.get("orchestrationEngine", DBOS_ORCHESTRATION_ENGINE)
+            ),
+            replayed=True,
+            correlation_id=stored.get("correlationId"),
+        )
+
+    correlation_id = correlation_id or str(uuid7())
+    run = WorkflowRun(
+        workflow_type=command_type,
+        workflow_version=DBOS_WORKFLOW_VERSION,
+        orchestration_engine=DBOS_ORCHESTRATION_ENGINE,
+        status=WorkflowRunStatus.ACCEPTED,
+        initiated_by_user_id=_uuid(actor_user_id, field="actor_user_id"),
+        correlation_id=correlation_id,
+        # Minimal domain input: the v2 definition runs the domain entry from
+        # here; no raw webhook / full body is copied into the event payload.
+        input_json=payload,
+    )
+    db.add(run)
+    db.flush()
+
+    emit_event(
+        db,
+        event_type="workflow.accepted",
+        aggregate_type="workflow",
+        aggregate_id=str(run.id),
+        correlation_id=correlation_id,
+        producer="workflow",
+        payload={
+            "workflow_id": str(run.id),
+            "workflow_type": command_type,
+            "workflow_version": DBOS_WORKFLOW_VERSION,
+            "correlation_id": correlation_id,
+        },
+        consumers=[ACCEPTED_EVENT_CONSUMER],
+    )
+
+    accepted = AcceptedCommand(
+        workflow_id=run.id,
+        workflow_type=command_type,
+        status="accepted",
+        status_url=f"/v1/workflows/{run.id}",
+        workflow_version=DBOS_WORKFLOW_VERSION,
+        orchestration_engine=DBOS_ORCHESTRATION_ENGINE,
+        replayed=False,
+        correlation_id=correlation_id,
+    )
+    db.add(
+        IdempotencyRecord(
+            scope=IDEMPOTENCY_SCOPE_COMMAND,
+            key=idempotency_key,
+            request_hash=request_hash,
+            status="completed",
+            result_json=accepted.as_dict(),
+        )
+    )
+    db.flush()
+    return accepted
+
+
 __all__ = [
+    "ACCEPTED_EVENT_CONSUMER",
     "COMMAND_HANDLERS",
+    "DBOS_ORCHESTRATION_ENGINE",
+    "DBOS_WORKFLOW_VERSION",
+    "AcceptedCommand",
+    "accept_command",
     "advance_entity",
     "canonical_hash",
     "dispatch_command",

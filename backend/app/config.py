@@ -35,6 +35,27 @@ class Settings(BaseSettings):
     environment: str = "dev"
     log_level: str = "INFO"
 
+    # Inbox relay (WP4; field names fixed by .env.example)
+    inbox_poll_interval_ms: int = 500
+    inbox_batch_size: int = 50
+    inbox_lease_seconds: int = 30
+    inbox_max_attempts: int = 10
+    effect_max_retries: int = 3
+
+    # Privacy (WP4: HMAC pseudonymization key + retention window)
+    pii_hash_key: str = ""
+    privacy_retention_days: int = 30
+    privacy_cleanup_interval_hours: int = 24
+
+    # Minimal-privilege database roles (WP3/WP4): API and worker use
+    # separate URLs when configured; otherwise they fall back to database_url.
+    api_database_url: str | None = None
+    worker_database_url: str | None = None
+
+    # Worker process (WP3 contract: /metrics on 9101, heartbeat)
+    worker_metrics_port: int = 9101
+    worker_heartbeat_interval_seconds: int = 10
+
     # Shopify dev store
     shopify_api_version: str = "2026-07"
     shopify_shop_name: str = ""
@@ -57,6 +78,11 @@ class Settings(BaseSettings):
     # Observability
     otlp_endpoint: str = ""
     raw_payload_retention_days: int = 30
+
+    # Dev-store / sandbox safety rail: Shopify refundCreate never moves real
+    # money unless this is explicitly enabled (plan 二.4 compensation is
+    # human, never automatic; fail-closed by default).
+    allow_dev_refund: bool = False
 
 
 @lru_cache

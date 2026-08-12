@@ -35,6 +35,8 @@ from app.models.reconciliation import (
     ReconciliationRunStatus,
 )
 from app.models.returns import ReturnCase, ReturnDisposition, ReturnStatus
+from app.models.runtime import RuntimeHeartbeat
+from app.models.sensitive_payload import SensitivePayload
 from app.models.workflow import (
     WorkflowRun,
     WorkflowRunStatus,
@@ -78,10 +80,12 @@ __all__ = [
     "ReturnCase",
     "ReturnDisposition",
     "ReturnStatus",
+    "RuntimeHeartbeat",
     "Role",
     "RoleAssignment",
     "SalesOrder",
     "SalesOrderStatus",
+    "SensitivePayload",
     "TimestampMixin",
     "UUIDPkMixin",
     "User",

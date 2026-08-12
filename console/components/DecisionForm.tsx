@@ -2,8 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { api, ApiError } from "@/lib/api";
-import type { WorkItemDecision } from "@/lib/types";
+import { api, ApiError, newIdempotencyKey } from "@/lib/api";
+import type { WorkItemDecisionResponse } from "@/lib/types";
 
 /**
  * 工作项决策表单：批准 / 拒绝 + 原因。
@@ -29,11 +29,11 @@ export default function DecisionForm({
     setError(null);
     setSuccess(null);
     try {
-      const result = await api.post<WorkItemDecision>(`/v1/work-items/${workItemId}/decisions`, {
+      const result = await api.post<WorkItemDecisionResponse>(`/v1/work-items/${workItemId}/decisions`, {
         decision,
         reason: reason.trim() ? reason.trim() : undefined,
         expectedWorkflowVersion,
-      });
+      }, { idempotencyKey: newIdempotencyKey() });
       setSuccess(`已${decision === "approve" ? "批准" : "拒绝"}（状态：${result.status}）`);
       // 稍等片刻让用户看到结果提示，再刷新列表
       window.setTimeout(() => router.refresh(), 700);

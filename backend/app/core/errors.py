@@ -75,6 +75,23 @@ class ExternalSystemError(CommerceError):
     title = "External system error"
 
 
+class RetryableEffectError(ExternalSystemError):
+    """Definitive remote failure that is safe to retry (effect not applied).
+
+    Raised when the external system definitively did **not** apply the effect
+    but the failure is transient and retrying the same intent is safe (e.g.
+    HTTP 429 rate limiting received before the request was processed). Maps
+    to ``EffectFailed(retryable=True)``; the effect ledger bounds retries to
+    3 attempts, after which the effect escalates to manual reconciliation.
+
+    Distinct from :class:`OutcomeUnknownError`, which signals an **ambiguous**
+    remote outcome and must never be blind-retried.
+    """
+
+    type = "retryable-effect-error"
+    title = "Retryable effect failure"
+
+
 async def commerce_error_handler(request: Request, exc: CommerceError) -> JSONResponse:
     """Serialize a domain error as an RFC 7807 problem detail."""
     problem = exc.to_problem()
@@ -127,6 +144,7 @@ __all__ = [
     "IdempotencyConflictError",
     "NotFoundError",
     "PermissionDeniedError",
+    "RetryableEffectError",
     "ValidationError",
     "VersionConflictError",
     "commerce_error_handler",

@@ -6,7 +6,7 @@ import enum
 import uuid
 
 from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPkMixin, enum_values
 from app.schemas.events import ROLES
@@ -38,6 +38,11 @@ class User(UUIDPkMixin, TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    role_assignments: Mapped[list[RoleAssignment]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
 
 class RoleAssignment(UUIDPkMixin, Base):
     __tablename__ = "role_assignment"
@@ -51,6 +56,8 @@ class RoleAssignment(UUIDPkMixin, Base):
         nullable=False,
     )
     scope: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="role_assignments")
 
 
 __all__ = ["Role", "RoleAssignment", "User"]

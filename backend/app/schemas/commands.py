@@ -74,6 +74,31 @@ class WorkItemDecisionSubmit(BaseModel):
     expectedWorkflowVersion: int | None = Field(default=None, ge=1)
 
 
+class AcceptedCommand(BaseModel):
+    """Service-contract result of :func:`accept_command` (WP4 contract).
+
+    Carries the same fields as the wire :class:`AcceptedResponse` plus the
+    internal ``replayed`` flag so the API layer can keep metrics/telemetry.
+    """
+
+    workflowId: UUID
+    status: Literal["accepted"] = "accepted"
+    statusUrl: str
+    replayed: bool = False
+
+
+class DecisionResult(BaseModel):
+    """Service-contract result of :func:`submit_decision` (WP4 contract)."""
+
+    workItemId: UUID
+    decision: str
+    status: str
+    workflowId: UUID
+    workflowStatus: str | None = None
+    result: dict[str, Any] | None = None
+    replayed: bool = False
+
+
 class StatusUrlResponse(BaseModel):
     """Pollable status URL for an accepted workflow."""
 
@@ -86,8 +111,10 @@ CreateCommandResponse = AcceptedResponse
 
 
 __all__ = [
+    "AcceptedCommand",
     "CatalogRevisionCreate",
     "CreateCommandResponse",
+    "DecisionResult",
     "ListingPublicationCreate",
     "ProcurementCreate",
     "ReconciliationCreate",

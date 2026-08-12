@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, type FormEvent } from "react";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
-import type { AcceptedCommand } from "@/lib/types";
+import type { AcceptedResponse } from "@/lib/types";
 
 interface CommandType {
   value: string;
@@ -17,37 +17,70 @@ const COMMAND_TYPES: CommandType[] = [
   {
     value: "catalog-revision",
     label: "商品修订",
-    description: "对商品进行价格 / 库存等修订（POST /v1/catalog-revisions）",
+    description: "提交商品内容修订（契约 §2.1，POST /v1/catalog-revisions）",
     endpoint: "/v1/catalog-revisions",
-    example: { entityId: "SKU-1001", changes: { price: 199.0, stock: 50 } },
+    example: {
+      sku: "SKU-1001",
+      title: "示例商品",
+      category: "electronics",
+      proposed: { price: "199.00", stock: 50 },
+      sourceRefs: [{ id: "fb-001", type: "feedback" }],
+      sourceRevision: "r1",
+      evidence: { reviewedBy: "ops" },
+    },
   },
   {
     value: "listing-publication",
     label: "渠道上架",
-    description: "将商品发布 / 上架到渠道（POST /v1/listing-publications）",
+    description: "创建上架发布计划（契约 §2.2，POST /v1/listing-publications）",
     endpoint: "/v1/listing-publications",
-    example: { entityId: "SKU-1001", channel: "taobao", action: "publish" },
+    example: {
+      sku: "SKU-1001",
+      channel: "shopify",
+      payload: {
+        shopify: {
+          title: "示例商品",
+          descriptionHtml: "<p>描述</p>",
+          status: "active",
+          tags: ["electronics"],
+          publishedAt: "2026-08-11T00:00:00Z",
+        },
+      },
+    },
   },
   {
     value: "procurement",
     label: "采购",
-    description: "发起采购订单（POST /v1/procurements）",
+    description: "创建采购（契约 §2.3，POST /v1/procurements）",
     endpoint: "/v1/procurements",
-    example: { supplierId: "SUP-001", items: [{ sku: "SKU-1001", quantity: 100 }] },
+    example: {
+      sku: "SKU-1001",
+      qty: "100",
+      uom: "unit",
+      supplier: "供应商 A",
+      unitCost: "12.50",
+      currency: "CNY",
+    },
   },
   {
     value: "return",
     label: "退货",
-    description: "发起退货（POST /v1/returns）",
+    description: "创建退货 case（契约 §2.4，POST /v1/returns）",
     endpoint: "/v1/returns",
-    example: { orderId: "ORDER-2026-0001", reason: "客户退货" },
+    example: {
+      returnRef: "R-2026-0001",
+      shopifyOrderId: "gid://shopify/Order/123",
+      orderRef: "ORDER-2026-0001",
+      customerRef: "CUST-001",
+      reason: "客户退货",
+    },
   },
   {
     value: "reconciliation",
     label: "对账",
-    description: "发起对账运行（POST /v1/reconciliations）",
+    description: "触发对账运行（契约 §2.5，POST /v1/reconciliations）",
     endpoint: "/v1/reconciliations",
-    example: { scope: "reconciliation", channel: "all" },
+    example: { run_type: "daily", domains: ["shopify", "odoo", "ledger"], scope: {} },
   },
 ];
 
@@ -57,7 +90,7 @@ export default function CommandsPage() {
     JSON.stringify(COMMAND_TYPES[0].example, null, 2),
   );
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<AcceptedCommand | null>(null);
+  const [result, setResult] = useState<AcceptedResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const jsonValid = useMemo(() => {
@@ -99,7 +132,7 @@ export default function CommandsPage() {
 
     setSubmitting(true);
     try {
-      const res = await api.post<AcceptedCommand>(type.endpoint, payload, {
+      const res = await api.post<AcceptedResponse>(type.endpoint, payload, {
         idempotencyKey: newIdempotencyKey(),
       });
       setResult(res);

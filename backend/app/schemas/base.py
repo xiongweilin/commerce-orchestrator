@@ -17,6 +17,25 @@ request; the server deduplicates on ``(scope, key)`` via the
 ``idempotency_record`` table and returns the stored result.
 """
 
+RETRY_AFTER_HEADER = "Retry-After"
+"""Header value set to ``1`` on ``409 idempotency_in_progress`` responses."""
+
+IDEMPOTENCY_RETRY_AFTER_SECONDS = "1"
+"""The server is busy replaying the in-flight request; retry in 1 second."""
+
+ERROR_IDEMPOTENCY_IN_PROGRESS = "idempotency_in_progress"
+"""Error code for a same-key/same-body request that is still being processed."""
+
+ERROR_IDEMPOTENCY_CONFLICT = "idempotency_key_conflict"
+"""Error code for a same-key request with a different body."""
+
+# Idempotency record scopes used by the WP6 write facades.  These follow the
+# plan's "scope = endpoint-level command domain" rule and are shared with the
+# WP4 services once they take over the idempotency machinery.
+IDEMPOTENCY_SCOPE_DECISION = "work-item-decision"
+IDEMPOTENCY_SCOPE_DIFF_RESOLVE = "reconciliation-diff-resolve"
+IDEMPOTENCY_SCOPE_INBOX_RETRY = "inbox-retry"
+
 
 def _money_serializer(value: Decimal) -> str:
     return str(value)
@@ -70,9 +89,16 @@ class Page[T](BaseModel):
 
 __all__ = [
     "AcceptedResponse",
+    "ERROR_IDEMPOTENCY_CONFLICT",
+    "ERROR_IDEMPOTENCY_IN_PROGRESS",
     "ErrorBody",
     "IDEMPOTENCY_KEY_HEADER",
+    "IDEMPOTENCY_RETRY_AFTER_SECONDS",
+    "IDEMPOTENCY_SCOPE_DECISION",
+    "IDEMPOTENCY_SCOPE_DIFF_RESOLVE",
+    "IDEMPOTENCY_SCOPE_INBOX_RETRY",
     "Money",
     "Page",
+    "RETRY_AFTER_HEADER",
     "Rfc3339Datetime",
 ]

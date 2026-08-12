@@ -467,7 +467,21 @@ def main() -> int:
         default=SHOPIFY_ORDER_ID,
         help=f"Shopify order id (default {SHOPIFY_ORDER_ID})",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="执行真实外部写（Shopify 发布 / Odoo 订单；开发店沙盒）",
+    )
+    parser.add_argument(
+        "--drive-v1",
+        action="store_true",
+        help="v1 兼容：脚本直接推进状态机（legacy 演示）；v2 主线下由 worker 驱动",
+    )
     args = parser.parse_args()
+    if not args.live:
+        print("DRY-RUN：未传 --live，不执行真实外部写。")
+        print("用法：uv run python scripts/run_test_order_flow.py [ORDER_ID] --live")
+        return 0
     _load_env()
     sys.path.insert(0, str(BACKEND_DIR))
 

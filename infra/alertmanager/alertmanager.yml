@@ -1,0 +1,18 @@
+# Alertmanager 配置（P7 影子运行）
+#
+# 影子环境只投递到仓库内本地 alert receiver（compose 服务 alert-receiver，
+# 记录 alert 名称/级别/runbook URL，不记录业务 payload）。
+# 生产外部通知渠道（邮件/Slack/PagerDuty 等）留待切换阶段指定。
+
+route:
+  receiver: local-receiver
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: local-receiver
+    webhook_configs:
+      - url: http://alert-receiver:9116/alert
+        send_resolved: true

@@ -78,7 +78,7 @@ export default async function ApprovalsPage() {
             </div>
             <DecisionForm
               workItemId={item.workItemId}
-              expectedWorkflowVersion={item.expectedWorkflowVersion}
+              expectedWorkflowVersion={item.expectedWorkflowVersion ?? item.expectedVersion ?? 1}
             />
           </div>
         ))}

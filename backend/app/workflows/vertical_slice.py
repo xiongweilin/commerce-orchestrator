@@ -1,20 +1,17 @@
-"""DBOS workflows for the first vertical slice (docs/architecture.md, 21 steps).
+"""DBOS v1 legacy workflows (in-flight runs compatibility adapter, P7 二.2).
 
-Each workflow is a durable :class:`DBOS.workflow` that composes
-``@DBOS.transaction`` functions (business-DB writes via ``DBOS.sql_session``,
-exactly-once) and ``@DBOS.step`` functions (external connector calls,
-at-least-once).  Connector callables are injected through
-:func:`register_connector`; when no connector is registered a no-op stub is
-used so the slice can run in development.
+P7 WP4 replaced the v1 inline continuation + this slice with one DBOS v2
+definition set (``app.workflows.definitions``).  This module is kept only to
+finish in-flight ``legacy_inline`` / webhook-driven v1 runs: the workflow
+functions keep their names and signatures so DBOS recovery of already-started
+executions keeps working.  Effect execution no longer uses a stub or a
+mutable connector registry — it goes through the same WP5 typed seam as v2
+(``app.workflows.effect_execution``) and fails closed when the adapter cannot
+produce a typed request.
 
-Approvals are human steps: the workflows poll the business DB for pending
-work-item decisions (submitted through the API) and suspend with
-``DBOS.sleep`` while waiting -- a 30-day approval wait does not occupy a
-worker slot.
-
-This module intentionally imports ``dbos`` at module import time: the
-decorators must be applied while the module is loaded.  ``app.services`` never
-imports this module, so tests do not require a live DBOS runtime.
+This module intentionally imports ``dbos`` at module import time (decorators
+must be applied while the module is loaded).  ``app.services`` never imports
+this module, so tests do not require a live DBOS runtime.
 """
 
 from __future__ import annotations
@@ -25,16 +22,14 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from dbos import DBOS
+from pydantic import TypeAdapter
 from sqlalchemy import select
 
 from app.core.logging import get_logger
 from app.core.time import utc_now
 from app.core.uuid7 import uuid7
-from app.models.catalog import CatalogRevision, CatalogRevisionStatus
 from app.models.effect import EffectLedgerEntry, EffectStatus
-from app.models.listing import ListingPublication, ListingStatus
 from app.models.order import SalesOrder, SalesOrderStatus
-from app.models.procurement import ProcurementOrder
 from app.models.returns import ReturnCase, ReturnStatus
 from app.models.workflow import (
     WorkflowRun,
@@ -42,52 +37,22 @@ from app.models.workflow import (
     WorkItem,
     WorkItemStatus,
 )
+from app.schemas.effects import EffectExecutionOutcome, EffectExecutionRequest
 from app.services.approvals import create_work_item
 from app.services.commands import advance_entity, canonical_hash
-from app.services.effect_ledger import mark_effect, record_effect
-from app.services.outbox_inbox import (
-    emit_event,
-    register_consumer,
-)
+from app.services.effect_ledger import record_effect
+from app.services.outbox_inbox import emit_event
 from app.services.reconciliation import run_reconciliation
+from app.workflows.effect_execution import (
+    apply_effect_outcome,
+    build_effect_execution_request,
+    execute_effect_seam,
+)
 
 logger = get_logger("commerce.workflows")
 
 DEFAULT_APPROVAL_TIMEOUT_DAYS = 30
 DEFAULT_POLL_SECONDS = 60
-
-# ---------------------------------------------------------------------------
-# Connector registry (injected by app/connectors, or stub for development)
-# ---------------------------------------------------------------------------
-
-_CONNECTOR_REGISTRY: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
-
-
-def register_connector(operation: str, fn: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
-    """Register the callable that executes an effect operation.
-
-    Contract: ``fn(request_payload) -> {"ok": bool, "remote_reference": str|None,
-    "error": str|None}``.  ``ok`` must be False unless the remote system
-    confirmed success through every response signal (HTTP status, top-level
-    errors, mutation userErrors).
-    """
-    _CONNECTOR_REGISTRY[operation] = fn
-
-
-def get_connector(operation: str) -> Callable[[dict[str, Any]], dict[str, Any]] | None:
-    return _CONNECTOR_REGISTRY.get(operation)
-
-
-def _stub_connector(request: dict[str, Any]) -> dict[str, Any]:
-    logger.warning(
-        "connector_not_registered_using_stub",
-        operation=request.get("operation"),
-    )
-    return {
-        "ok": True,
-        "remote_reference": f"stub:{request.get('operation', 'unknown')}:{uuid.uuid4()}",
-        "error": None,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -133,232 +98,59 @@ def _run_state_txn(workflow_id: str) -> dict[str, Any]:
             {
                 "effect_id": str(effect.intent_id),
                 "target_system": effect.target_system,
-                "operation": effect.operation,
+                "operation": f"{effect.target_system}.{effect.operation}",
                 "idempotency_key": effect.idempotency_key,
                 "request_hash": effect.request_hash,
-                "request_payload": {
-                    "operation": f"{effect.target_system}.{effect.operation}",
-                    "idempotency_key": effect.idempotency_key,
-                    "approval_ref": workflow_id,
-                },
             }
             for effect in effects
         ],
     }
 
 
+@DBOS.transaction(name="slice_build_effect_request")
+def _build_effect_request_txn(workflow_id: str, effect: dict[str, Any]) -> dict[str, Any]:
+    """Build the WP5 typed request for a planned ledger row (fail-closed)."""
+    db = DBOS.sql_session
+    run = db.get(WorkflowRun, uuid.UUID(workflow_id))
+    if run is None:
+        raise ValueError(f"workflow run {workflow_id} not found")
+    request = build_effect_execution_request(db, run, effect)
+    return request.model_dump(mode="json")
+
+
 @DBOS.step(name="slice_execute_effect")
-def _execute_effect_step(effect: dict[str, Any]) -> dict[str, Any]:
-    """Execute one external effect through the registered connector."""
-    operation = f"{effect['target_system']}.{effect['operation']}"
-    connector = get_connector(operation) or _stub_connector
-    request = {**effect.get("request_payload", {}), "operation": operation}
-    try:
-        outcome = connector(request)
-    except Exception as exc:  # noqa: BLE001 - surface as effect failure
-        logger.exception(
-            "connector_call_failed",
-            operation=operation,
-            effect_id=effect["effect_id"],
-        )
-        outcome = {"ok": False, "remote_reference": None, "error": str(exc)}
+def _execute_effect_step(request_json: dict[str, Any]) -> dict[str, Any]:
+    """Execute one effect through the WP5 typed seam (at-least-once)."""
+    request = EffectExecutionRequest.model_validate(request_json)
+    outcome = execute_effect_seam(request)
     return {
-        "effect_id": effect["effect_id"],
-        "operation": operation,
-        "outcome": outcome,
+        "effect_id": str(request.intent_id),
+        "operation": request.operation,
+        "outcome": outcome.model_dump(mode="json"),
     }
 
 
 @DBOS.transaction(name="slice_apply_effect_outcome")
 def _apply_effect_outcome_txn(workflow_id: str, step_result: dict[str, Any]) -> None:
-    """Record the effect outcome in the ledger (never blind-retry outcome_unknown)."""
+    """Mark dispatched + persist the typed outcome + finalize the domain."""
+    from app.services.effect_ledger import effect_transition_context, mark_dispatched
+
     db = DBOS.sql_session
     effect_id = uuid.UUID(step_result["effect_id"])
     operation = str(step_result.get("operation", ""))
-    outcome = step_result["outcome"]
+    outcome = TypeAdapter(EffectExecutionOutcome).validate_python(step_result["outcome"])
     entry = db.execute(
         select(EffectLedgerEntry).where(EffectLedgerEntry.intent_id == effect_id)
     ).scalar_one_or_none()
-    if entry is None:
-        # Effect was not recorded in the ledger (e.g. order slice executed the
-        # step directly): nothing to mark, still run the finalizer.
-        logger.warning(
-            "effect_row_missing_skipping_mark",
-            effect_id=step_result["effect_id"],
-            workflow_id=workflow_id,
-        )
-        _finalize_after_effect(db, workflow_id, step_result)
-        return
-    if outcome.get("ok") is True:
-        # Effect ledger state machine requires planned -> dispatched before
-        # the final status (succeeded/failed/outcome_unknown).
-        mark_effect(db, effect_id, status="dispatched", context=_effect_context(operation))
-        mark_effect(
-            db,
-            effect_id,
-            status="succeeded",
-            remote_reference=outcome.get("remote_reference"),
-            response_hash=canonical_hash(outcome),
-            context=_effect_context(operation),
-        )
-    elif outcome.get("error") and "timeout" in str(outcome.get("error")).lower():
-        # Result cannot be confirmed: escalate, never re-dispatch blindly.
-        mark_effect(db, effect_id, status="dispatched", context=_effect_context(operation))
-        mark_effect(
-            db,
-            effect_id,
-            status="outcome_unknown",
-            error_detail=outcome.get("error"),
-            context=_effect_context(operation),
-        )
-    else:
-        mark_effect(db, effect_id, status="dispatched", context=_effect_context(operation))
-        mark_effect(
-            db,
-            effect_id,
-            status="failed",
-            error_detail=outcome.get("error"),
-            context=_effect_context(operation),
-        )
-    _finalize_after_effect(db, workflow_id, step_result)
-
-
-def _effect_context(operation: str) -> dict[str, Any]:
-    """Attest invariants the effect ledger guards require.
-
-    Credit-note effects are only legal against posted invoices; inventory
-    effects must name their change source (stock move / adjustment).
-    """
-    ctx: dict[str, Any] = {}
-    if operation in {"credit_note_create", "credit_note_validate"}:
-        ctx["invoice_posted"] = True
-    if operation in {"stock_move_create", "picking_validate", "receive_transfer"}:
-        ctx["inventory_change_source"] = "stock_move"
-    return ctx
-
-
-def _finalize_after_effect(db, workflow_id: str, step_result: dict[str, Any]) -> None:
-    """Advance the domain machine after a successful external effect."""
-    run = db.get(WorkflowRun, uuid.UUID(workflow_id))
-    if run is None:
-        return
-    operation = step_result["operation"]
-    outcome = step_result["outcome"]
-    if outcome.get("ok") is not True:
-        return
-
-    refs = _run_entity_refs(db, run)
-
-    if operation == "shopify.product_publish":
-        publishing = (
-            db.execute(
-                select(ListingPublication)
-                .where(ListingPublication.status == ListingStatus.PUBLISHING)
-                .order_by(ListingPublication.created_at.desc())
-            )
-            .scalars()
-            .all()
-        )
-        listing = _match_listing(publishing, refs)
-        if listing is not None and listing.status == ListingStatus.PUBLISHING:
-            listing.shopify_product_gid = outcome.get("remote_reference")
-            listing.remote_reference = outcome.get("remote_reference")
-            advance_entity(
-                db,
-                listing,
-                "ListingPublication",
-                "active",
-                correlation_id=run.correlation_id,
-                context={"auto": True},
-            )
-        revision = (
-            db.get(CatalogRevision, uuid.UUID(refs["revision_id"]))
-            if refs.get("revision_id")
-            else None
-        )
-        if revision is not None:
-            advance_entity(
-                db,
-                revision,
-                "CatalogRevision",
-                "official",
-                correlation_id=run.correlation_id,
-                context={"auto": True, "listing_published": True},
-            )
-            others = (
-                db.execute(
-                    select(CatalogRevision).where(
-                        CatalogRevision.sku == revision.sku,
-                        CatalogRevision.id != revision.id,
-                        CatalogRevision.status.in_(
-                            (CatalogRevisionStatus.OFFICIAL, CatalogRevisionStatus.APPROVED)
-                        ),
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for other in others:
-                advance_entity(
-                    db,
-                    other,
-                    "CatalogRevision",
-                    "superseded",
-                    correlation_id=run.correlation_id,
-                    context={"auto": True},
-                )
-
-    if operation == "shopify.refund_create":
-        case = db.get(ReturnCase, uuid.UUID(refs["case_id"])) if refs.get("case_id") else None
-        if case is not None:
-            case.shopify_refund_gid = outcome.get("remote_reference")
-            advance_entity(
-                db,
-                case,
-                "ReturnCase",
-                "refund_succeeded",
-                correlation_id=run.correlation_id,
-                context={"auto": True},
-            )
-
-    if operation in {"odoo.po_create", "odoo.po_confirm", "odoo.receive_transfer"}:
-        order = db.get(ProcurementOrder, uuid.UUID(refs["po_id"])) if refs.get("po_id") else None
-        if order is not None:
-            order.odoo_po_id = outcome.get("remote_reference") or order.odoo_po_id
-
-
-def _run_entity_refs(db, run: WorkflowRun) -> dict[str, str]:
-    """Resolve domain entity ids referenced by the run's work-item payloads."""
-    refs: dict[str, str] = {}
-    items = (
-        db.execute(
-            select(WorkItem).where(WorkItem.workflow_id == run.id).order_by(WorkItem.created_at)
-        )
-        .scalars()
-        .all()
+    if entry is not None:
+        mark_dispatched(db, effect_id, context=effect_transition_context(operation))
+    apply_effect_outcome(
+        db,
+        workflow_id=workflow_id,
+        effect_id=effect_id,
+        operation=operation,
+        outcome=outcome,
     )
-    for item in items:
-        payload = item.payload_json or {}
-        for key in ("revision_id", "listing_id", "case_id", "po_id"):
-            value = payload.get(key)
-            if value and key not in refs:
-                refs[key] = str(value)
-    return refs
-
-
-def _match_listing(
-    rows: list[ListingPublication],
-    refs: dict[str, str],
-) -> ListingPublication | None:
-    """Pick the publishing listing owned by this run."""
-    target = refs.get("revision_id") or refs.get("listing_id")
-    if not target:
-        return None
-    for row in rows:
-        payload_revision = (row.payload or {}).get("revision_id")
-        if (payload_revision and str(payload_revision) == target) or str(row.id) == target:
-            return row
-    return None
 
 
 @DBOS.transaction(name="slice_complete_run")
@@ -464,7 +256,8 @@ def _drive_effects(workflow_id: str) -> None:
             _complete_run_txn(workflow_id)
             return
         for effect in state["planned_effects"]:
-            step_result = _execute_effect_step(effect)
+            request_json = _build_effect_request_txn(workflow_id, effect)
+            step_result = _execute_effect_step(request_json)
             _apply_effect_outcome_txn(workflow_id, step_result)
 
 
@@ -559,7 +352,8 @@ def procurement_workflow(
                 continue
             if state["planned_effects"]:
                 for effect in state["planned_effects"]:
-                    step_result = _execute_effect_step(effect)
+                    request_json = _build_effect_request_txn(workflow_id, effect)
+                    step_result = _execute_effect_step(request_json)
                     _apply_effect_outcome_txn(workflow_id, step_result)
                 continue
             _complete_run_txn(workflow_id)
@@ -721,14 +515,17 @@ def _order_effect(workflow_id: str, operation: str, correlation_id: str) -> dict
     """Record + execute one order effect step through the ledger."""
     effect_id = _record_effect_txn(workflow_id, operation, {"correlation_id": correlation_id})
     target_system, _, op = operation.partition(".")
-    step_result = _execute_effect_step(
+    request_json = _build_effect_request_txn(
+        workflow_id,
         {
             "effect_id": effect_id,
             "target_system": target_system,
-            "operation": op,
-            "request_payload": {"correlation_id": correlation_id, "operation": operation},
-        }
+            "operation": operation,
+            "idempotency_key": f"{workflow_id}:{operation}",
+            "request_hash": canonical_hash({"correlation_id": correlation_id}),
+        },
     )
+    step_result = _execute_effect_step(request_json)
     _apply_effect_outcome_txn(workflow_id, step_result)
     return step_result
 
@@ -976,39 +773,10 @@ def daily_reconciliation_workflow(
         raise
 
 
-# ---------------------------------------------------------------------------
-# Worker inbox consumer: starts domain workflows from webhook events.
-# ---------------------------------------------------------------------------
-
-
-def _worker_event_handler(event) -> None:
-    payload = event.payload or {}
-    if not payload.get("webhook_id"):
-        return
-    correlation_id = event.correlation_id
-    if event.event_type == "order.received":
-        DBOS.start_workflow(
-            order_to_cash_workflow,
-            payload=payload,
-            correlation_id=correlation_id,
-        )
-    elif event.event_type == "return.case_requested":
-        DBOS.start_workflow(
-            return_to_refund_workflow,
-            payload=payload,
-            correlation_id=correlation_id,
-        )
-
-
-register_consumer("worker", _worker_event_handler)
-
-
 __all__ = [
     "catalog_change_and_listing_workflow",
     "daily_reconciliation_workflow",
-    "get_connector",
     "order_to_cash_workflow",
     "procurement_workflow",
-    "register_connector",
     "return_to_refund_workflow",
 ]

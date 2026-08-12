@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, newIdempotencyKey } from "@/lib/api";
 
 const NOT_READY_CODES = new Set([
   "not_found",
@@ -33,7 +33,7 @@ export default function ResolveDiffForm({ runId, diffId }: { runId: string; diff
     try {
       await api.post(`/v1/reconciliations/${runId}/diffs/${diffId}/resolve`, {
         note: note.trim(),
-      });
+      }, { idempotencyKey: newIdempotencyKey() });
       setMessage({ kind: "success", text: "已提交解决备注，列表已刷新。" });
       window.setTimeout(() => router.refresh(), 500);
     } catch (err) {

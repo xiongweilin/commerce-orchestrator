@@ -48,7 +48,7 @@ from app.connectors.base import (
     prefer_ipv4,
     truncate,
 )
-from app.core.errors import ExternalSystemError
+from app.core.errors import ExternalSystemError, RetryableEffectError
 from app.core.logging import get_logger
 from app.core.telemetry import get_tracer
 
@@ -84,6 +84,22 @@ _OPEN_FULFILLMENT_ORDER_STATUSES = {"OPEN", "IN_PROGRESS"}
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _payload_matches_product(payload: dict[str, Any], product: dict[str, Any]) -> bool:
+    """True when every top-level ``payload`` field already equals ``product``.
+
+    Values are compared as strings so Shopify-side type normalization does not
+    produce false drift (used by the read-back idempotency strategy: target
+    state already present == success).
+    """
+    for key, expected in payload.items():
+        actual = product.get(key)
+        if actual is None and expected is None:
+            continue
+        if actual is None or str(actual) != str(expected):
+            return False
+    return True
 
 
 class ShopifyConnector:
@@ -321,8 +337,12 @@ class ShopifyConnector:
         if status == 404:
             raise ExternalSystemError(f"Shopify {operation} not found (HTTP 404): {body}")
         if status == 429:
-            raise ExternalSystemError(
-                f"Shopify {operation} rate limited (HTTP 429); back off before retry: {body}"
+            # 429 is returned before the mutation is processed: the effect was
+            # definitively NOT applied, so retrying the same intent is safe
+            # (maps to EffectFailed(retryable=True), max 3 attempts).
+            raise RetryableEffectError(
+                f"Shopify {operation} rate limited (HTTP 429) before processing; "
+                f"the effect was not applied — retry is safe: {body}"
             )
         if status == 408 or status >= 500:
             logger.warning("shopify_request_outcome_unknown", operation=operation, status=status)
@@ -443,13 +463,29 @@ class ShopifyConnector:
         )
 
     def update_product(
-        self, gid: str, payload: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        gid: str,
+        payload: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id: str | None = None,
     ) -> EffectResult:
-        """Update a product by GID (``productUpdate``).
+        """Update a product by GID with read-back idempotency.
 
-        ``payload`` maps to ``ProductUpdateInput``; ``idempotency_key`` is
-        logged for caller-level ledger correlation (no native idempotency).
+        Reads the product first; when every top-level field in ``payload``
+        already matches the remote product, the update is skipped and the
+        result is reported ``succeeded(replayed=True)`` — the target state
+        already exists. Otherwise ``productUpdate`` runs; ``idempotency_key``
+        is logged for caller-level ledger correlation (no native idempotency).
         """
+        existing = self.get_product(gid)
+        if existing is not None and _payload_matches_product(payload, existing):
+            logger.info("shopify_product_update_replayed", gid=gid, intent_id=intent_id)
+            return EffectResult.succeeded(
+                remote_reference=gid,
+                response_hash=payload_hash({"product": existing}),
+                replayed=True,
+            )
         query = """
             mutation productUpdate(
               $identifier: ProductUpdateIdentifiers!
@@ -513,13 +549,29 @@ class ShopifyConnector:
         publication_id: str | None = None,
         publish_date: str | None = None,
         idempotency_key: str | None = None,
+        intent_id: str | None = None,
     ) -> EffectResult:
-        """Publish a product (``publishablePublish``, 2026-07 shape).
+        """Publish a product with read-back idempotency.
 
         ``input`` is a ``[PublicationInput!]!`` list; with no
         ``publication_id`` the default (Online Store) publication is used.
         ``publish_date`` defaults to now; a future date schedules publishing.
+        When the product is already published to the target publication, the
+        publish is skipped and reported ``succeeded(replayed=True)``.
         """
+        status = self.get_product_publish_status(gid)
+        if status is not None and status["isPublished"] and (
+            publication_id is None or publication_id in status["publicationIds"]
+        ):
+            logger.info(
+                "shopify_product_publish_replayed",
+                gid=gid,
+                publication_id=publication_id,
+                intent_id=intent_id,
+            )
+            return EffectResult.succeeded(
+                remote_reference=gid, response_hash=payload_hash(status), replayed=True
+            )
         publication: dict[str, Any] = {"publishDate": publish_date or _utc_now_iso()}
         if publication_id:
             publication["publicationId"] = publication_id
@@ -552,8 +604,9 @@ class ShopifyConnector:
         fulfillment_order_gid: str | None = None,
         notify_customer: bool = False,
         idempotency_key: str | None = None,
+        intent_id: str | None = None,
     ) -> EffectResult:
-        """Fulfill a whole order (``fulfillmentCreate``).
+        """Fulfill a whole order (``fulfillmentCreate``), pre-checked.
 
         2026-07 fulfills via fulfillment orders, so when
         ``fulfillment_order_gid`` is omitted the connector resolves the
@@ -562,11 +615,35 @@ class ShopifyConnector:
         compatibility; in 2026-07 the fulfillment order's assigned location
         is authoritative (a provided gid is logged, not asserted).
 
+        Idempotency strategy: the order's fulfillment orders **and existing
+        fulfillments** are read first. An existing fulfillment means the
+        effect already happened -> ``succeeded(replayed=True)``. A read
+        failure (transport/5xx) raises ``OutcomeUnknownError`` so the caller
+        routes the effect to reconciliation instead of guessing.
+
         ``tracking``: ``{"company"?, "number"?, "url"?}``.
         """
+        state = self._read_fulfillment_state(order_gid)
+        if state is None:
+            return EffectResult.failed(
+                error=f"Shopify fulfillment_create: order {order_gid} not found"
+            )
+        if state["fulfillments"]:
+            existing = state["fulfillments"][0]
+            logger.info(
+                "shopify_fulfillment_replayed",
+                order_gid=order_gid,
+                fulfillment_gid=existing.get("id"),
+                intent_id=intent_id,
+            )
+            return EffectResult.succeeded(
+                remote_reference=existing.get("id"),
+                response_hash=payload_hash(state),
+                replayed=True,
+            )
         if fulfillment_order_gid is None:
-            fulfillment_order_gid = self._resolve_fulfillment_order(
-                order_gid, preferred_location_gid=location_gid
+            fulfillment_order_gid = self._pick_fulfillment_order(
+                state["fulfillment_orders"], preferred_location_gid=location_gid
             )
             if fulfillment_order_gid is None:
                 return EffectResult.failed(
@@ -609,10 +686,28 @@ class ShopifyConnector:
         self, order_gid: str, *, preferred_location_gid: str | None = None
     ) -> str | None:
         """Return the first open fulfillment order GID for an order."""
+        state = self._read_fulfillment_state(order_gid)
+        if state is None:
+            return None
+        return self._pick_fulfillment_order(
+            state["fulfillment_orders"], preferred_location_gid=preferred_location_gid
+        )
+
+    def _read_fulfillment_state(self, order_gid: str) -> dict[str, Any] | None:
+        """Read an order's fulfillment orders + existing fulfillments.
+
+        Returns ``None`` when the order does not exist; otherwise
+        ``{"order_gid", "fulfillments": [...], "fulfillment_orders": [...]}``.
+        Transport/5xx failures raise :class:`OutcomeUnknownError` (outcome
+        ambiguous — route to reconciliation).
+        """
         query = """
-            query orderFulfillmentOrders($id: ID!) {
+            query orderFulfillmentState($id: ID!) {
               order(id: $id) {
                 id
+                fulfillments(first: 10) {
+                  edges { node { id status } }
+                }
                 fulfillmentOrders(first: 10) {
                   edges {
                     node {
@@ -625,10 +720,34 @@ class ShopifyConnector:
               }
             }
         """
-        payload = self._graphql(query, {"id": order_gid}, operation="resolve_fulfillment_order")
-        order = (payload.get("data") or {}).get("order") or {}
-        for edge in (order.get("fulfillmentOrders") or {}).get("edges") or []:
-            node = edge.get("node") or {}
+        payload = self._graphql(query, {"id": order_gid}, operation="read_fulfillment_state")
+        order = (payload.get("data") or {}).get("order")
+        if order is None:
+            return None
+        fulfillments = [
+            edge.get("node") or {}
+            for edge in (order.get("fulfillments") or {}).get("edges") or []
+            if edge.get("node")
+        ]
+        fulfillment_orders = [
+            edge.get("node") or {}
+            for edge in (order.get("fulfillmentOrders") or {}).get("edges") or []
+            if edge.get("node")
+        ]
+        return {
+            "order_gid": order_gid,
+            "fulfillments": fulfillments,
+            "fulfillment_orders": fulfillment_orders,
+        }
+
+    def _pick_fulfillment_order(
+        self,
+        fulfillment_orders: list[dict[str, Any]],
+        *,
+        preferred_location_gid: str | None = None,
+    ) -> str | None:
+        """Return the first open fulfillment order GID from a node list."""
+        for node in fulfillment_orders:
             if node.get("status") in _OPEN_FULFILLMENT_ORDER_STATUSES:
                 if preferred_location_gid and node.get("location", {}).get("id") != (
                     preferred_location_gid
@@ -931,6 +1050,105 @@ class ShopifyConnector:
             "isPublished": bool(product.get("publishedAt")),
             "publicationIds": publication_ids,
         }
+
+    def list_products(
+        self, first: int = 25, cursor: str | None = None
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """List products with publication state (reconciliation reader).
+
+        Returns ``(nodes, next_cursor)``; each node carries ``id``, ``handle``,
+        ``title``, ``productType``, ``status``, ``publishedAt``/``published``,
+        the SKUs of the first 20 variants and ``publication_ids``. Used by the
+        listing-domain canonical reconciliation reader.
+        """
+        page = max(1, min(int(first), 25))
+        query = """
+            query productsPage($after: String, $first: Int!) {
+              products(first: $first, after: $after) {
+                edges {
+                  node {
+                    id
+                    handle
+                    title
+                    productType
+                    status
+                    publishedAt
+                    variants(first: 20) {
+                      edges { node { id sku } }
+                    }
+                    resourcePublications(first: 25) {
+                      edges { node { publication { id } } }
+                    }
+                  }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+        """
+        payload = self._graphql(query, {"after": cursor, "first": page}, operation="list_products")
+        data = payload.get("data") or {}
+        edges = (data.get("products") or {}).get("edges") or []
+        page_info = (data.get("products") or {}).get("pageInfo") or {}
+        nodes: list[dict[str, Any]] = []
+        for edge in edges:
+            product = edge.get("node") or {}
+            variant_skus = [
+                variant_edge.get("node", {}).get("sku")
+                for variant_edge in (product.get("variants") or {}).get("edges") or []
+                if variant_edge.get("node", {}).get("sku")
+            ]
+            publication_ids = [
+                pub_edge.get("node", {}).get("publication", {}).get("id")
+                for pub_edge in (product.get("resourcePublications") or {}).get("edges") or []
+                if pub_edge.get("node", {}).get("publication", {}).get("id")
+            ]
+            nodes.append(
+                {
+                    "id": product.get("id"),
+                    "handle": product.get("handle"),
+                    "title": product.get("title"),
+                    "productType": product.get("productType"),
+                    "status": product.get("status"),
+                    "publishedAt": product.get("publishedAt"),
+                    "published": bool(product.get("publishedAt")),
+                    "skus": variant_skus,
+                    "publication_ids": publication_ids,
+                }
+            )
+        next_cursor = page_info.get("endCursor") if page_info.get("hasNextPage") else None
+        return nodes, next_cursor
+
+    def get_fulfillment(self, gid: str) -> dict[str, Any] | None:
+        """Fetch a fulfillment by GID; returns ``None`` when it does not exist."""
+        query = """
+            query fulfillmentById($id: ID!) {
+              fulfillment(id: $id) {
+                id
+                status
+                name
+                order { id }
+              }
+            }
+        """
+        payload = self._graphql(query, {"id": gid}, operation="get_fulfillment")
+        return (payload.get("data") or {}).get("fulfillment")
+
+    def get_refund(self, gid: str) -> dict[str, Any] | None:
+        """Fetch a refund by GID; returns ``None`` when it does not exist."""
+        query = """
+            query refundById($id: ID!) {
+              refund(id: $id) {
+                id
+                status
+                note
+                totalRefundSet {
+                  presentmentMoney { amount currencyCode }
+                }
+              }
+            }
+        """
+        payload = self._graphql(query, {"id": gid}, operation="get_refund")
+        return (payload.get("data") or {}).get("refund")
 
 
 __all__ = ["ShopifyConnector"]

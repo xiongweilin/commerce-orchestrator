@@ -4,6 +4,10 @@
 -- 挂载到 postgres 容器的 /docker-entrypoint-initdb.d/init.sql，
 -- 仅当数据卷为空、容器首次启动时由官方镜像以超级用户执行一次。
 -- 所有语句均写成幂等形式（可安全重放，但 docker-entrypoint-initdb.d 不会重跑）。
+--
+-- 说明：角色/权限引导（最小权限角色、应用库所有权、默认授权）由
+-- infra/postgres/bootstrap.sql 承担，经 compose 的 db-bootstrap 服务执行
+-- （幂等，且覆盖非空数据卷升级场景）。本文件只负责首次引导的库与扩展创建。
 -- ============================================================================
 
 -- 1) 主库（commerce）启用 pgcrypto（加密辅助函数）

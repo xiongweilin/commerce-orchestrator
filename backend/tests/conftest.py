@@ -43,6 +43,14 @@ os.environ["COMMERCE_LOG_LEVEL"] = "WARNING"
 os.environ["COMMERCE_SHOPIFY_WEBHOOK_SECRET"] = "test-webhook-secret"
 os.environ["COMMERCE_SHOPIFY_SHOP_NAME"] = "test-shop"
 os.environ["COMMERCE_SHOPIFY_ACCESS_TOKEN"] = "shpat_test_token"
+# Test isolation: never let a real root `.env` inject client credentials.
+# pydantic-settings prefers env vars over the `.env` file, so these empty
+# values keep every Settings instance free of real Shopify OAuth credentials
+# regardless of the pytest working directory.  Without this, running the
+# suite from the repo root reads COMMERCE_SHOPIFY_CLIENT_ID/SECRET from the
+# real `.env` and triggers a client-credentials token exchange (network).
+os.environ["COMMERCE_SHOPIFY_CLIENT_ID"] = ""
+os.environ["COMMERCE_SHOPIFY_CLIENT_SECRET"] = ""
 os.environ["COMMERCE_ODOO_BASE_URL"] = "http://odoo.test"
 os.environ["COMMERCE_ODOO_API_KEY"] = "odoo-test-key"
 os.environ["COMMERCE_ODOO_DB"] = "test-db"
@@ -138,6 +146,46 @@ def clean_outbox_registries() -> Iterator[None]:
     outbox_inbox._LOCAL_CONSUMER_ROUTING.update(before_routes)
     outbox_inbox.CONSUMER_HANDLERS.clear()
     outbox_inbox.CONSUMER_HANDLERS.update(before_handlers)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers so ``pytest -m`` and warnings stay clean."""
+    config.addinivalue_line(
+        "markers",
+        "integration: requires a local PostgreSQL (Docker commerce-postgres); "
+        "skipped when the database is unreachable.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "dbos_integration: requires a local PostgreSQL and the DBOS runtime; "
+        "skipped when either is unavailable.",
+    )
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Remember pytest's exit status for the DBOS clean-exit path."""
+    session.config._pytest_exitstatus = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Force a clean interpreter exit after the DBOS integration module ran.
+
+    The in-process DBOS runtime leaves its executor thread blocked inside a
+    long ``DBOS.recv`` even after ``DBOS.destroy()``; Python's normal shutdown
+    would hang joining that non-daemon thread.  The DBOS fixture marks the
+    shared config object; ``pytest_unconfigure`` is the last pytest hook (it
+    runs after the terminal reporter's summary), so we exit with pytest's own
+    status without truncating the report.
+    """
+    if getattr(config, "_dbos_force_exit", False):
+        import os
+        import sys
+
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(getattr(config, "_pytest_exitstatus", 0))
 
 
 __all__ = ["TEST_DB_FILENAME", "TEST_DB_URL"]

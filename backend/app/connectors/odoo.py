@@ -46,7 +46,7 @@ from app.connectors.base import (
     prefer_ipv4,
     truncate,
 )
-from app.core.errors import ExternalSystemError
+from app.core.errors import ExternalSystemError, RetryableEffectError
 from app.core.logging import get_logger
 from app.core.telemetry import get_tracer
 
@@ -80,6 +80,14 @@ _ADR8_FALLBACK_HINT = (
     "if unavailable, implement the ADR-0008 minimal integration module — "
     "XML-RPC is intentionally NOT expanded"
 )
+
+_CO_MARKER_PREFIX = "CO:"
+"""Idempotency marker prefix for Odoo create operations (plan 二.4).
+
+Every create-carrying effect stamps ``CO:<intent_id>`` into a searchable
+field (``client_order_ref`` / ``partner_ref`` / ``origin`` / ``ref``) so a
+replayed intent is found by a read-before-create instead of duplicated.
+"""
 
 
 class OdooApiError(ExternalSystemError):
@@ -213,6 +221,14 @@ class OdooConnector:
                 f"Odoo {model}/{method} authentication/authorization failed "
                 f"(HTTP {status}): {message}"
             )
+        if status == 429:
+            # 429 is returned before the request was processed: the per-call
+            # transaction did not run, so the effect was definitively NOT
+            # applied — retrying the same intent is safe.
+            raise RetryableEffectError(
+                f"Odoo {model}/{method} rate limited (HTTP 429) before processing; "
+                "the effect was not applied — retry is safe"
+            )
         if error_body is not None:
             # A parseable Odoo error means the per-call transaction rolled
             # back: the effect was definitively NOT applied.
@@ -268,6 +284,78 @@ class OdooConnector:
         )
 
     # ------------------------------------------------------------------ #
+    # Read helpers (idempotency read-backs and reconciliation reads)
+    # ------------------------------------------------------------------ #
+
+    def _search(
+        self,
+        model: str,
+        domain: list[list[Any]],
+        fields: list[str],
+        *,
+        limit: int = 5,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Run a read-only ``search_read`` on a model (never state-changing)."""
+        rows = self._post(
+            model,
+            "search_read",
+            {"domain": domain, "fields": fields, "limit": limit, "offset": offset},
+        )
+        if not isinstance(rows, list):
+            raise ExternalSystemError(
+                f"Odoo {model}/search_read returned an unexpected shape: {type(rows).__name__}"
+            )
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
+    def _search_one(
+        self, model: str, domain: list[list[Any]], fields: list[str]
+    ) -> dict[str, Any] | None:
+        rows = self._search(model, domain, fields, limit=1)
+        return rows[0] if rows else None
+
+    def _read_state(self, model: str, odoo_id: int) -> str:
+        """Read the ``state`` field of an Odoo record (idempotency pre-check)."""
+        row = self._search_one(model, [["id", "=", int(odoo_id)]], ["id", "state"])
+        if row is None:
+            raise ExternalSystemError(f"Odoo {model} record {odoo_id} not found")
+        return str(row.get("state") or "")
+
+    def _co_marker(self, intent_id) -> str:
+        return f"{_CO_MARKER_PREFIX}{intent_id}"
+
+    def _apply_marker(
+        self, values: dict[str, Any], intent_id, *, field: str
+    ) -> tuple[dict[str, Any], str | None]:
+        """Stamp ``CO:<intent_id>`` into ``values[field]`` and return it.
+
+        When ``intent_id`` is None the values are returned untouched with a
+        ``None`` marker. A pre-existing value that differs from the marker is
+        a contract violation (fail-closed) so read-before-create stays sound.
+        """
+        if intent_id is None:
+            return values, None
+        marker = self._co_marker(intent_id)
+        current = values.get(field)
+        if current and str(current) != marker:
+            raise ConnectorError(
+                f"Odoo create values.{field} is {current!r}; expected the "
+                f"CO:<intent_id> marker {marker!r} for idempotent create"
+            )
+        updated = dict(values)
+        updated.setdefault(field, marker)
+        return updated, marker
+
+    def _replayed_result(self, remote_reference: str, facts: dict[str, Any]) -> EffectResult:
+        """Build a replayed-success result for read-before-create/state hits."""
+        logger.info("odoo_effect_replayed", remote_reference=remote_reference)
+        return EffectResult.succeeded(
+            remote_reference=remote_reference,
+            response_hash=payload_hash(facts),
+            replayed=True,
+        )
+
+    # ------------------------------------------------------------------ #
     # Connectivity / auth probe (read-only, P0 gate)
     # ------------------------------------------------------------------ #
 
@@ -304,19 +392,39 @@ class OdooConnector:
     # ------------------------------------------------------------------ #
 
     def create_product(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a product (``product.template`` create; one variant per SKU).
+        """Create a product idempotently by SKU (``default_code``).
 
         Odoo 19 JSON-2 ``create`` takes ``vals_list`` (list of value dicts);
-        a single-record create sends ``{"vals_list": [values]}``.
+        a single-record create sends ``{"vals_list": [values]}``. When an
+        ``intent_id`` is carried (the WP5 effect seam) a product with the
+        same ``default_code`` already existing is reported as
+        ``succeeded(replayed=True)`` instead of duplicated; legacy callers
+        without an intent keep the v1 single-write behavior.
         """
+        sku = (values.get("default_code") or "").strip()
+        if intent_id is not None and sku:
+            existing = self._search_one(
+                "product.template", [["default_code", "=", sku]], ["id", "default_code"]
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write(
             "product.template", "create", {"vals_list": [values]}, operation="product_create"
         )
 
     def update_product(
-        self, odoo_id: int, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        odoo_id: int,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
         """Update a product (``product.template`` write by record id).
 
@@ -335,17 +443,44 @@ class OdooConnector:
     # ------------------------------------------------------------------ #
 
     def create_sale_order(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a draft sales order (``sale.order`` create)."""
+        """Create a draft sales order idempotently.
+
+        ``CO:<intent_id>`` is stamped into ``client_order_ref`` and searched
+        first; an existing order with the same marker is reported
+        ``succeeded(replayed=True)`` (plan 二.4 read-before-create).
+        """
+        values, marker = self._apply_marker(values, intent_id, field="client_order_ref")
+        if marker:
+            existing = self._search_one(
+                "sale.order", [["client_order_ref", "=", marker]], ["id", "client_order_ref"]
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write(
             "sale.order", "create", {"vals_list": [values]}, operation="sale_order_create"
         )
 
     def confirm_sale_order(
-        self, odoo_id: int, *, idempotency_key: str | None = None
+        self,
+        odoo_id: int,
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Confirm a sales order (``sale.order`` ``action_confirm``)."""
+        """Confirm a sales order; already-confirmed is idempotent success.
+
+        Reads ``state`` first (when called through the WP5 seam with an
+        ``intent_id``); ``sale``/``done`` mean the order is already at the
+        target state (plan 二.4 state pre-check).
+        """
+        if intent_id is not None and self._read_state("sale.order", odoo_id) in {"sale", "done"}:
+            return self._replayed_result(str(odoo_id), {"state": "sale"})
         return self._write(
             "sale.order",
             "action_confirm",
@@ -359,23 +494,53 @@ class OdooConnector:
     # ------------------------------------------------------------------ #
 
     def create_stock_move(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a stock move (``stock.move`` create)."""
+        """Create a stock move idempotently (``origin=CO:<intent_id>``)."""
+        values, marker = self._apply_marker(values, intent_id, field="origin")
+        if marker:
+            existing = self._search_one(
+                "stock.move", [["origin", "=", marker]], ["id", "origin"]
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write(
             "stock.move", "create", {"vals_list": [values]}, operation="stock_move_create"
         )
 
     def create_picking(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a picking (``stock.picking`` create)."""
+        """Create a picking idempotently (``origin=CO:<intent_id>``)."""
+        values, marker = self._apply_marker(values, intent_id, field="origin")
+        if marker:
+            existing = self._search_one(
+                "stock.picking", [["origin", "=", marker]], ["id", "origin"]
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write(
             "stock.picking", "create", {"vals_list": [values]}, operation="picking_create"
         )
 
-    def validate_picking(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
-        """Validate a picking (``stock.picking`` ``button_validate``, Odoo 19)."""
+    def validate_picking(
+        self,
+        odoo_id: int,
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
+    ) -> EffectResult:
+        """Validate a picking; already done is idempotent success (seam)."""
+        if intent_id is not None and self._read_state("stock.picking", odoo_id) == "done":
+            return self._replayed_result(str(odoo_id), {"state": "done"})
         return self._write(
             "stock.picking",
             "button_validate",
@@ -384,20 +549,50 @@ class OdooConnector:
             odoo_id=odoo_id,
         )
 
-    def receive_transfer(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
+    def receive_transfer(
+        self,
+        odoo_id: int,
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
+    ) -> EffectResult:
         """Validate an incoming transfer / receipt (``stock.picking`` ``button_validate``).
 
-        Single narrow call; over/under-receipt wizard handling is out of
-        scope here — the caller must pass a picking whose quantities are
-        complete (ADR-0008: atomic single-method actions).
+        ``odoo_id`` is the owning purchase order id: the incoming
+        ``stock.picking`` generated by purchase_stock for that PO is resolved
+        first (plan 二.4 read-before-act; no picking -> definitive failure,
+        never a silent success).  Already-done pickings are reported
+        ``succeeded(replayed=True)`` when the call carries an ``intent_id``.
         """
+        picking = self._picking_for_po(int(odoo_id))
+        if picking is None:
+            raise ExternalSystemError(
+                f"odoo.receive_transfer: no incoming stock.picking for PO {odoo_id}"
+            )
+        picking_id = int(picking["id"])
+        odoo_id = picking_id
+        if intent_id is not None and self._read_state("stock.picking", odoo_id) == "done":
+            return self._replayed_result(str(odoo_id), {"state": "done"})
         return self._write(
             "stock.picking",
-            "action_done",
+            "button_validate",
             {"ids": [odoo_id]},
             operation="receive_transfer",
             odoo_id=odoo_id,
         )
+
+    def _picking_for_po(self, po_id: int) -> dict[str, Any] | None:
+        """Resolve the incoming receipt picking auto-created for a PO."""
+        pickings = self._search(
+            "stock.picking",
+            [["purchase_id", "=", int(po_id)]],
+            ["id", "state", "origin"],
+            limit=5,
+        )
+        if not pickings:
+            return None
+        # Prefer an in-progress incoming picking; fall back to any row.
+        return next((p for p in pickings if p.get("state") != "done"), pickings[0])
 
     def update_quantity(
         self,
@@ -464,17 +659,38 @@ class OdooConnector:
     # ------------------------------------------------------------------ #
 
     def create_invoice(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a customer invoice (``account.move`` ``move_type`` out_invoice)."""
+        """Create a customer invoice idempotently (``ref=CO:<intent_id>``)."""
         body = dict(values)
         body.setdefault("move_type", "out_invoice")
+        body, marker = self._apply_marker(body, intent_id, field="ref")
+        if marker:
+            existing = self._search_one(
+                "account.move",
+                [["ref", "=", marker], ["move_type", "=", "out_invoice"]],
+                ["id", "ref"],
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write(
             "account.move", "create", {"vals_list": [body]}, operation="invoice_create"
         )
 
-    def validate_invoice(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
-        """Post an invoice (``account.move`` ``action_post``)."""
+    def validate_invoice(
+        self,
+        odoo_id: int,
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
+    ) -> EffectResult:
+        """Post an invoice; already posted is idempotent success (seam)."""
+        if intent_id is not None and self._read_state("account.move", odoo_id) == "posted":
+            return self._replayed_result(str(odoo_id), {"state": "posted"})
         return self._write(
             "account.move",
             "action_post",
@@ -484,19 +700,38 @@ class OdooConnector:
         )
 
     def create_credit_note(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a credit note (``account.move`` ``move_type`` out_refund)."""
+        """Create a credit note idempotently (``ref=CO:<intent_id>``)."""
         body = dict(values)
         body.setdefault("move_type", "out_refund")
+        body, marker = self._apply_marker(body, intent_id, field="ref")
+        if marker:
+            existing = self._search_one(
+                "account.move",
+                [["ref", "=", marker], ["move_type", "=", "out_refund"]],
+                ["id", "ref"],
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write(
             "account.move", "create", {"vals_list": [body]}, operation="credit_note_create"
         )
 
     def validate_credit_note(
-        self, odoo_id: int, *, idempotency_key: str | None = None
+        self,
+        odoo_id: int,
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Post a credit note (``account.move`` ``action_post``)."""
+        """Post a credit note; already posted is idempotent success (seam)."""
+        if intent_id is not None and self._read_state("account.move", odoo_id) == "posted":
+            return self._replayed_result(str(odoo_id), {"state": "posted"})
         return self._write(
             "account.move",
             "action_post",
@@ -506,15 +741,90 @@ class OdooConnector:
         )
 
     def create_po(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a purchase order (``purchase.order`` create)."""
+        """Create a PO idempotently (``partner_ref=CO:<intent_id>``).
+
+        Accepts either Odoo-native ``purchase.order`` values (``partner_id`` +
+        ``order_line``) or the domain business fields (``sku`` / ``supplier`` /
+        ``qty`` / ``uom`` / ``unit_cost`` / ``currency``) which are resolved
+        against the live Odoo catalog first (plan 二.4: PO create queries
+        product by SKU / partner by supplier before creating, never duplicates).
+        """
+        values, marker = self._apply_marker(values, intent_id, field="partner_ref")
+        values = self._normalize_po_values(values)
+        if marker:
+            existing = self._search_one(
+                "purchase.order", [["partner_ref", "=", marker]], ["id", "partner_ref"]
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write(
             "purchase.order", "create", {"vals_list": [values]}, operation="po_create"
         )
 
-    def confirm_po(self, odoo_id: int, *, idempotency_key: str | None = None) -> EffectResult:
-        """Confirm a purchase order (``purchase.order`` ``button_confirm``)."""
+    def _normalize_po_values(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Resolve business PO fields to Odoo-native purchase.order values."""
+        if "partner_id" in values or "order_line" in values:
+            return values
+        sku = str(values.get("sku") or "").strip()
+        supplier = str(values.get("supplier") or "").strip()
+        if not sku or not supplier:
+            raise ExternalSystemError(
+                "odoo.po_create: business values require 'sku' and 'supplier'"
+            )
+        product = self._search_one(
+            "product.template",
+            [["default_code", "=", sku]],
+            ["id", "default_code", "name"],
+        )
+        if product is None:
+            raise ExternalSystemError(
+                f"odoo.po_create: product with default_code {sku!r} not found"
+            )
+        partner = self._search_one(
+            "res.partner",
+            [["name", "=", supplier]],
+            ["id", "name"],
+        )
+        if partner is None:
+            raise ExternalSystemError(f"odoo.po_create: partner {supplier!r} not found")
+        qty = float(values.get("qty") or 1)
+        unit_cost = float(values.get("unit_cost") or 0)
+        return {
+            "partner_id": int(partner["id"]),
+            "order_line": [
+                (
+                    0,
+                    0,
+                    {
+                        "product_id": int(product["id"]),
+                        "name": product.get("name") or sku,
+                        "product_qty": qty,
+                        "price_unit": unit_cost,
+                    },
+                )
+            ],
+            "partner_ref": values.get("partner_ref"),
+        }
+
+    def confirm_po(
+        self,
+        odoo_id: int,
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
+    ) -> EffectResult:
+        """Confirm a PO; already confirmed is idempotent success (seam)."""
+        if intent_id is not None and self._read_state("purchase.order", odoo_id) in {
+            "confirmed",
+            "done",
+        }:
+            return self._replayed_result(str(odoo_id), {"state": "confirmed"})
         return self._write(
             "purchase.order",
             "button_confirm",
@@ -524,12 +834,155 @@ class OdooConnector:
         )
 
     def create_bill(
-        self, values: dict[str, Any], *, idempotency_key: str | None = None
+        self,
+        values: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+        intent_id=None,
     ) -> EffectResult:
-        """Create a vendor bill (``account.move`` ``move_type`` in_invoice)."""
+        """Create a vendor bill idempotently (``ref=CO:<intent_id>``).
+
+        Accepts either Odoo-native ``account.move`` values or the domain
+        business fields (``sku`` / ``supplier`` / ``qty`` / ``unit_cost`` /
+        ``po_id``), resolved against the live Odoo catalog first (plan 二.4).
+        """
         body = dict(values)
+        body = self._normalize_bill_values(body)
         body.setdefault("move_type", "in_invoice")
+        body, marker = self._apply_marker(body, intent_id, field="ref")
+        if marker:
+            existing = self._search_one(
+                "account.move",
+                [["ref", "=", marker], ["move_type", "=", "in_invoice"]],
+                ["id", "ref"],
+            )
+            if existing:
+                return self._replayed_result(str(existing["id"]), existing)
         return self._write("account.move", "create", {"vals_list": [body]}, operation="bill_create")
+
+    def _normalize_bill_values(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Resolve business bill fields to Odoo-native account.move values."""
+        if "partner_id" in values or "invoice_line_ids" in values:
+            return values
+        sku = str(values.get("sku") or "").strip()
+        supplier = str(values.get("supplier") or "").strip()
+        if not sku or not supplier:
+            raise ExternalSystemError(
+                "odoo.bill_create: business values require 'sku' and 'supplier'"
+            )
+        product = self._search_one(
+            "product.template",
+            [["default_code", "=", sku]],
+            ["id", "default_code", "name"],
+        )
+        if product is None:
+            raise ExternalSystemError(
+                f"odoo.bill_create: product with default_code {sku!r} not found"
+            )
+        partner = self._search_one(
+            "res.partner",
+            [["name", "=", supplier]],
+            ["id", "name"],
+        )
+        if partner is None:
+            raise ExternalSystemError(f"odoo.bill_create: partner {supplier!r} not found")
+        qty = float(values.get("qty") or 1)
+        unit_cost = float(values.get("unit_cost") or 0)
+        body: dict[str, Any] = {
+            "partner_id": int(partner["id"]),
+            "invoice_line_ids": [
+                (
+                    0,
+                    0,
+                    {
+                        "product_id": int(product["id"]),
+                        "name": product.get("name") or sku,
+                        "quantity": qty,
+                        "price_unit": unit_cost,
+                    },
+                )
+            ],
+        }
+        if values.get("ref"):
+            body["ref"] = values["ref"]
+        return body
+
+    # ------------------------------------------------------------------ #
+    # Reconciliation reads (read-only, never state-changing)
+    # ------------------------------------------------------------------ #
+
+    def read_records(
+        self,
+        model: str,
+        ids: list[int],
+        fields: list[str],
+        *,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Read Odoo records by id (effect-domain read-back)."""
+        if not ids:
+            return []
+        return self._search(
+            model, [["id", "in", [int(i) for i in ids]]], fields, limit=min(limit, 500)
+        )
+
+    def list_products(
+        self, *, offset: int = 0, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """List product templates for the catalog reconciliation domain."""
+        return self._search(
+            "product.template",
+            [],
+            ["id", "default_code", "name", "type", "categ_id"],
+            limit=min(limit, 500),
+            offset=offset,
+        )
+
+    def list_sale_orders(
+        self, *, offset: int = 0, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """List sale orders for the order reconciliation domain."""
+        return self._search(
+            "sale.order",
+            [["state", "!=", "cancel"]],
+            ["id", "name", "client_order_ref", "amount_total", "currency_id", "state"],
+            limit=min(limit, 500),
+            offset=offset,
+        )
+
+    def list_purchase_orders(
+        self, *, offset: int = 0, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """List purchase orders for the procurement reconciliation domain."""
+        return self._search(
+            "purchase.order",
+            [["state", "!=", "cancel"]],
+            ["id", "name", "partner_ref", "amount_total", "currency_id", "state"],
+            limit=min(limit, 500),
+            offset=offset,
+        )
+
+    def list_account_moves(
+        self, move_type: str, *, offset: int = 0, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """List account moves of one type (invoice/bill/credit note)."""
+        return self._search(
+            "account.move",
+            [["move_type", "=", move_type]],
+            ["id", "name", "ref", "amount_total", "currency_id", "state", "move_type"],
+            limit=min(limit, 500),
+            offset=offset,
+        )
+
+    def list_quants(self, *, offset: int = 0, limit: int = 500) -> list[dict[str, Any]]:
+        """List stock quants for the inventory reconciliation domain."""
+        return self._search(
+            "stock.quant",
+            [["quantity", "!=", 0.0]],
+            ["id", "product_id", "location_id", "quantity"],
+            limit=min(limit, 500),
+            offset=offset,
+        )
 
 
 __all__ = ["OdooApiError", "OdooConnector"]

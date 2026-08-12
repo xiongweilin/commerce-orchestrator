@@ -3,6 +3,8 @@
 from app.api.v1 import (
     commands,
     decisions,
+    me,
+    ops,
     procurements,
     reconciliations,
     return_cases,
@@ -14,6 +16,8 @@ from app.api.v1 import (
 __all__ = [
     "commands",
     "decisions",
+    "me",
+    "ops",
     "procurements",
     "reconciliations",
     "return_cases",
