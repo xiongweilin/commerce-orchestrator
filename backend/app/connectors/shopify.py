@@ -705,15 +705,18 @@ class ShopifyConnector:
             query orderFulfillmentState($id: ID!) {
               order(id: $id) {
                 id
-                fulfillments(first: 10) {
-                  edges { node { id status } }
+                fulfillments {
+                  id
+                  status
                 }
                 fulfillmentOrders(first: 10) {
                   edges {
                     node {
                       id
                       status
-                      location { id }
+                      assignedLocation {
+                        location { id }
+                      }
                     }
                   }
                 }
@@ -724,11 +727,7 @@ class ShopifyConnector:
         order = (payload.get("data") or {}).get("order")
         if order is None:
             return None
-        fulfillments = [
-            edge.get("node") or {}
-            for edge in (order.get("fulfillments") or {}).get("edges") or []
-            if edge.get("node")
-        ]
+        fulfillments = [n for n in (order.get("fulfillments") or []) if n]
         fulfillment_orders = [
             edge.get("node") or {}
             for edge in (order.get("fulfillmentOrders") or {}).get("edges") or []
@@ -749,13 +748,12 @@ class ShopifyConnector:
         """Return the first open fulfillment order GID from a node list."""
         for node in fulfillment_orders:
             if node.get("status") in _OPEN_FULFILLMENT_ORDER_STATUSES:
-                if preferred_location_gid and node.get("location", {}).get("id") != (
-                    preferred_location_gid
-                ):
+                location_id = node.get("assignedLocation", {}).get("location", {}).get("id")
+                if preferred_location_gid and location_id != preferred_location_gid:
                     logger.info(
                         "shopify_fulfillment_order_location_mismatch",
                         preferred_location_gid=preferred_location_gid,
-                        actual_location_gid=node.get("location", {}).get("id"),
+                        actual_location_gid=location_id,
                     )
                     continue
                 return node.get("id")

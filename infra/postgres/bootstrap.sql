@@ -127,7 +127,7 @@ BEGIN
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'dbos'
-      AND c.relkind IN ('r','p','v','m','S')
+      AND c.relkind IN ('r','p','v','m')
       AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = 'dbos_app')
   LOOP
     EXECUTE format('ALTER TABLE %I.%I OWNER TO dbos_app', 'dbos', obj.relname);
@@ -154,7 +154,9 @@ BEGIN
       AND c.relkind IN ('r','p','v','m','S')
       AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = 'commerce_migrator')
   LOOP
-    EXECUTE format('ALTER TABLE public.%I OWNER TO commerce_migrator', obj.relname);
+    IF obj.relkind IN ('r','p','v','m') THEN
+      EXECUTE format('ALTER TABLE public.%I OWNER TO commerce_migrator', obj.relname);
+    END IF;
     IF obj.relkind IN ('r','p') THEN
       EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO commerce_api, commerce_worker', obj.relname);
       EXECUTE format('GRANT SELECT ON TABLE public.%I TO commerce_readonly', obj.relname);
@@ -186,7 +188,7 @@ BEGIN
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'dbos'
-      AND c.relkind IN ('r','p','v','m','S')
+      AND c.relkind IN ('r','p','v','m')
       AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = 'commerce_worker')
   LOOP
     EXECUTE format('ALTER TABLE %I.%I OWNER TO commerce_worker', 'dbos', obj.relname);

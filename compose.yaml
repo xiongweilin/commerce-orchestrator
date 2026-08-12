@@ -101,6 +101,8 @@ services:
       COMMERCE_API_DATABASE_URL: postgresql+psycopg://commerce_api:commerce_api@postgres:5432/${POSTGRES_DB:-commerce}
       # DBOS 系统库由 dbos_app 角色独占
       COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://dbos_app:dbos_app@postgres:5432/dbos
+      # 容器内 Odoo 走 compose 服务名（.env 的 localhost 仅用于宿主机进程）
+      COMMERCE_ODOO_BASE_URL: http://odoo19:8069
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
@@ -128,6 +130,7 @@ services:
       COMMERCE_DATABASE_URL: postgresql+psycopg://commerce_worker:commerce_worker@postgres:5432/${POSTGRES_DB:-commerce}
       COMMERCE_WORKER_DATABASE_URL: postgresql+psycopg://commerce_worker:commerce_worker@postgres:5432/${POSTGRES_DB:-commerce}
       COMMERCE_DBOS_SYSTEM_DATABASE_URL: postgresql+psycopg://dbos_app:dbos_app@postgres:5432/dbos
+      COMMERCE_ODOO_BASE_URL: http://odoo19:8069
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -128,6 +128,13 @@ def _resolve_listing(db, run: WorkflowRun, refs: dict[str, str]) -> ListingPubli
     return None
 
 
+def _shopify_order_gid(value: str | None) -> str | None:
+    """Return the Shopify Order GID for a stored order id (numeric or GID)."""
+    if not value:
+        return None
+    text = str(value)
+    return text if text.startswith("gid://") else f"gid://shopify/Order/{text}"
+
 def _resolve_sales_order(db, run: WorkflowRun) -> SalesOrder | None:
     """Resolve the sales order owned by an order-to-cash run.
 
@@ -237,7 +244,7 @@ def build_effect_execution_request(
             raise ValueError(f"cannot build {operation} parameters: return case missing")
         parameters = param_model(
             operation=operation,
-            order_gid=case.shopify_order_id,
+            order_gid=_shopify_order_gid(case.shopify_order_id),
             amount=float(case.refund_amount) if case.refund_amount is not None else 0.0,
             note=f"refund for {case.return_ref}",
             # Fail-closed rail (plan 二.4): refunds never move real money
@@ -249,7 +256,9 @@ def build_effect_execution_request(
         order = _resolve_sales_order(db, run)
         if order is None or not order.shopify_order_id:
             raise ValueError(f"cannot build {operation} parameters: sales order missing")
-        parameters = param_model(operation=operation, order_gid=order.shopify_order_id)
+        parameters = param_model(
+            operation=operation, order_gid=_shopify_order_gid(order.shopify_order_id)
+        )
     elif operation in {"odoo.po_create", "odoo.bill_create"}:
         order = db.get(ProcurementOrder, uuid.UUID(refs["po_id"])) if refs.get("po_id") else None
         if order is None:
@@ -280,10 +289,11 @@ def build_effect_execution_request(
         parameters = param_model(
             operation=operation,
             values={
-                "order_ref": order.order_ref,
+                "items": order.items or [],
                 "currency": order.currency,
                 "total": str(order.total),
-                "items": order.items or [],
+                "customer_ref": order.customer_ref or "",
+                "partner_name": "Shopify Customer",
             },
         )
     elif operation == "odoo.sale_order_confirm":
@@ -333,10 +343,24 @@ def build_effect_execution_request(
         order = _resolve_sales_order(db, run)
         if order is None:
             raise ValueError(f"cannot build {operation} parameters: sales order missing")
-        parameters = param_model(
-            operation=operation,
-            values={"order_ref": order.order_ref, "currency": order.currency},
-        )
+        if operation == "odoo.picking_create":
+            if not order.odoo_sale_order_id:
+                raise ValueError(
+                    f"cannot build {operation} parameters: odoo sale order id unknown "
+                    f"(odoo.sale_order_create effect must succeed first)"
+                )
+            values = {"sale_order_id": int(order.odoo_sale_order_id)}
+        else:
+            if not order.odoo_sale_order_id:
+                raise ValueError(
+                    f"cannot build {operation} parameters: odoo sale order id unknown "
+                    f"(odoo.sale_order_create effect must succeed first)"
+                )
+            values = {
+                "sale_order_id": int(order.odoo_sale_order_id),
+                "order_ref": order.order_ref,
+            }
+        parameters = param_model(operation=operation, values=values)
     elif operation == "odoo.credit_note_create":
         case = db.get(ReturnCase, uuid.UUID(refs["case_id"])) if refs.get("case_id") else None
         if case is None:
