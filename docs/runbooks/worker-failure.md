@@ -59,7 +59,7 @@ curl -s -H "Authorization: Bearer <jwt>" http://localhost:8000/v1/ops/runtime
 
 ## 6. 预防
 
-- worker 独立 Docker healthcheck（主进程存活 + postgres 可达）+ `WorkerUnavailable` 告警（30s 阈值，与 `/readyz` 一致）。
+- worker 独立 Docker healthcheck（探测 worker 进程内 9101 `/livez`；bootstrap/DBOS launch 失败时进程非零退出）+ `WorkerUnavailable` 告警（30s 阈值，与 `/readyz` 一致）。
 - 每轮整改按 ADR-0010 kill injection 门禁验证恢复（worker 在 transaction 前/effect 前/effect 后/结果落库前被 kill 均可恢复）。
 - 配置变更（Shopify/Odoo adapter、DB URL）走 compose + `.env.example` 同步，避免启动期 fail-closed。
 
