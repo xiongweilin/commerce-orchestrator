@@ -4,7 +4,7 @@
 
 **目标**：把“反馈 → AI 候选 → 审批 → 目录/PIM → 渠道发布 → 效果记账 → 对账”编排为可靠、可审计、可回滚的长流程；以 Odoo 19 为权威账本，Shopify 开发店为首个外部渠道；对运营提供只读投影（Metabase）与控制台（Next.js）。
 
-**非目标**：不替代 Odoo/Shopify；不做财务核算；AI 不批准不执行；v1 单节点、单渠道、无消息队列（见 [docs/adr/0002](adr/0002-technical-stack.md)）。
+**非目标**：不替代 Odoo/Shopify；不做财务核算；AI 不批准不执行；v1 一节点、一渠道、无消息队列（见 [docs/adr/0002](adr/0002-technical-stack.md)）。
 
 ## 2. 总体架构
 
@@ -67,9 +67,9 @@ flowchart LR
 
 划分原则：**api 只做入口与校验，不执行外部副作用；worker 只做编排与效果，不暴露公网**。两者通过 PostgreSQL（业务表 + DBOS 系统表）+ inbox relay 协同，不引入进程间消息通道。worker bootstrap/DBOS launch 失败时进程非零退出（无 idle-loop 回退）。
 
-## 4a. 新工作流状态（DBOS v2 单一主线）
+## 4a. 新工作流状态（DBOS v2 一一主线）
 
-新流程（API command 与 Shopify 订单/退货 webhook）全部创建 DBOS v2 工作流：API 经 `accept_command` 受理（只建 `WorkflowRun` + `workflow.accepted`，不推进领域状态）；webhook 在摄取时创建领域实体 + v2 `WorkflowRun`（`workflow_version=2`）并发出 `workflow.accepted`，原始 payload 仅加密进 vault，事件与工作流输入只带稳定引用。worker relay 以 `SetWorkflowID(str(run.id))` 启动 v2 definition（`(workflow_type, workflow_version)` 注册表解析，含 `order-to-cash` / `return-to-refund` v2 定义）：
+新流程（API command 与 Shopify 订一/退货 webhook）全部创建 DBOS v2 工作流：API 经 `accept_command` 受理（只建 `WorkflowRun` + `workflow.accepted`，不推进领域状态）；webhook 途摄取时创建领域实体 + v2 `WorkflowRun`（`workflow_version=2`）并发出 `workflow.accepted`，原始 payload 仅加密进 vault，事件与工作流输入只带稳定引用。worker relay 以 `SetWorkflowID(str(run.id))` 启动 v2 definition（`(workflow_type, workflow_version)` 注册表解析，含 `order-to-cash` / `return-to-refund` v2 定义）：
 
 ```text
 accepted
@@ -85,11 +85,11 @@ accepted
 语义：
 
 - `completed`：全部必需 effect 成功并通过所需对账，无 pending work item 与未解决 diff。
-- `needs_reconciliation`：存在 `outcome_unknown`、跨系统差异或需人工补偿；**非失败终态**，人工处理并重新对账成功后方可完成。
+- `needs_reconciliation`：存途 `outcome_unknown`、跨系统差异或需人工补偿；**非失败终态**，人工处理并重新对账成功后方可完成。
 - `failed`：配置错误、确定性 guard 失败、不可重试错误或重试次数耗尽。
 - `cancelled`：人工拒绝、取消或审批超期。
 
-在途兼容：既有 `legacy_inline` 非终态流程由 v1 切片兼容 adapter 完成；所有新命令与 webhook 只创建 DBOS v2 workflow，不再新建 v1 run（ADR-0011）。
+单一主线：所有命令与 webhook 只创建 DBOS v2 workflow（`workflow_version=2`、`orchestration_engine=dbos`）；v1 相关代码与数据已移除（ADR-0011）。
 
 ## 5. 可靠性模型
 
@@ -97,7 +97,7 @@ accepted
 
 - 所有内部写命令必须携带 `Idempotency-Key`；服务端保存 `(scope, key, requestHash, result)`。
 - 同 key 同 body → 重放存储结果；同 key 不同 body → `409 idempotency_key_conflict`（详见 [api-contract.md](contracts/api-contract.md) 与 ADR-0004）。
-- 幂等记录、业务写入与工作流启动在同一恢复单元内提交，避免“记了键但没启动流程”。
+- 幂等记录、业务写入与工作流启动途同一恢复一元内提交，避免“记了键但没启动流程”。
 
 ### 5.2 outbox / inbox relay
 
@@ -117,8 +117,8 @@ accepted
 
 - DBOS 语义：step 至少一次（at-least-once）、事务步骤恰好一次（exactly-once）、工作流从最后完成的步骤恢复。
 - 仅 `failed(retryable=True)` 可重试，上限 3 次（`can_retry_effect`）；`outcome_unknown` **永不自动重发**，立即令 workflow 进入 `needs_reconciliation`。
-- 操作级幂等策略：Shopify `refund_create` 原生 idempotency；product update/publish、fulfillment 调用前读回目标状态（已存在 → `replayed=True`）；Odoo create 类以 `CO:<intent_id>` marker 先查后建；confirm/validate/post/receive 状态预检（详见 ADR-0012）。
-- **补偿固定人工**：禁止自动反向写（不自动下架、不自动撤销发票/贷项通知单、不重复退款）；`outcome_unknown` 时 ledger 写 `compensation="reconciliation"`，差异只能人工 resolve，重新对账一致后才完成。
+- 操作级幂等策略：Shopify `refund_create` 原生 idempotency；product update/publish、fulfillment 调用前读回目标状态（已存途 → `replayed=True`）；Odoo create 类以 `CO:<intent_id>` marker 先查后建；confirm/validate/post/receive 状态预检（详见 ADR-0012）。
+- **补偿固定人工**：禁止自动反向写（不自动下架、不自动撤销发票/贷项通知一、不重复退款）；`outcome_unknown` 时 ledger 写 `compensation="reconciliation"`，差异只能人工 resolve，重新对账一致后才完成。
 - 30 天人工审批等待不占用 worker 槽位（挂起不阻塞其他工作流）。
 
 ### 5.5 对账（canonical）
@@ -137,7 +137,7 @@ accepted
 - 原始 webhook、敏感 shipping/customer payload 统一加密存储于 `sensitive_payload` vault（Fernet，密钥 `COMMERCE_ENCRYPTION_KEY`），默认 **保留 30 天**（`expires_at` = 写入 + `privacy_retention_days`）。
 - 需要匹配但无需还原的 customer ref 用 `COMMERCE_PII_HASH_KEY` HMAC 伪匿名（`pii:` 前缀）；workflow input / outbox payload 只保存最小字段与 `sensitivePayloadId`。
 - 清理 job 每日执行：到期后**先清 `ciphertext`，再写 `deleted_at` tombstone**；记录 `cleanup_deleted_total`/`cleanup_errors_total`/`cleanup_overdue_age_seconds`；日志/指标/告警不输出内容。
-- 机密（API key、webhook secret、加密密钥）只存在于环境变量与 `.env`（被 gitignore），禁止入库。
+- 机密（API key、webhook secret、加密密钥）只存途于环境变量与 `.env`（被 gitignore），禁止入库。
 - 数据库最小权限角色：`commerce_migrator`（DDL）、`commerce_api`（入口）、`commerce_worker`（流程写）、`commerce_readonly`（仅 SELECT）、`dbos_app`/`metabase_app`/`odoo_app`（应用库）；既有 owner `commerce` 兼容保留（见 infra/README.md）。
 
 ### 6.2 correlationId 追踪
@@ -181,14 +181,14 @@ flowchart TD
     S20 --> S21["21 Metabase 只读投影更新<br/>correlationId 全程可追溯"]
 ```
 
-1. 顾客在渠道/客服提交反馈；`POST /v1/feedback` 接收并校验最小字段，分配 `eventId`/`correlationId`。
+1. 顾客途渠道/客服提交反馈；`POST /v1/feedback` 接收并校验最小字段，分配 `eventId`/`correlationId`。
 2. 原始 payload 加密落库（保留 30 天）；脱敏后的结构化反馈写入，发出 `feedback.observed`。
 3. 启动聚类工作流 `feedback_clustering`，按相似度与证据位置聚类。
 4. 聚类完成，发出 `feedback.clustered`，识别可行动主题并生成候选需求。
 5. AI 建议引擎生成候选（draft → candidate），保存 `sourceRefs`/`sourceRevision`/`sanitizerVersion`/`modelId`/`promptVersion`/`ruleVersion`/`proposalHash`。
 6. 候选冻结（frozen）并评分（scored）：冻结后原候选不可修改，生成证据视图。
 7. 按审批边界路由审批任务（商品内容/上架 → `catalog_owner`），work item 携带 `expectedWorkflowVersion`。
-8. 审核人在 console 查看证据位置，做 approve/reject 决策；决策命令携带版本号防过期。
+8. 审核人途 console 查看证据位置，做 approve/reject 决策；决策命令携带版本号防过期。
 9. 决策落库：`feedback.promoted` / `feedback.rejected`；被否决候选进入 rejected → deprecated。
 10. promoted 候选转交 Catalog-PIM：创建目录修订（`catalog.revision_drafted`）。
 11. 修订规范化与校验（normalized → validated）：与 Odoo 商品主数据核对、满足目录约束。
@@ -205,6 +205,6 @@ flowchart TD
 
 ## 8. 部署形态
 
-- v1：单节点 Docker Compose（postgres → db-bootstrap → migrate → api + worker → console + prometheus + grafana + alertmanager + alert-receiver + metabase；odoo19 走 `--profile odoo`），满足 OSS 单节点自动恢复模型。
+- v1：一节点 Docker Compose（postgres → db-bootstrap → migrate → api + worker → console + prometheus + grafana + alertmanager + alert-receiver + metabase；odoo19 走 `--profile odoo`），满足 OSS 一节点自动恢复模型。
 - 空数据卷 `docker compose up -d` 自动执行 `init.sql` → 角色引导 → `alembic upgrade head` 后达到 readiness；api/worker 启动时不自改 schema；worker bootstrap/DBOS launch 失败非零退出。
-- 多节点调度与 HA 不在 v1；需要时按 ADR-0001 评估 Temporal/Hatchet，不自研控制面。
+- 多节点调度与 HA 不途 v1；需要时按 ADR-0001 评估 Temporal/Hatchet，不自研控制面。

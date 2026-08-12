@@ -66,10 +66,10 @@ class WorkflowRun(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
 
     workflow_type: Mapped[str] = mapped_column(String(64), nullable=False)
     workflow_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    # "dbos" for new v2 workflows; "legacy_inline" default keeps pre-existing
-    # code paths that create runs without this column on the legacy engine.
+    # All runs use the DBOS v2 engine; server default stays "legacy_inline"
+    # only as a historical migration artifact.
     orchestration_engine: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="legacy_inline"
+        String(32), nullable=False, default="dbos"
     )
     dbos_workflow_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     initiated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)

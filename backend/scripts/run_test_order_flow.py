@@ -181,11 +181,9 @@ def resolve_order_and_run(db, payload: dict[str, Any], webhook_id: str) -> tuple
 
     from app.core.security import encrypt_payload
     from app.core.time import utc_now
-    from app.core.uuid7 import uuid7
     from app.models.order import SalesOrder
     from app.models.projections import Projection
-    from app.models.workflow import WorkflowRun, WorkflowRunStatus
-    from app.services.outbox_inbox import emit_event
+    from app.models.workflow import WorkflowRun
     from app.services.webhooks import ingest_shopify_webhook
 
     shopify_id = str(payload["id"])
@@ -243,131 +241,51 @@ def resolve_order_and_run(db, payload: dict[str, Any], webhook_id: str) -> tuple
         .all()
     )
     run = next(
-        (r for r in runs if str((r.input_json or {}).get("id")) == shopify_id),
+        (
+            r
+            for r in runs
+            if str(
+                (r.input_json or {}).get("id")
+                or (r.input_json or {}).get("shopify_order_id")
+                or ""
+            )
+            == shopify_id
+        ),
         None,
     )
     if run is None:
-        run = WorkflowRun(
-            workflow_type="order-to-cash",
-            workflow_version=1,
-            status=WorkflowRunStatus.RUNNING,
-            correlation_id=str(uuid7()),
-            input_json=payload,
-        )
-        db.add(run)
-        db.flush()
-        emit_event(
-            db,
-            event_type="order.received",
-            aggregate_type="sales_order",
-            aggregate_id=str(order.id),
-            correlation_id=run.correlation_id,
-            producer="shopify_adapter",
-            payload={"webhook_id": webhook_id, "topic": WEBHOOK_TOPIC, **payload},
-            consumers=["worker"],
+        raise RuntimeError(
+            "no DBOS v2 order-to-cash run found after webhook ingest; "
+            "refusing to create a legacy v1 run"
         )
     db.flush()
     return order, run, created_or_adopted
 
 
-def record_order_effect(db, run: Any, target_system: str, operation: str) -> str:
-    """Record a planned effect for the run with a deterministic intent id."""
-    from app.services.commands import canonical_hash
-    from app.services.effect_ledger import record_effect
+def drive_gates_v2(db, run: Any, users: dict[str, uuid.UUID], *, timeout_s: int = 300) -> None:
+    """Approve v2 O2C gates as they appear until the run reaches a terminal state.
 
-    intent_id = uuid.uuid5(
-        uuid.NAMESPACE_URL, f"order-to-cash:{run.id}:{target_system}.{operation}"
-    )
-    entry = record_effect(
-        db,
-        intent_id=intent_id,
-        target_system=target_system,
-        operation=operation,
-        idempotency_key=f"order-to-cash:{run.id}:{target_system}.{operation}",
-        approval_ref=run.id,
-        request_hash=canonical_hash({"order_run": str(run.id), "operation": operation}),
-    )
-    return str(entry.intent_id)
+    The DBOS worker advances the workflow and creates/plans gates and effects
+    asynchronously, so this polls pending work items, approves each one
+    (committing per decision), and exits when the run is terminal.
+    """
+    import time
 
-
-def advance_auto_segment(db, order: Any, run: Any) -> None:
-    """received -> validated -> accepted -> odo_drafted -> confirmed (auto)."""
-    from app.services.commands import advance_entity
-    from app.services.state_machines import SALES_ORDER_STATES
-
-    path = list(SALES_ORDER_STATES)
-    current = path.index(order.status.value)
-    target = path.index("confirmed")
-    if current >= target:
-        return
-    for state in path[current + 1 : target]:
-        advance_entity(
-            db,
-            order,
-            "SalesOrder",
-            state,
-            correlation_id=run.correlation_id,
-            context={"auto": True},
-        )
-    record_order_effect(db, run, "odoo", "sale_order_create")
-    record_order_effect(db, run, "odoo", "sale_order_confirm")
-    advance_entity(
-        db,
-        order,
-        "SalesOrder",
-        "confirmed",
-        correlation_id=run.correlation_id,
-        context={"auto": True},
-    )
-
-
-def ensure_reserve_gate(db, order: Any, run: Any, users: dict[str, uuid.UUID]) -> None:
-    """Create the first human gate (inventory reservation) at ``confirmed``."""
     from sqlalchemy import select
 
     from app.models.workflow import WorkflowRunStatus, WorkItem, WorkItemStatus
-    from app.services.approvals import create_work_item
-
-    if order.status.value != "confirmed":
-        return
-    pending = (
-        db.execute(
-            select(WorkItem).where(
-                WorkItem.workflow_id == run.id,
-                WorkItem.status == WorkItemStatus.PENDING,
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if any((item.payload_json or {}).get("next_step") == "reserve" for item in pending):
-        return
-    create_work_item(
-        db,
-        workflow_id=run.id,
-        kind="approval",
-        title=f"Approve inventory reservation for {order.order_ref}",
-        required_roles=["inventory_supervisor"],
-        payload={
-            "order_ref": order.order_ref,
-            "four_eyes_area": "inventory",
-            "proposed_by_user_id": str(users["proposer"]),
-            "next_step": "reserve",
-        },
-        expected_version=run.version,
-    )
-    run.status = WorkflowRunStatus.AWAITING_APPROVAL
-    db.flush()
-
-
-def drive_gates(db, run: Any, users: dict[str, uuid.UUID]) -> None:
-    """Approve every pending O2C gate in order through the approval service."""
-    from sqlalchemy import select
-
-    from app.models.workflow import WorkItem, WorkItemStatus
     from app.services.approvals import submit_decision
 
-    for step_name, approver_key in O2C_GATES:
+    deadline = time.monotonic() + timeout_s
+    last_error: str | None = None
+    while time.monotonic() < deadline:
+        db.refresh(run)
+        if run.status in (
+            WorkflowRunStatus.COMPLETED,
+            WorkflowRunStatus.FAILED,
+            WorkflowRunStatus.NEEDS_RECONCILIATION,
+        ):
+            return
         pending = (
             db.execute(
                 select(WorkItem).where(
@@ -378,21 +296,31 @@ def drive_gates(db, run: Any, users: dict[str, uuid.UUID]) -> None:
             .scalars()
             .all()
         )
-        item = next(
-            (i for i in pending if (i.payload_json or {}).get("next_step") == step_name),
-            None,
-        )
-        if item is None:
-            continue
-        submit_decision(
-            db,
-            work_item_id=item.id,
-            user_id=users[approver_key],
-            decision="approve",
-            reason=f"run_test_order_flow: approve {step_name} gate",
-            expected_workflow_version=item.expected_version,
-        )
-
+        acted = False
+        for item in pending:
+            step = (item.payload_json or {}).get("next_step")
+            approver_key = dict(O2C_GATES).get(step)
+            if approver_key is None:
+                continue
+            try:
+                submit_decision(
+                    db,
+                    work_item_id=item.id,
+                    user_id=users[approver_key],
+                    decision="approve",
+                    reason=f"run_test_order_flow: approve {step} gate (v2)",
+                    expected_workflow_version=item.expected_version,
+                )
+                db.commit()
+                acted = True
+            except Exception as exc:  # noqa: BLE001 - retry on the next poll
+                last_error = f"{step}: {exc}"
+        if not acted:
+            time.sleep(2)
+    raise RuntimeError(
+        f"v2 O2C gates did not finish within {timeout_s}s "
+        f"(run={run.status.value}; last_error={last_error})"
+    )
 
 def project_inventory(db, connector: Any) -> dict[str, Any]:
     """Write the variant inventory projection (owner ``shopify_inventory``)."""
@@ -472,11 +400,6 @@ def main() -> int:
         action="store_true",
         help="执行真实外部写（Shopify 发布 / Odoo 订单；开发店沙盒）",
     )
-    parser.add_argument(
-        "--drive-v1",
-        action="store_true",
-        help="v1 兼容：脚本直接推进状态机（legacy 演示）；v2 主线下由 worker 驱动",
-    )
     args = parser.parse_args()
     if not args.live:
         print("DRY-RUN：未传 --live，不执行真实外部写。")
@@ -536,16 +459,21 @@ def main() -> int:
             payload = build_fallback_payload(args.shopify_order_id)
         webhook_id = str(uuid.uuid4())
 
-        # 3-6) single DB transaction: users, ingest/resolve, state machine,
+        # 3-6) users, ingest/resolve (commit), v2 gate driving,
         #      inventory projection, reconciliation.
         db = SessionLocal()
         try:
             users = ensure_users(db)
             order, run, created_or_adopted = resolve_order_and_run(db, payload, webhook_id)
-            advance_auto_segment(db, order, run)
-            ensure_reserve_gate(db, order, run, users)
-            drive_gates(db, run, users)
-            db.flush()
+            if int(run.workflow_version or 0) != 2 or run.orchestration_engine != "dbos":
+                raise RuntimeError(
+                    f"expected DBOS v2 run, got engine={run.orchestration_engine!r} "
+                    f"version={run.workflow_version!r}"
+                )
+            # Commit the webhook ingest so the worker can start the v2 workflow,
+            # then approve gates as the DBOS driver creates them.
+            db.commit()
+            drive_gates_v2(db, run, users, timeout_s=300)
 
             inventory = project_inventory(db, connector)
 

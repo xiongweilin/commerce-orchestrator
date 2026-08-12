@@ -141,7 +141,7 @@
 规范化字段（P7 §四.1，OpenAPI schema 为前后端唯一契约源）：
 
 - 事件保留契约字段 `type`（前端读取 `type`，不读旧字段）。
-- work item 以 `expectedWorkflowVersion` 为 canonical 字段；兼容期内同时返回 legacy `expectedVersion`；补充 `workflowId`、`createdAt`。
+- work item 以 `expectedWorkflowVersion` 为 canonical 字段；补充 `workflowId`、`createdAt`。
 - effect 补充 `remoteReference`（远端引用）、`attempt`（尝试次数）、`errorDetail`（截断后非敏感错误详情）。
 - `needs_reconciliation` 不是失败终态：存在 `outcome_unknown`/跨系统差异/需人工补偿时进入，人工处置并重新对账成功后方可完成。
 
@@ -267,7 +267,7 @@ Shopify webhook 入口（异步处理）。
 
 - 校验：对原始请求体计算 Base64 HMAC-SHA256，与 `X-Shopify-Hmac-Sha256` 常量时间比较；缺失或失败 → `401 unauthenticated`。
 - 去重：按 `X-Shopify-Webhook-Id` 去重（inbox 唯一键 `(consumer=shopify-webhook, eventId)`）。
-- 处理：原始体加密留存（默认 30 天，`sensitive_payload` vault）、幂等入库、创建领域实体（`SalesOrder` / `ReturnCase`）、创建 DBOS v2 `WorkflowRun`（`workflow_version=2`）并发出 `workflow.accepted` 供 relay 启动 v2 定义；领域事件（如 `orders/create` → `order.received`、`refunds/create` → `return.case_requested`）只携带稳定引用，不再路由到 legacy v1 slice；成功 → `200 {"received": true, "deduplicated": bool}`。
+- 处理：原始体加密留存（默认 30 天，`sensitive_payload` vault）、幂等入库、创建领域实体（`SalesOrder` / `ReturnCase`）、创建 DBOS v2 `WorkflowRun`（`workflow_version=2`）并发出 `workflow.accepted` 供 relay 启动 v2 定义；领域事件（如 `orders/create` → `order.received`、`refunds/create` → `return.case_requested`）只携带稳定引用；成功 → `200 {"received": true, "deduplicated": bool}`。
 - 容忍乱序与漏投；以 `updated_at` 增量对账兜底（runbooks/reconciliation-drift.md）。
 
 ## 5. 健康检查与运维接口（写）

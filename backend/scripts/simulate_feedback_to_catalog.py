@@ -220,7 +220,7 @@ def main() -> None:
             i.status = FeedbackStatus.PROMOTED_TO_CATALOG_CHANGE
         db.commit()
 
-        # 6) 商品修订审批（dispatch_command -> catalog_owner 审批 -> 上架 effect planned）
+        # 6) 商品修订审批（accept_command -> catalog_owner 审批 -> 上架 effect planned）
         proposer = db.execute(
             select(User).where(User.email == "proposer@x.com")
         ).scalar_one_or_none()

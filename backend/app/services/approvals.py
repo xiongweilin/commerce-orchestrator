@@ -6,7 +6,7 @@ a :class:`WorkflowRun`.  Submitting a decision enforces:
 - the work item exists and is pending (not expired / already decided);
 - the decision is one of ``approve|reject|confirm|cancel``;
 - the submitted ``expected_workflow_version`` matches the current
-  :class:`WorkflowRun` version (v2) or the item's snapshot (legacy inline);
+  :class:`WorkflowRun` version (v2);
 - the user holds one of the required roles (compliance may veto catalog /
   listing work items with ``compliance_vetoable`` payload);
 - the four-eyes rule for refund / PO / inventory / accounting work items
@@ -14,14 +14,9 @@ a :class:`WorkflowRun`.  Submitting a decision enforces:
 - the unique :class:`WorkItemDecision` per work item (one winner under
   concurrency, others get a 409-style :class:`ConflictError`).
 
-Decision delivery depends on the owning run's engine:
-
-- ``legacy_inline`` runs (compatibility adapter for in-flight v1 workflows)
-  run the registered next-step continuation synchronously in the same
-  transaction, exactly as before the P7 refactor.
-- ``dbos`` runs (P7 v2) record the decision and emit ``workflow.decision_recorded``
-  into the worker inbox; the worker ``DBOS.send``s it and the workflow applies
-  the continuation after receiving it via ``DBOS.recv`` (durable approval).
+Decision delivery (v2 only): the decision is recorded and ``workflow.decision_recorded``
+is emitted into the worker inbox; the worker ``DBOS.send``s it and the workflow
+applies the continuation after receiving it via ``DBOS.recv`` (durable approval).
 """
 
 from __future__ import annotations
@@ -410,7 +405,7 @@ def submit_decision(
     compare ``expected_workflow_version`` against the current run version ->
     insert the unique :class:`WorkItemDecision`, update the item, bump the
     workflow/item versions -> write ``workflow.decision_recorded`` into the
-    worker inbox (dbos runs) or run the inline continuation (legacy runs).
+    worker inbox (v2 DBOS runs).
 
     Concurrent approvals: the unique ``WorkItemDecision.work_item_id``
     constraint lets exactly one succeed; the rest raise
@@ -458,11 +453,8 @@ def submit_decision(
     if expected_workflow_version is None:
         raise ValidationError("expected_workflow_version is required")
 
-    # Compare against the *current* run version (plan 二.3), not a snapshot;
-    # legacy runs keep the item's snapshot comparison.
-    current_version = (
-        run.version if run.orchestration_engine == "dbos" else item.expected_version
-    )
+    # Compare against the *current* run version (plan 二.3), not a snapshot.
+    current_version = run.version
     if expected_workflow_version != current_version:
         raise VersionConflictError(
             f"expected workflow version {expected_workflow_version} does not match "
@@ -536,18 +528,10 @@ def submit_decision(
         )
         step_result: dict[str, Any] = {}
         run_workflow_status = run.status
-    else:
-        # Legacy compatibility adapter: run the continuation synchronously.
-        step_result = apply_domain_continuation(
-            db,
-            run=run,
-            item=item,
-            user_id=user_id,
-            decision=decision,
-            reason=reason,
+    else:  # pragma: no cover - legacy_inline runs were removed with v1
+        raise ValueError(
+            f"submit_decision supports only dbos runs; got {run.orchestration_engine!r}"
         )
-        run.version += 1
-        run_workflow_status = run.status
 
     result = DecisionResult(
         work_item_id=item.id,

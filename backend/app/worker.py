@@ -2,7 +2,7 @@
 
 Responsibilities:
 
-- bootstrap DBOS (v2 definitions + v1 legacy slice) and **exit non-zero** on
+- bootstrap DBOS (v2 single-mainline definitions) and **exit non-zero** on
   any bootstrap/launch failure — there is no idle-loop fallback;
 - run the inbox relay loop (SKIP LOCKED claim, lease recovery, backoff,
   dead-letter) for the ``worker`` consumer;

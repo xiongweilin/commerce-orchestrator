@@ -3,7 +3,7 @@
 ``configure_dbos`` never imports DBOS at module import time -- the ``dbos``
 package is imported lazily inside functions so that ``app.services`` and unit
 tests never require a live DBOS runtime.  Only this module,
-``app.workflows.definitions`` and ``app.workflows.vertical_slice`` import
+``app.workflows.definitions`` imports
 ``dbos`` at all.
 
 :func:`start_worker` launches the DBOS runtime and returns; the blocking
@@ -70,12 +70,8 @@ def start_worker() -> None:
     cfg = configure_dbos()["config"]
     # Importing the modules registers the @DBOS.workflow/@DBOS.step/
     # @DBOS.scheduled functions in the global registry before launch:
-    # - definitions: the v2 single mainline (workflow_version=2);
-    # - vertical_slice: the v1 legacy slice finishing in-flight runs.
-    from app.workflows import (  # noqa: F401
-        definitions,
-        vertical_slice,
-    )
+    # definitions: the v2 single mainline (workflow_version=2).
+    from app.workflows import definitions  # noqa: F401
 
     DBOS(config=DBOSConfig(**cfg))
     DBOS.launch()

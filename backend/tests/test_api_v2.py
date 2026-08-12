@@ -5,7 +5,7 @@ The reconciliation trigger follows the plan matrix (accountant /
 system_admin); ``tests/test_api.py`` covers the positive path with an
 accountant user.  The write command endpoints are accept-only for DBOS v2
 runs (WP4), so tests that need a concrete work item seed the run through the
-service layer (``dispatch_command``, legacy inline engine) instead of the
+service layer (v2 runs seeded with ``v2_helpers.start_v2_run``) instead of the
 command endpoint — this keeps the decision HTTP contract testable without a
 live worker and independent of the command path's engine.
 """
@@ -16,13 +16,14 @@ import uuid
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from v2_helpers import start_v2_run
 
 from app.models.audit import AuditLog
 from app.models.identity import User
 from app.models.messaging import IdempotencyRecord, InboxEvent, InboxStatus
 from app.models.reconciliation import ReconciliationDiff
-from app.models.workflow import WorkItem, WorkItemDecision
-from app.services.commands import canonical_hash, dispatch_command
+from app.models.workflow import WorkItemDecision
+from app.services.commands import canonical_hash
 from app.services.reconciliation import run_reconciliation
 from app.services.workflows import IDEMPOTENCY_SCOPE_DECISION
 
@@ -198,35 +199,22 @@ def test_read_matrix(client: TestClient, make_user, auth_headers) -> None:
 
 def _seed_procurement_work_item(db, proposer) -> tuple[str, str, int]:
     """Seed a procurement run + first work item via the service layer."""
-    result = dispatch_command(
+    run, items = start_v2_run(
         db,
-        scope=f"seed-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="procurement",
-        payload={"sku": "SKU-D", "qty": "1", "supplier": "ACME", "unit_cost": "1.00"},
+        "procurement",
+        {"sku": "SKU-D", "qty": "1", "supplier": "ACME", "unit_cost": "1.00"},
         actor_user_id=proposer,
     )
-    item = (
-        db.execute(select(WorkItem).where(WorkItem.workflow_id == uuid.UUID(result["workflowId"])))
-        .scalars()
-        .one()
-    )
+    item = items[0]
     db.commit()
-    return result["workflowId"], str(item.id), item.expected_version or 1
+    return str(run.id), str(item.id), item.expected_version or 1
 
 
 def _seed_catalog_revision(db, owner, sku: str = "SKU-C1") -> str:
     """Seed a catalog-revision run via the service layer; return workflow id."""
-    result = dispatch_command(
-        db,
-        scope=f"catalog-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="catalog-revision",
-        payload={"sku": sku},
-        actor_user_id=owner,
-    )
+    run, _items = start_v2_run(db, "catalog-revision", {"sku": sku}, actor_user_id=owner)
     db.commit()
-    return result["workflowId"]
+    return str(run.id)
 
 
 def test_system_admin_does_not_implicitly_approve(
@@ -540,7 +528,6 @@ def test_workflow_detail_normalized_fields(
     assert item["workflowId"] == workflow_id
     assert item["createdAt"]
     assert item["expectedWorkflowVersion"] == 1
-    assert item["expectedVersion"] == 1  # legacy compatibility field
     # Effect normalization fields are present whenever effects exist; assert
     # the shape on an approval that records an effect.
     approver = make_user(["catalog_owner", "budget_owner"])
@@ -550,6 +537,24 @@ def test_workflow_detail_normalized_fields(
         headers={**auth_headers(approver, ["catalog_owner"]), "Idempotency-Key": "norm-approve-1"},
     )
     assert approved.status_code == 200
+    # v2: the worker applies the continuation after DBOS.recv; simulate that
+    # step (mirrors app.workflows.definitions._apply_decision_txn) so the
+    # effect normalization shape can be asserted without a live runtime.
+    from app.models.workflow import WorkflowRun, WorkItem
+    from app.services.approvals import apply_domain_continuation
+
+    run = db.get(WorkflowRun, uuid.UUID(workflow_id))
+    item = db.get(WorkItem, uuid.UUID(item["workItemId"]))
+    run.version += 1
+    apply_domain_continuation(
+        db,
+        run=run,
+        item=item,
+        user_id=approver,
+        decision="approve",
+        reason=None,
+    )
+    db.commit()
     detail2 = client.get(f"/v1/workflows/{workflow_id}", headers=auth).json()
     assert detail2["effects"]
     effect = detail2["effects"][0]

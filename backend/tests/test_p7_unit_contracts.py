@@ -17,20 +17,19 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from v2_helpers import start_v2_run
 
 from app.config import Settings
 from app.connectors.odoo import OdooConnector
 from app.connectors.shopify import ShopifyConnector
 from app.models.identity import User
-from app.models.workflow import WorkItem
 from app.schemas.effects import (
     EFFECT_PARAMETER_MODELS,
     EffectExecutionRequest,
     validate_effect_parameter_coverage,
 )
 from app.schemas.events import EFFECT_OPS, ROLES
-from app.services.commands import COMMAND_HANDLERS, dispatch_command
+from app.services.commands import COMMAND_HANDLERS
 from app.services.effect_ledger import _OP_METHOD, _dispatch_kwargs
 from app.services.rbac import (
     COMMAND_INITIATE_ROLES,
@@ -121,19 +120,13 @@ def test_inactive_user_cannot_submit_decision(
     is rejected (401) even when they hold the required role."""
     proposer = make_user(["procurement_lead"])
     approver = make_user(["budget_owner"])
-    result = dispatch_command(
+    run, items = start_v2_run(
         db,
-        scope=f"inactive-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="procurement",
-        payload={"sku": "SKU-I", "qty": "1", "supplier": "ACME", "unit_cost": "1.00"},
+        "procurement",
+        {"sku": "SKU-I", "qty": "1", "supplier": "ACME", "unit_cost": "1.00"},
         actor_user_id=proposer,
     )
-    item = (
-        db.execute(select(WorkItem).where(WorkItem.workflow_id == uuid.UUID(result["workflowId"])))
-        .scalars()
-        .one()
-    )
+    item = items[0]
     db.get(User, approver).is_active = False
     db.commit()
 

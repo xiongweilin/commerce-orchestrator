@@ -33,6 +33,7 @@ import psycopg
 import pytest
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
+from v2_helpers import start_v2_run
 
 from app.core.time import utc_now
 from app.core.uuid7 import uuid7
@@ -42,7 +43,7 @@ from app.models.order import SalesOrder
 from app.models.sensitive_payload import SensitivePayload
 from app.models.workflow import WorkflowRun, WorkItem, WorkItemDecision
 from app.services.approvals import submit_decision
-from app.services.commands import accept_command, dispatch_command
+from app.services.commands import accept_command
 from app.services.outbox_inbox import (
     claim_inbox_batch,
     emit_event,
@@ -441,23 +442,13 @@ def test_two_users_concurrent_approval_only_one_succeeds(pg_factory) -> None:
     approver_a = _make_user(pg_factory, ["budget_owner"])
     approver_b = _make_user(pg_factory, ["budget_owner"])
     with pg_factory() as db:
-        result = dispatch_command(
+        run, items = start_v2_run(
             db,
-            scope=f"seed-{uuid.uuid4()}",
-            key=f"key-{uuid.uuid4()}",
-            command_type="procurement",
-            payload={"sku": "SKU-APPROVE", "qty": "1", "supplier": "ACME", "unit_cost": "1"},
+            "procurement",
+            {"sku": "SKU-APPROVE", "qty": "1", "supplier": "ACME", "unit_cost": "1"},
             actor_user_id=proposer,
         )
-        item = (
-            db.execute(
-                select(WorkItem).where(
-                    WorkItem.workflow_id == uuid.UUID(result["workflowId"])
-                )
-            )
-            .scalars()
-            .one()
-        )
+        item = items[0]
         db.commit()
         item_id = item.id
         expected_version = item.expected_version or 1
