@@ -468,6 +468,141 @@ def return_entry(
     return _run_result(run, {"caseId": str(case.id), "workItemId": str(item.id)})
 
 
+def _order_for_run(db, run: WorkflowRun) -> SalesOrder | None:
+    """Resolve the sales order owned by an order-to-cash run.
+
+    v2 webhook runs carry ``entity_id`` (our SalesOrder uuid) plus stable
+    refs; legacy v1 runs carried the Shopify order id under ``id``.  Falls
+    back to the most recent order only for in-flight legacy compatibility.
+    """
+    payload = run.input_json or {}
+    entity_id = payload.get("entity_id")
+    if entity_id:
+        order = db.get(SalesOrder, _uuid(entity_id, field="entity_id"))
+        if order is not None:
+            return order
+    for key in ("shopify_order_id", "id"):
+        value = payload.get(key)
+        if value is not None:
+            order = db.execute(
+                select(SalesOrder).where(SalesOrder.shopify_order_id == str(value))
+            ).scalar_one_or_none()
+            if order is not None:
+                return order
+    return (
+        db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1))
+        .scalars()
+        .first()
+    )
+
+
+def _case_for_run(db, run: WorkflowRun) -> ReturnCase | None:
+    """Resolve the return case owned by a return-to-refund run."""
+    payload = run.input_json or {}
+    entity_id = payload.get("entity_id") or payload.get("case_id")
+    if entity_id:
+        case = db.get(ReturnCase, _uuid(entity_id, field="entity_id"))
+        if case is not None:
+            return case
+    order_id = payload.get("shopify_order_id")
+    if order_id:
+        case = db.execute(
+            select(ReturnCase).where(ReturnCase.shopify_order_id == str(order_id))
+        ).scalars().first()
+        if case is not None:
+            return case
+    return None
+
+
+def order_to_cash_entry(
+    db,
+    run: WorkflowRun,
+    payload: dict[str, Any],
+    actor_user_id: Any = None,
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    """Webhook-driven O2C entry: intake the mirrored SalesOrder into Odoo.
+
+    The SalesOrder was created at webhook ingest (status ``received``).
+    Automated intake advances it to ``odo_drafted`` (no human gate) and
+    records the Odoo sale-order create + confirm effects; the order only
+    reaches ``confirmed`` after the remote effects succeed
+    (``finalize_after_effect``).  The first human gate is the inventory
+    reservation approval (mirrors ``order_to_cash_workflow``'s gate).
+    """
+    order = _order_for_run(db, run)
+    if order is None:
+        raise NotFoundError("sales order not found for order-to-cash run")
+    for state in ("validated", "accepted", "odo_drafted"):
+        advance_entity(
+            db,
+            order,
+            "SalesOrder",
+            state,
+            correlation_id=correlation_id,
+            context={"auto": True},
+        )
+    for operation in ("sale_order_create", "sale_order_confirm"):
+        _record_order_effect(db, run, "odoo", operation)
+    item = create_work_item(
+        db,
+        workflow_id=run.id,
+        kind="approval",
+        title=f"Approve inventory reservation for {order.order_ref}",
+        required_roles=["inventory_supervisor"],
+        payload={
+            "order_ref": order.order_ref,
+            "next_step": "reserve",
+        },
+        expected_version=run.version,
+    )
+    run.status = WorkflowRunStatus.AWAITING_APPROVAL
+    return _run_result(run, {"orderId": str(order.id), "workItemId": str(item.id)})
+
+
+def return_to_refund_entry(
+    db,
+    run: WorkflowRun,
+    payload: dict[str, Any],
+    actor_user_id: Any = None,
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    """Webhook-driven return entry: route the mirrored ReturnCase to review.
+
+    The ReturnCase was created at webhook ingest (status ``requested``).  The
+    first human gate is the customer-service eligibility review (same gate as
+    the user-initiated ``return_entry``).
+    """
+    case = _case_for_run(db, run)
+    if case is None:
+        raise NotFoundError("return case not found for return-to-refund run")
+    advance_entity(
+        db,
+        case,
+        "ReturnCase",
+        "eligibility_review",
+        correlation_id=correlation_id,
+    )
+    item = create_work_item(
+        db,
+        workflow_id=run.id,
+        kind="approval",
+        title=f"Review return eligibility for {case.return_ref}",
+        required_roles=["customer_service"],
+        payload={
+            "case_id": str(case.id),
+            "return_ref": case.return_ref,
+            "proposed_by_user_id": str(actor_user_id) if actor_user_id else None,
+            "four_eyes_area": "refund",
+            "refund_amount": str(case.refund_amount) if case.refund_amount is not None else None,
+            "next_step": "approve_eligibility",
+        },
+        expected_version=run.version,
+    )
+    run.status = WorkflowRunStatus.AWAITING_APPROVAL
+    return _run_result(run, {"caseId": str(case.id), "workItemId": str(item.id)})
+
+
 def reconciliation_entry(
     db,
     run: WorkflowRun,
@@ -502,6 +637,10 @@ COMMAND_HANDLERS.update(
         "listing-publication": listing_publication_entry,
         "procurement": procurement_entry,
         "return": return_entry,
+        # Webhook-driven workflow types: the domain entry runs from the v2
+        # definition (``_start_txn``) after the ``workflow.accepted`` relay.
+        "order-to-cash": order_to_cash_entry,
+        "return-to-refund": return_to_refund_entry,
         "reconciliation": reconciliation_entry,
     }
 )
@@ -680,16 +819,18 @@ def _approve_procurement_bill(db, run: WorkflowRun, item, user_id) -> dict[str, 
     order = db.get(ProcurementOrder, _uuid(item.payload_json.get("po_id")))
     if order is None:
         raise NotFoundError("procurement order not found")
-    for state in ("bill_posted", "in_payment"):
-        advance_entity(
-            db,
-            order,
-            "ProcurementOrder",
-            state,
-            correlation_id=run.correlation_id,
-            context={"auto": False},
-            actor_user_id=user_id,
-        )
+    # Bill posting is effect-gated (P7 整改第 2 点): the remote
+    # ``odoo.bill_create`` effect must succeed before ``bill_posted`` /
+    # ``in_payment`` are advanced -- that advancement happens in
+    # ``finalize_after_effect``, never here.
+    record_effect(
+        db,
+        target_system="odoo",
+        operation="bill_create",
+        idempotency_key=f"procurement:{run.id}:odoo.bill_create",
+        approval_ref=run.id,
+        request_hash=canonical_hash({"po_id": str(order.id), "op": "bill_create"}),
+    )
     item_next = create_work_item(
         db,
         workflow_id=run.id,
@@ -832,19 +973,20 @@ def _approve_return_credit_note(db, run: WorkflowRun, item, user_id) -> dict[str
     case = db.get(ReturnCase, _uuid(item.payload_json.get("case_id")))
     if case is None:
         raise NotFoundError("return case not found")
-    advance_entity(
-        db,
-        case,
-        "ReturnCase",
-        "credit_note_posted",
-        correlation_id=run.correlation_id,
-        context={
-            "auto": False,
-            "invoice_posted": (item.payload_json or {}).get("invoice_posted") is True,
-        },
-        actor_user_id=user_id,
-    )
-    case.credit_note_id = str(item.payload_json.get("credit_note_id") or f"CN-{uuid7()}")
+    # Credit-note posting is effect-gated (P7 整改第 2 点): both
+    # ``odoo.credit_note_create`` and ``odoo.credit_note_validate`` must
+    # succeed before ``credit_note_posted`` is advanced (finalize_after_effect
+    # with the invoice-posted invariant), and ``credit_note_id`` is sourced
+    # from the effect's remote_reference -- never a synthetic CN-* number.
+    for op in ("credit_note_create", "credit_note_validate"):
+        record_effect(
+            db,
+            target_system="odoo",
+            operation=op,
+            idempotency_key=f"return:{run.id}:odoo.{op}",
+            approval_ref=run.id,
+            request_hash=canonical_hash({"case_id": str(case.id), "op": op}),
+        )
     proposer = _proposer_for_workflow(db, run)
     item_next = create_work_item(
         db,
@@ -896,18 +1038,6 @@ def _approve_return_refund(db, run: WorkflowRun, item, user_id) -> dict[str, Any
 # order_to_cash_workflow gates, driven through the approval service so the
 # run can be completed without a live DBOS worker).
 # ---------------------------------------------------------------------------
-
-
-def _order_for_run(db, run: WorkflowRun) -> SalesOrder | None:
-    """Resolve the sales order owned by an order-to-cash run."""
-    shopify_id = (run.input_json or {}).get("id")
-    if shopify_id is not None:
-        order = db.execute(
-            select(SalesOrder).where(SalesOrder.shopify_order_id == str(shopify_id))
-        ).scalar_one_or_none()
-        if order is not None:
-            return order
-    return db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1)).scalars().first()
 
 
 def _record_order_effect(

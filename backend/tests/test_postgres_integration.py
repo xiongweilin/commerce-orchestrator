@@ -190,7 +190,7 @@ def test_empty_database_migrates_to_head() -> None:
                 )
             }
         engine.dispose()
-        assert head == "0005_sensitive_payload"
+        assert head == "0006_remote_entity_ids"
         for expected in (
             "workflow_run",
             "work_item",

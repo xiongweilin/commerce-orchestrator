@@ -38,6 +38,7 @@ os.environ["COMMERCE_DATABASE_URL"] = TEST_DB_URL
 os.environ["COMMERCE_DBOS_SYSTEM_DATABASE_URL"] = "sqlite:///./test_dbos.db"
 os.environ["COMMERCE_JWT_SECRET"] = "test-jwt-secret-not-for-production"
 os.environ["COMMERCE_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
+os.environ["COMMERCE_PII_HASH_KEY"] = "test-pii-hash-key-for-webhook-pseudonymization"
 os.environ["COMMERCE_ENVIRONMENT"] = "dev"
 os.environ["COMMERCE_LOG_LEVEL"] = "WARNING"
 os.environ["COMMERCE_SHOPIFY_WEBHOOK_SECRET"] = "test-webhook-secret"

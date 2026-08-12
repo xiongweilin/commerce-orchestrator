@@ -46,10 +46,13 @@ from app.models.effect import EffectLedgerEntry, EffectStatus
 from app.models.identity import Role, RoleAssignment, User
 from app.models.listing import ExternalIdMapping
 from app.models.messaging import InboxEvent, OutboxEvent
+from app.models.order import SalesOrder, SalesOrderStatus
+from app.models.procurement import ProcurementOrder, ProcurementStatus
 from app.models.workflow import WorkflowRun, WorkflowRunStatus, WorkItem
 from app.services.approvals import submit_decision
 from app.services.commands import accept_command
 from app.services.outbox_inbox import claim_inbox_batch
+from app.services.webhooks import ingest_shopify_webhook
 from app.workflows.inbox_dispatch import execute_inbox_action, plan_inbox_action
 
 pytestmark = pytest.mark.dbos_integration
@@ -141,14 +144,41 @@ def dbos_env(request: pytest.FixtureRequest) -> Iterator[dict]:
     from app.workflows import definitions  # noqa: F401
 
     DBOS.launch()
+
+    # Default isolation (P7 测试隔离整改): the DBOS worker must never touch
+    # the real Shopify/Odoo adapters during the full test run.  Install
+    # scripted fakes into the connector registry; individual tests override
+    # them with their own scripted adapter when they shape specific
+    # outcomes (e.g. ``_drive_catalog_to_effect`` with ``_ScriptedShopify``).
+    from app.connectors import registry
+
+    previous_singletons = {
+        name: registry._SINGLETONS.get(name) for name in ("shopify", "odoo")
+    }
+    shopify_fake = _ScriptedShopify(
+        [EffectResult.succeeded("gid://shopify/Product/default", "hash:default")]
+    )
+    odoo_fake = _ScriptedOdoo()
+    registry._SINGLETONS["shopify"] = shopify_fake
+    registry._SINGLETONS["odoo"] = odoo_fake
+
     try:
         yield {
             "factory": factory,
             "app_url": app_url,
             "sys_url": sys_url,
+            "shopify_fake": shopify_fake,
+            "odoo_fake": odoo_fake,
         }
     finally:
         DBOS.destroy()
+        # Restore whatever the registry held before the fixture installed the
+        # fakes so no other test module observes test adapters.
+        for name, prior in previous_singletons.items():
+            if prior is None:
+                registry._SINGLETONS.pop(name, None)
+            else:
+                registry._SINGLETONS[name] = prior
         app_engine.dispose()
         _drop_database(app_db)
         _drop_database(sys_db)
@@ -238,6 +268,25 @@ def _run_status(factory: Callable[[], Session], run_id: uuid.UUID) -> str | None
         return run.status.value if run else None
 
 
+def _ledger_succeeded_ops(
+    factory: Callable[[], Session], run_id: uuid.UUID
+) -> set[str]:
+    """Operations whose ledger rows for ``run_id`` are terminal-succeeded."""
+    with factory() as db:
+        rows = (
+            db.execute(
+                select(EffectLedgerEntry).where(
+                    EffectLedgerEntry.approval_ref == run_id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            row.operation for row in rows if row.status == EffectStatus.SUCCEEDED
+        }
+
+
 def _start_catalog_run(
     factory: Callable[[], Session],
     actor: uuid.UUID,
@@ -256,6 +305,30 @@ def _start_catalog_run(
     assert _wait_for(lambda: len(_items_for(factory, run_id)) == 1), "work item not created"
     item = _items_for(factory, run_id)[0]
     return run_id, item
+
+
+def _ingest_webhook(
+    factory: Callable[[], Session],
+    *,
+    topic: str,
+    payload: dict,
+) -> str:
+    """Ingest a Shopify webhook and return the created v2 run id."""
+    import json
+
+    raw = json.dumps(payload).encode("utf-8")
+    with factory() as db:
+        result = ingest_shopify_webhook(
+            db,
+            webhook_id=str(uuid.uuid4()),
+            topic=topic,
+            raw_body=raw,
+            payload=payload,
+        )
+        db.commit()
+    assert result["workflow_version"] == 2
+    assert result["workflow_id"] is not None
+    return str(result["workflow_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +369,64 @@ def test_v2_accept_start_reaches_awaiting_approval(dbos_env) -> None:
 
     status = DBOS.get_workflow_status(str(run_id))
     assert status is not None
+
+
+def test_webhook_order_starts_v2_definition_and_intakes_to_odoo(dbos_env) -> None:
+    """P7 整改第 1 点: a Shopify order webhook creates a DBOS v2 run (never a
+    v1 run), the relay starts the ``order-to-cash@2`` definition with the
+    deterministic workflow id, and the intake effects (sale_order_create /
+    sale_order_confirm) run through the fake Odoo adapter -- the order only
+    reaches ``confirmed`` after the remote effects succeed."""
+    factory = dbos_env["factory"]
+    run_id = _ingest_webhook(
+        factory,
+        topic="orders/create",
+        payload={
+            "id": 9001,
+            "name": "#S9001",
+            "email": "buyer@example.com",
+            "currency": "JPY",
+            "total_price": "9900.00",
+            "line_items": [{"id": 1, "sku": "SKU-W", "quantity": 1}],
+        },
+    )
+    with factory() as db:
+        run = db.get(WorkflowRun, uuid.UUID(run_id))
+        assert run is not None
+        assert run.workflow_type == "order-to-cash"
+        assert run.workflow_version == 2
+        assert run.orchestration_engine == "dbos"
+        # Minimal input: no raw payload expansion (no email / line items).
+        blob = str(run.input_json)
+        assert "buyer@example.com" not in blob
+        assert "line_items" not in blob
+
+    # workflow.accepted is relayed: the v2 definition starts exactly once.
+    assert _relay_all(factory) == 1
+    assert _wait_for(
+        lambda: len(_items_for(factory, uuid.UUID(run_id))) == 1,
+        timeout=40,
+    ), "order-to-cash v2 run did not create the reservation gate"
+
+    order = None
+    with factory() as db:
+        order = db.execute(select(SalesOrder)).scalars().one()
+        # Intake effects succeed against the fake Odoo; the order reaches
+        # confirmed only after sale_order_confirm succeeded (not before).
+        assert order.status == SalesOrderStatus.CONFIRMED
+        assert order.odoo_sale_order_id is not None
+
+    # The first human gate is the inventory-reservation approval.
+    items = _items_for(factory, uuid.UUID(run_id))
+    assert items[0].required_roles == ["inventory_supervisor"]
+    assert items[0].payload_json["next_step"] == "reserve"
+    assert _run_status(factory, uuid.UUID(run_id)) == "awaiting_approval"
+
+    # Ledger: sale_order_create + sale_order_confirm both succeeded with
+    # remote references consistent with the domain column.
+    ops = _ledger_succeeded_ops(factory, uuid.UUID(run_id))
+    assert ops == {"sale_order_create", "sale_order_confirm"}
+    assert order.odoo_sale_order_id  # written back by finalize_after_effect
 
 
 def test_accepted_replay_starts_single_workflow(dbos_env) -> None:
@@ -373,6 +504,41 @@ def test_decision_relay_advances_workflow(dbos_env) -> None:
     assert items[1].required_roles == ["warehouse_staff"]
     assert _run_status(factory, run_id) == "awaiting_approval"
 
+    # The planned Odoo effects recorded by the PO approval were executed
+    # through the injected fake adapter: po_create + po_confirm both
+    # succeeded, and the create effect's remote reference was written back to
+    # the purchase order (P7 整改第 3 点 remote id chain).
+    assert _wait_for(
+        lambda: {"po_create", "po_confirm"} <= _ledger_succeeded_ops(factory, run_id),
+        timeout=40,
+    ), "planned odoo effects did not succeed through the fake adapter"
+    with factory() as db:
+        po = (
+            db.execute(
+                select(ProcurementOrder).where(ProcurementOrder.sku == "SKU-DBOS-3")
+            )
+            .scalars()
+            .one()
+        )
+        entries = {
+            entry.operation: entry
+            for entry in db.execute(
+                select(EffectLedgerEntry).where(
+                    EffectLedgerEntry.approval_ref == run_id
+                )
+            )
+            .scalars()
+            .all()
+        }
+    assert set(entries) == {"po_create", "po_confirm"}
+    assert entries["po_create"].status == EffectStatus.SUCCEEDED
+    assert entries["po_create"].remote_reference == po.odoo_po_id
+    assert entries["po_confirm"].status == EffectStatus.SUCCEEDED
+    assert po.status == ProcurementStatus.PO_CONFIRMED
+    odoo_fake = dbos_env["odoo_fake"]
+    assert odoo_fake.calls.get("create_po") == 1
+    assert odoo_fake.calls.get("confirm_po") == 1
+
 
 # ---------------------------------------------------------------------------
 # Typed effect execution through the DBOS driver (计划 §二.4)
@@ -394,6 +560,96 @@ class _ScriptedShopify:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+class _ScriptedOdoo:
+    """Odoo adapter fake: per-method scripted outcomes, succeed by default.
+
+    Mirrors the real ``OdooConnector`` operation methods (the ``_OP_METHOD``
+    dispatch set in ``app.services.effect_ledger``) so the DBOS effect step
+    never reaches the real Odoo service.  Unscripted methods return
+    :class:`EffectResult.succeeded` with a deterministic integer remote
+    reference (Odoo record ids are integers) so ``finalize_after_effect`` can
+    write back ``odoo_po_id`` / ``odoo_bill_id`` / ... and downstream
+    validate effects can be built from them.  A method's script may raise
+    ``OutcomeUnknownError`` / ``RetryableEffectError`` or return an
+    ``EffectResult`` to shape the outcome per test.
+    """
+
+    name = "odoo"
+
+    def __init__(self, script: dict[str, list] | None = None) -> None:
+        self._script = {
+            method: list(outcomes) for method, outcomes in (script or {}).items()
+        }
+        self.calls: dict[str, int] = {}
+        self._remote_id = 1000
+
+    def _next(self, method: str, kwargs: dict) -> EffectResult:
+        self.calls[method] = self.calls.get(method, 0) + 1
+        outcomes = self._script.get(method)
+        if outcomes:
+            outcome = outcomes[min(self.calls[method] - 1, len(outcomes) - 1)]
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        odoo_id = kwargs.get("odoo_id")
+        if odoo_id is not None:
+            # The real connector reports the same record id back for
+            # confirm/validate/write-by-id operations; echo it so finalize's
+            # write-back of the domain column stays idempotent.
+            return EffectResult.succeeded(
+                str(odoo_id), f"hash:{method}:{self.calls[method]}"
+            )
+        self._remote_id += 1
+        return EffectResult.succeeded(
+            str(self._remote_id), f"hash:{method}:{self.calls[method]}"
+        )
+
+    def create_po(self, **kwargs):
+        return self._next("create_po", kwargs)
+
+    def confirm_po(self, **kwargs):
+        return self._next("confirm_po", kwargs)
+
+    def receive_transfer(self, **kwargs):
+        return self._next("receive_transfer", kwargs)
+
+    def create_bill(self, **kwargs):
+        return self._next("create_bill", kwargs)
+
+    def create_sale_order(self, **kwargs):
+        return self._next("create_sale_order", kwargs)
+
+    def confirm_sale_order(self, **kwargs):
+        return self._next("confirm_sale_order", kwargs)
+
+    def create_picking(self, **kwargs):
+        return self._next("create_picking", kwargs)
+
+    def validate_picking(self, **kwargs):
+        return self._next("validate_picking", kwargs)
+
+    def create_invoice(self, **kwargs):
+        return self._next("create_invoice", kwargs)
+
+    def validate_invoice(self, **kwargs):
+        return self._next("validate_invoice", kwargs)
+
+    def create_credit_note(self, **kwargs):
+        return self._next("create_credit_note", kwargs)
+
+    def validate_credit_note(self, **kwargs):
+        return self._next("validate_credit_note", kwargs)
+
+    def create_product(self, **kwargs):
+        return self._next("create_product", kwargs)
+
+    def update_product(self, **kwargs):
+        return self._next("update_product", kwargs)
+
+    def create_stock_move(self, **kwargs):
+        return self._next("create_stock_move", kwargs)
 
 
 def _seed_gid_mapping(factory: Callable[[], Session], sku: str) -> None:
@@ -567,6 +823,25 @@ def test_worker_kill_recovery_resumes_pending_workflow(dbos_env) -> None:
         assert run.status == WorkflowRunStatus.AWAITING_APPROVAL
         assert run.version >= 3
         assert decision_rows >= 2  # accepted + decision_recorded events
+
+    # The recovered workflow executed the planned Odoo effects through the
+    # injected fake adapter (same isolation as the decision-relay test), so
+    # the run stays awaiting_approval at the receipt gate instead of
+    # settling into needs_reconciliation.
+    assert _wait_for(
+        lambda: {"po_create", "po_confirm"} <= _ledger_succeeded_ops(factory, run_id),
+        timeout=60,
+    ), "recovered workflow did not execute the planned odoo effects"
+    with factory() as db:
+        po = (
+            db.execute(
+                select(ProcurementOrder).where(ProcurementOrder.sku == "SKU-DBOS-K")
+            )
+            .scalars()
+            .one()
+        )
+        assert po.status == ProcurementStatus.PO_CONFIRMED
+        assert po.odoo_po_id is not None
 
 
 __all__ = ["DBOS_IMPORTABLE", "PG_REACHABLE", "dbos_env"]

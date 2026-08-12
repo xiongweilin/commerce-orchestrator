@@ -184,6 +184,8 @@ types = (
     "procurement",
     "return",
     "reconciliation",
+    "order-to-cash",
+    "return-to-refund",
 )
 for workflow_type in types:
     fn = resolve_definition(workflow_type, 2)
@@ -207,6 +209,8 @@ print(",".join(sorted(definition_names())))
     assert proc.returncode == 0, proc.stderr
     assert "procurement@2" in proc.stdout
     assert "return@2" in proc.stdout
+    assert "order-to-cash@2" in proc.stdout
+    assert "return-to-refund@2" in proc.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +626,24 @@ def test_plan_inbox_action_unknown_event_raises() -> None:
     )
     with pytest.raises(ValueError, match="no inbox action"):
         plan_inbox_action(event)
+
+
+def test_plan_inbox_action_webhook_domain_events_have_no_relay_action() -> None:
+    """Webhooks now create DBOS v2 runs; the worker relay is driven by
+    ``workflow.accepted``, so planning a raw webhook domain event fails
+    closed instead of starting the legacy v1 slice."""
+    from app.models.messaging import OutboxEvent
+    from app.workflows.inbox_dispatch import plan_inbox_action
+
+    for event_type in ("order.received", "return.case_requested"):
+        event = OutboxEvent(
+            event_type=event_type,
+            aggregate_type="sales_order",
+            aggregate_id="1",
+            payload={"webhook_id": "w-1", "entity_id": "e-1"},
+        )
+        with pytest.raises(ValueError, match="no inbox action"):
+            plan_inbox_action(event)
 
 
 def test_execute_inbox_action_send_uses_topic_and_idempotency_key(

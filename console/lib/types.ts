@@ -3,8 +3,8 @@
  *
  * - 命令请求/响应类型来自 OpenAPI 生成的 lib/generated/openapi.ts（唯一契约源，禁止手写重复）。
  * - 以下读模型类型当前未出现在后端 OpenAPI 响应 schema 中（后端以 additionalProperties 返回），
- *   按 docs/contracts/api-contract.md 与整改计划 §四.1 编写最小契约类型；WP6 落地后由
- *   gen-types 接管，届时删除本文件中的重复定义。
+ *   按 docs/contracts/api-contract.md 与整改计划 §四.1 编写最小契约类型；字段名已按 WP6
+ *   落地实现核对，后端仍以动态 dict 返回，故保留本文件的手写定义。
  * - 契约之外的额外字段使用 [key: string]: unknown 兼容，避免因后端扩展字段导致类型报错。
  */
 
@@ -167,7 +167,7 @@ export interface ReconciliationDetail extends ReconciliationRun {
 
 /**
  * GET /v1/me 的最小客户端可见视图（服务端 getServerUser 解析为同形结构）。
- * 来源：整改计划 §四.1；精确字段待 WP6 联调。
+ * 来源：整改计划 §四.1 与后端 /v1/me 实际响应（WP6 落地）。
  */
 export interface CurrentUser {
   id: string;
@@ -182,7 +182,7 @@ export interface CurrentUser {
  * GET /v1/ops/inbox 列表项（计划 §2.2 受保护运维接口，仅 system_admin）。
  * 字段对齐 backend/app/models/messaging.py 的 InboxEvent（event_id/consumer/status/
  * attempts/next_attempt_at/lease_until/last_error/processed_at/received_at）；
- * ops 接口的精确 JSON 由 WP6 实现，字段名待联调核对。
+ * 字段名已按后端 /v1/ops/inbox 实际 JSON 核对（WP6 落地）。
  */
 export interface OpsInboxEvent {
   eventId: string;
@@ -197,14 +197,14 @@ export interface OpsInboxEvent {
   [key: string]: unknown;
 }
 
-/** GET /readyz 响应（计划 §四.1：数据库、Alembic head、adapter 配置、worker heartbeat；WP6 实现）。 */
+/** GET /readyz 响应（计划 §四.1：数据库、Alembic head、adapter 配置、worker heartbeat；已实现）。 */
 export interface ReadyzResponse {
   status: string;
   checks?: Record<string, { status?: string; message?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 }
 
-/** GET /v1/ops/runtime 响应（计划 §2.2；worker/inbox/effect/reconciliation 运行信息，WP6 实现）。 */
+/** GET /v1/ops/runtime 响应（计划 §2.2；worker/inbox/effect/reconciliation 运行信息；已实现）。 */
 export interface OpsRuntimeResponse {
   worker?: Record<string, unknown>;
   inbox?: Record<string, unknown>;

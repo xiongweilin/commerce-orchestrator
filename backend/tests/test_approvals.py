@@ -104,7 +104,6 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
         (item, budget_owner, "approve"),
         (None, warehouse, "confirm"),
         (None, accountant_a, "approve"),
-        (None, accountant_b, "approve"),
     ]
     for idx, (work_item, user, decision) in enumerate(steps):
         if work_item is None:
@@ -120,16 +119,178 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
         db.flush()
         assert outcome["workflowId"] == str(run_id)
 
-    run = db.get(WorkflowRun, run_id)
-    assert run.status == WorkflowRunStatus.COMPLETED
-
+    # The bill approval only records the remote effect: the domain state must
+    # NOT advance until the effect succeeds (P7 整改第 2 点).
+    from app.models.effect import EffectLedgerEntry
     from app.models.procurement import ProcurementOrder
 
     order = db.execute(select(ProcurementOrder)).scalars().one()
+    assert order.status.value == "received"
+    bill_effect = db.execute(
+        select(EffectLedgerEntry).where(
+            EffectLedgerEntry.approval_ref == run_id,
+            EffectLedgerEntry.operation == "bill_create",
+        )
+    ).scalar_one()
+    assert bill_effect.status.value == "planned"
+
+    from app.schemas.effects import EffectSucceeded
+    from app.services.effect_ledger import effect_transition_context, mark_dispatched
+    from app.workflows.effect_execution import apply_effect_outcome
+
+    mark_dispatched(
+        db, bill_effect.intent_id, context=effect_transition_context("odoo.bill_create")
+    )
+    apply_effect_outcome(
+        db,
+        workflow_id=str(run_id),
+        effect_id=bill_effect.intent_id,
+        operation="odoo.bill_create",
+        outcome=EffectSucceeded(remote_reference="4201"),
+    )
+    db.refresh(order)
+    assert order.status.value == "in_payment"
+    assert order.odoo_bill_id == "4201"
+
+    # The close gate (created with the bill gate) now completes the run.
+    close_item = _work_items(db, run_id)[-1]
+    outcome = submit_decision(
+        db,
+        work_item_id=close_item.id,
+        user_id=accountant_b,
+        decision="approve",
+        reason="step 3",
+        expected_workflow_version=close_item.expected_version,
+    )
+    db.flush()
+    assert outcome["workflowId"] == str(run_id)
+
+    run = db.get(WorkflowRun, run_id)
+    assert run.status == WorkflowRunStatus.COMPLETED
+    db.refresh(order)
     assert order.status.value == "closed"
     # Every gate decision was audited.
     decisions = db.execute(select(func.count()).select_from(WorkItemDecision)).scalar_one()
     assert decisions == 4
+
+
+def _dispatch_return(db, actor_user_id: uuid.UUID) -> tuple[uuid.UUID, WorkItem]:
+    result = dispatch_command(
+        db,
+        scope=f"return-{uuid.uuid4()}",
+        key=f"key-{uuid.uuid4()}",
+        command_type="return",
+        payload={
+            "customer_ref": "cust-1",
+            "reason": "damaged on arrival",
+            "return_ref": "RET-TEST-1",
+            "shopify_order_id": "SO-9001",
+            "refund_amount": "12.50",
+            "currency": "CNY",
+        },
+        actor_user_id=actor_user_id,
+    )
+    run_id = uuid.UUID(result["workflowId"])
+    return run_id, _work_items(db, run_id)[0]
+
+
+def test_return_credit_note_chain_is_effect_gated(db, make_user) -> None:
+    """The credit note must be created + validated remotely before the case
+    advances past disposition_approved; credit_note_id comes from the remote
+    reference, never a synthetic CN-* number (P7 整改第 2 点)."""
+    from app.models.effect import EffectLedgerEntry
+    from app.models.returns import ReturnCase
+
+    proposer = make_user(["customer_service"])
+    cs_approver = make_user(["customer_service"])
+    warehouse = make_user(["warehouse_staff"])
+    accountant = make_user(["accountant"])
+    finance = make_user(["finance_approver"])
+
+    run_id, item = _dispatch_return(db, proposer)
+    gates = [
+        (item, cs_approver, "approve"),
+        (None, warehouse, "confirm"),
+        (None, warehouse, "approve"),
+        (None, accountant, "approve"),
+    ]
+    for idx, (work_item, user, decision) in enumerate(gates):
+        if work_item is None:
+            work_item = _work_items(db, run_id)[-1]
+        submit_decision(
+            db,
+            work_item_id=work_item.id,
+            user_id=user,
+            decision=decision,
+            reason=f"step {idx}",
+            expected_workflow_version=work_item.expected_version,
+        )
+        db.flush()
+
+    case = db.execute(select(ReturnCase)).scalars().one()
+    # The accountant approved the credit-note gate: effects are planned but
+    # the domain state must not advance and no synthetic number is assigned.
+    assert case.status.value == "disposition_approved"
+    assert case.credit_note_id is None
+    assert case.odoo_credit_note_id is None
+    ops = {
+        f"{e.target_system}.{e.operation}"
+        for e in db.execute(
+            select(EffectLedgerEntry).where(EffectLedgerEntry.approval_ref == run_id)
+        ).scalars().all()
+    }
+    assert ops == {"odoo.credit_note_create", "odoo.credit_note_validate"}
+
+    from app.schemas.effects import EffectSucceeded
+    from app.services.effect_ledger import effect_transition_context, mark_dispatched
+    from app.workflows.effect_execution import apply_effect_outcome
+
+    for op, remote in (("credit_note_create", "501"), ("credit_note_validate", "501")):
+        entry = db.execute(
+            select(EffectLedgerEntry).where(
+                EffectLedgerEntry.approval_ref == run_id,
+                EffectLedgerEntry.operation == op,
+            )
+        ).scalar_one()
+        mark_dispatched(
+            db,
+            entry.intent_id,
+            context=effect_transition_context(f"odoo.{op}"),
+        )
+        apply_effect_outcome(
+            db,
+            workflow_id=str(run_id),
+            effect_id=entry.intent_id,
+            operation=f"odoo.{op}",
+            outcome=EffectSucceeded(remote_reference=remote),
+        )
+
+    db.refresh(case)
+    assert case.status.value == "credit_note_posted"
+    assert case.credit_note_id == "501"
+    assert case.odoo_credit_note_id == "501"
+
+    # The finance approver then approves the refund amount; the Shopify
+    # refund effect is planned.
+    refund_gate = _work_items(db, run_id)[-1]
+    submit_decision(
+        db,
+        work_item_id=refund_gate.id,
+        user_id=finance,
+        decision="approve",
+        reason="refund approved",
+        expected_workflow_version=refund_gate.expected_version,
+    )
+    db.flush()
+    db.refresh(case)
+    assert case.status.value == "refund_pending"
+    refund_effect = db.execute(
+        select(EffectLedgerEntry).where(
+            EffectLedgerEntry.approval_ref == run_id,
+            EffectLedgerEntry.operation == "refund_create",
+        )
+    ).scalar_one()
+    assert refund_effect.target_system == "shopify"
 
 
 def test_wrong_role_rejected(db, make_user) -> None:

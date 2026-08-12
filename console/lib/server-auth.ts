@@ -17,7 +17,7 @@ export async function getServerToken(): Promise<string | null> {
 /**
  * GET /v1/me 的最小客户端可见视图（数据库权威角色 + JWT 到期时间）。
  * 契约来源：整改计划 §四.1「GET /v1/me：返回当前 active 用户、数据库权威角色和 JWT 到期时间」；
- * 精确字段由 WP6 实现后核对（见 WP2-REPORT「待 WP6 联调」）。
+ * 字段已按后端 /v1/me 实际响应核对（WP6 落地：id/username/displayName/email/roles/isActive/jwtExpiresAt）。
  */
 export interface CurrentUser {
   id: string;
@@ -30,7 +30,7 @@ export interface CurrentUser {
 
 /**
  * 服务端组件读取当前用户（fail-closed）：
- * 无会话、后端不可达或后端 /v1/me 未实现（WP6 待办）时一律返回 null。
+ * 无会话、后端不可达或后端 /v1/me 返回非 2xx 时一律返回 null。
  */
 export async function getServerUser(): Promise<CurrentUser | null> {
   const token = await getServerToken();

@@ -2,9 +2,8 @@
  * POST /api/session：接收一次 JWT，调用后端 /v1/me 验证后设置 HttpOnly 会话 + CSRF cookie。
  * DELETE /api/session：清除会话。
  *
- * 联调说明：后端 /v1/me 由 WP6 在 Wave 2 实现；未就绪时本接口返回 502 backend_not_ready。
- * 开发模式可用 COMMERCE_SESSION_MOCK=1 跳过 /v1/me（仅 NODE_ENV !== "production" 时生效），
- * WP6 联调通过后应移除该 mock。
+ * 后端 /v1/me 已实现（WP6 落地）：本接口以 2xx 视为验证通过。
+ * 开发模式可用 COMMERCE_SESSION_MOCK=1 跳过 /v1/me（仅 NODE_ENV !== "production" 时生效）。
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -51,7 +50,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (upstream.status === 404) {
-    return errorJson(502, "backend_not_ready", "后端 /v1/me 尚未实现（待 WP6 联调）");
+    return errorJson(502, "backend_not_ready", "后端 /v1/me 不可用（HTTP 404）");
   }
   if (upstream.status === 401 || upstream.status === 403) {
     return errorJson(401, "unauthenticated", "Token 无效或已过期");
