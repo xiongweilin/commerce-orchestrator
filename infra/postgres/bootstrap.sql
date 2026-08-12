@@ -85,7 +85,7 @@ GRANT CONNECT ON DATABASE odoo TO odoo_app;
 
 -- ---------------------------------------------------------------------------
 -- 5) 默认权限：commerce_migrator 创建的表/序列/函数按角色自动授权
---    （覆盖后续所有 Alembic 迁移创建的对象；现有对象由同一规则在迁移时生效）
+--    （只覆盖后续所有 Alembic 迁移创建的对象；存量对象由第 7 节归一处理）
 -- ---------------------------------------------------------------------------
 ALTER DEFAULT PRIVILEGES FOR ROLE commerce_migrator IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO commerce_api, commerce_worker;
@@ -105,3 +105,88 @@ ALTER SCHEMA public OWNER TO metabase_app;
 
 \connect odoo
 ALTER SCHEMA public OWNER TO odoo_app;
+-- ---------------------------------------------------------------------------
+-- 6b) DBOS 系统 schema（dbos 库内 dbos）存量归一：历史卷由旧 owner（commerce）创建，
+--      dbos_app 无法在 information_schema 中看到该 schema 会触发重复创建；
+--      这里移交属主并转移其内部对象，保证 DBOS 系统迁移可继续。
+-- ---------------------------------------------------------------------------
+\connect dbos
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'dbos') THEN
+    ALTER SCHEMA dbos OWNER TO dbos_app;
+  END IF;
+END $$;
+
+DO $$
+DECLARE obj record;
+BEGIN
+  FOR obj IN
+    SELECT c.relname, c.relkind
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'dbos'
+      AND c.relkind IN ('r','p','v','m','S')
+      AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = 'dbos_app')
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I OWNER TO dbos_app', 'dbos', obj.relname);
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 7) 非空卷升级：现有 public 对象权限归一（幂等）
+--    P7 之前的历史卷由旧 owner（commerce）创建全部对象，且未授予
+--    commerce_migrator / commerce_api / commerce_worker 权限；
+--    ALTER DEFAULT PRIVILEGES 只影响新对象，这里把存量对象补齐：
+--    表/视图 owner 移交 commerce_migrator，并按角色授予最小读写权限。
+-- ---------------------------------------------------------------------------
+\connect commerce
+
+DO $$
+DECLARE obj record;
+BEGIN
+  FOR obj IN
+    SELECT c.relname, c.relkind
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind IN ('r','p','v','m','S')
+      AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = 'commerce_migrator')
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO commerce_migrator', obj.relname);
+    IF obj.relkind IN ('r','p') THEN
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO commerce_api, commerce_worker', obj.relname);
+      EXECUTE format('GRANT SELECT ON TABLE public.%I TO commerce_readonly', obj.relname);
+    ELSIF obj.relkind IN ('v','m') THEN
+      EXECUTE format('GRANT SELECT ON TABLE public.%I TO commerce_api, commerce_worker, commerce_readonly', obj.relname);
+    ELSIF obj.relkind = 'S' THEN
+      EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO commerce_api, commerce_worker', obj.relname);
+    END IF;
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 7b) DBOS 应用 schema（commerce 库内 dbos）存量归一：历史卷由旧 owner（commerce）创建，
+--      commerce_worker 无法看到该 schema 会触发 DBOS 重复建 schema 而失败；
+--      移交属主与内部对象，DBOS 才能继续应用表迁移。
+-- ---------------------------------------------------------------------------
+\connect commerce
+
+DO $$
+DECLARE obj record;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'dbos') THEN
+    ALTER SCHEMA dbos OWNER TO commerce_worker;
+  END IF;
+  FOR obj IN
+    SELECT c.relname, c.relkind
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'dbos'
+      AND c.relkind IN ('r','p','v','m','S')
+      AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = 'commerce_worker')
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I OWNER TO commerce_worker', 'dbos', obj.relname);
+  END LOOP;
+END $$;
