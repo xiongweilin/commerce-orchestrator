@@ -56,6 +56,10 @@ class ReturnCase(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
         nullable=True,
     )
     odoo_return_move_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Remote entity id produced by odoo.credit_note_create (account.move id).
+    # ``credit_note_id`` carries the business number which is also sourced
+    # from the effect's remote_reference (never a synthetic CN-* value).
+    odoo_credit_note_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     credit_note_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     shopify_refund_gid: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

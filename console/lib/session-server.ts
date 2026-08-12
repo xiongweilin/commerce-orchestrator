@@ -63,7 +63,7 @@ export function errorJson(status: number, code: string, message: string): NextRe
 
 /**
  * 联调开关：COMMERCE_SESSION_MOCK=1 且非生产环境时，跳过后端 /v1/me 验证。
- * WP6 实现 /v1/me 后应移除（本 mock 永不生效于生产）。
+ * 仅开发模式使用（本 mock 永不生效于生产）。
  */
 export function isSessionMockEnabled(): boolean {
   return process.env.COMMERCE_SESSION_MOCK === "1" && process.env.NODE_ENV !== "production";

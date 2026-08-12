@@ -520,6 +520,22 @@ def return_to_refund_workflow_v2(*, workflow_id: str) -> dict[str, Any]:
     return _run_definition(workflow_id, "return")
 
 
+@register_definition("order-to-cash", 2)
+@DBOS.workflow(name="order_to_cash_workflow_v2")
+def order_to_cash_workflow_v2(*, workflow_id: str) -> dict[str, Any]:
+    """received -> intake into Odoo -> reserve -> picking/ship -> invoice ->
+    payment -> close (webhook-driven; deterministic SetWorkflowID)."""
+    return _run_definition(workflow_id, "order-to-cash")
+
+
+@register_definition("return-to-refund", 2)
+@DBOS.workflow(name="return_to_refund_webhook_workflow_v2")
+def return_to_refund_webhook_workflow_v2(*, workflow_id: str) -> dict[str, Any]:
+    """case -> eligibility -> goods received -> disposition -> credit note ->
+    refund (webhook-driven; deterministic SetWorkflowID)."""
+    return _run_definition(workflow_id, "return-to-refund")
+
+
 @register_definition("reconciliation", 2)
 @DBOS.workflow(name="reconciliation_workflow_v2")
 def reconciliation_workflow_v2(*, workflow_id: str) -> dict[str, Any]:
@@ -534,9 +550,11 @@ __all__ = [
     "catalog_revision_workflow_v2",
     "definition_names",
     "listing_publication_workflow_v2",
+    "order_to_cash_workflow_v2",
     "procurement_workflow_v2",
     "reconciliation_workflow_v2",
     "register_definition",
     "resolve_definition",
+    "return_to_refund_webhook_workflow_v2",
     "return_to_refund_workflow_v2",
 ]

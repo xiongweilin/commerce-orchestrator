@@ -5,8 +5,8 @@ import type { OpsRuntimeResponse, ReadyzResponse } from "@/lib/types";
 /**
  * 概览页健康卡片（服务端组件）：worker / inbox / effect / reconciliation。
  * 数据源：GET /readyz（数据库、迁移、adapter 配置、worker heartbeat）与
- * GET /v1/ops/runtime（运行信息）。两者由 WP6 在 Wave 2 实现，未就绪时显示
- * 「待 WP6 联调」；字段映射在 WP6 落地后核对（见 WP2-REPORT）。
+ * GET /v1/ops/runtime（运行信息）。两者均已实现（WP6 落地）；
+ * 后端不可达或字段缺失时卡片显示「未知」。
  */
 
 const CARD_DEFS = [
@@ -75,7 +75,7 @@ export default async function HealthCards() {
                         : "badge-neutral"
                 }`}
               >
-                {tone === "ok" ? "正常" : tone === "down" ? "异常" : tone === "warn" ? "告警" : "待 WP6 联调"}
+                {tone === "ok" ? "正常" : tone === "down" ? "异常" : tone === "warn" ? "告警" : "未知"}
               </span>
             </div>
             <div className="stat-note">{hint}</div>
@@ -91,7 +91,7 @@ export default async function HealthCards() {
               livez?.status === "ok" ? "badge-success" : "badge-neutral"
             }`}
           >
-            {livez?.status === "ok" ? "正常" : "待 WP6 联调"}
+            {livez?.status === "ok" ? "正常" : "未知"}
           </span>
         </div>
         <div className="stat-note">/healthz 保留为 /livez 兼容别名（计划 §四.1）</div>

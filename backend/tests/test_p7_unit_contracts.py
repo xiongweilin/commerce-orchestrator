@@ -56,8 +56,12 @@ def test_command_initiate_matrix_matches_plan() -> None:
         "reconciliation": ("accountant", "system_admin"),
     }
     # Every command scope has a registered handler (the API cannot accept a
-    # command the domain does not implement).
-    assert set(COMMAND_INITIATE_ROLES) == set(COMMAND_HANDLERS)
+    # command the domain does not implement).  The webhook-driven workflow
+    # types are domain entries without a user-initiated command scope.
+    assert set(COMMAND_HANDLERS) == set(COMMAND_INITIATE_ROLES) | {
+        "order-to-cash",
+        "return-to-refund",
+    }
 
 
 def test_read_matrix_matches_plan() -> None:

@@ -27,11 +27,11 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.core.logging import get_logger
 from app.models.catalog import CatalogRevision, CatalogRevisionStatus
-from app.models.effect import EffectLedgerEntry
+from app.models.effect import EffectLedgerEntry, EffectStatus
 from app.models.listing import ExternalIdMapping, ListingPublication, ListingStatus
-from app.models.order import SalesOrder
-from app.models.procurement import ProcurementOrder
-from app.models.returns import ReturnCase
+from app.models.order import SalesOrder, SalesOrderStatus
+from app.models.procurement import ProcurementOrder, ProcurementStatus
+from app.models.returns import ReturnCase, ReturnStatus
 from app.models.workflow import WorkflowRun, WorkItem
 from app.schemas.effects import (
     EFFECT_PARAMETER_MODELS,
@@ -129,18 +129,61 @@ def _resolve_listing(db, run: WorkflowRun, refs: dict[str, str]) -> ListingPubli
 
 
 def _resolve_sales_order(db, run: WorkflowRun) -> SalesOrder | None:
-    shopify_id = (run.input_json or {}).get("id")
-    if shopify_id is not None:
-        order = db.execute(
-            select(SalesOrder).where(SalesOrder.shopify_order_id == str(shopify_id))
-        ).scalar_one_or_none()
+    """Resolve the sales order owned by an order-to-cash run.
+
+    v2 webhook runs carry ``entity_id`` (our SalesOrder uuid) plus stable
+    refs; legacy v1 runs carried the Shopify order id under ``id``.
+    """
+    payload = run.input_json or {}
+    entity_id = payload.get("entity_id")
+    if entity_id:
+        try:
+            order = db.get(SalesOrder, uuid.UUID(str(entity_id)))
+        except ValueError:
+            order = None
         if order is not None:
             return order
+    for key in ("shopify_order_id", "id"):
+        value = payload.get(key)
+        if value is not None:
+            order = db.execute(
+                select(SalesOrder).where(SalesOrder.shopify_order_id == str(value))
+            ).scalar_one_or_none()
+            if order is not None:
+                return order
     return (
         db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1))
         .scalars()
         .first()
     )
+
+
+def _prior_effect_remote_reference(db, run: WorkflowRun, operation: str) -> str | None:
+    """Resolve the remote id produced by a prior create effect.
+
+    The validate effects depend on the create effect's ``remote_reference``
+    (ledger chain, P7 整改第 3 点): ``approval_ref`` scopes the lookup to this
+    run and ``operation`` selects the producing effect (e.g. ``picking_create``
+    -> ``stock.picking.id``, ``invoice_create`` -> ``account.move.id``).
+    """
+    entry = (
+        db.execute(
+            select(EffectLedgerEntry)
+            .where(
+                EffectLedgerEntry.approval_ref == run.id,
+                EffectLedgerEntry.operation == operation,
+                EffectLedgerEntry.status.in_(
+                    (EffectStatus.SUCCEEDED, EffectStatus.RECONCILED)
+                ),
+            )
+            .order_by(EffectLedgerEntry.created_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if entry is None:
+        return None
+    return entry.remote_reference
 
 
 def _product_gid_for(db, listing: ListingPublication | None) -> str | None:
@@ -243,15 +286,47 @@ def build_effect_execution_request(
                 "items": order.items or [],
             },
         )
-    elif operation in {"odoo.sale_order_confirm", "odoo.invoice_validate", "odoo.picking_validate"}:
+    elif operation == "odoo.sale_order_confirm":
         order = _resolve_sales_order(db, run)
         odoo_id = None
         if order is not None:
-            odoo_id = order.odoo_sale_order_id
+            odoo_id = order.odoo_sale_order_id or _prior_effect_remote_reference(
+                db, run, "sale_order_create"
+            )
         if not odoo_id:
             raise ValueError(
                 f"cannot build {operation} parameters: odoo sale order id unknown "
-                f"(create effect must succeed first)"
+                f"(odoo.sale_order_create effect must succeed first)"
+            )
+        parameters = param_model(operation=operation, odoo_id=int(odoo_id))
+    elif operation == "odoo.picking_validate":
+        order = _resolve_sales_order(db, run)
+        odoo_id = None
+        if order is not None:
+            # The connector requires the stock.picking id, not the sale order
+            # id: prefer the domain column written back from picking_create,
+            # fall back to the create effect's ledger remote_reference.
+            odoo_id = order.odoo_picking_id or _prior_effect_remote_reference(
+                db, run, "picking_create"
+            )
+        if not odoo_id:
+            raise ValueError(
+                f"cannot build {operation} parameters: stock.picking id unknown "
+                f"(odoo.picking_create effect must succeed first)"
+            )
+        parameters = param_model(operation=operation, odoo_id=int(odoo_id))
+    elif operation == "odoo.invoice_validate":
+        order = _resolve_sales_order(db, run)
+        odoo_id = None
+        if order is not None:
+            # account.move id, not the sale order id.
+            odoo_id = order.odoo_invoice_id or _prior_effect_remote_reference(
+                db, run, "invoice_create"
+            )
+        if not odoo_id:
+            raise ValueError(
+                f"cannot build {operation} parameters: account.move id unknown "
+                f"(odoo.invoice_create effect must succeed first)"
             )
         parameters = param_model(operation=operation, odoo_id=int(odoo_id))
     elif operation in {"odoo.picking_create", "odoo.invoice_create"}:
@@ -262,15 +337,87 @@ def build_effect_execution_request(
             operation=operation,
             values={"order_ref": order.order_ref, "currency": order.currency},
         )
+    elif operation == "odoo.credit_note_create":
+        case = db.get(ReturnCase, uuid.UUID(refs["case_id"])) if refs.get("case_id") else None
+        if case is None:
+            raise ValueError(f"cannot build {operation} parameters: return case missing")
+        parameters = param_model(
+            operation=operation,
+            values={
+                "invoice_origin": case.order_ref or case.shopify_order_id or case.return_ref,
+                "currency": case.currency or "CNY",
+                "amount": str(case.refund_amount) if case.refund_amount is not None else "0",
+            },
+        )
+    elif operation == "odoo.credit_note_validate":
+        case = db.get(ReturnCase, uuid.UUID(refs["case_id"])) if refs.get("case_id") else None
+        odoo_id = None
+        if case is not None:
+            odoo_id = case.odoo_credit_note_id or _prior_effect_remote_reference(
+                db, run, "credit_note_create"
+            )
+        if not odoo_id:
+            raise ValueError(
+                f"cannot build {operation} parameters: account.move id unknown "
+                f"(odoo.credit_note_create effect must succeed first)"
+            )
+        parameters = param_model(operation=operation, odoo_id=int(odoo_id))
+    elif operation == "odoo.product_create":
+        revision = (
+            db.get(CatalogRevision, uuid.UUID(refs["revision_id"]))
+            if refs.get("revision_id")
+            else None
+        )
+        if revision is None:
+            raise ValueError(f"cannot build {operation} parameters: catalog revision missing")
+        parameters = param_model(
+            operation=operation,
+            values={
+                "name": revision.title or revision.sku,
+                "default_code": revision.sku,
+                "type": "product",
+                "sale_ok": True,
+                "purchase_ok": True,
+            },
+        )
+    elif operation == "odoo.product_update":
+        revision = (
+            db.get(CatalogRevision, uuid.UUID(refs["revision_id"]))
+            if refs.get("revision_id")
+            else None
+        )
+        odoo_id = _prior_effect_remote_reference(db, run, "product_create")
+        if revision is None or not odoo_id:
+            raise ValueError(
+                f"cannot build {operation} parameters: odoo product id unknown "
+                f"(odoo.product_create effect must succeed first)"
+            )
+        parameters = param_model(
+            operation=operation,
+            odoo_id=int(odoo_id),
+            values=dict(revision.proposed or {}),
+        )
+    elif operation == "shopify.product_update":
+        listing = _resolve_listing(db, run, refs)
+        gid = _product_gid_for(db, listing)
+        if not gid:
+            raise ValueError(
+                f"cannot build {operation} parameters: shopify product gid unknown"
+            )
+        revision = (
+            db.get(CatalogRevision, uuid.UUID(refs["revision_id"]))
+            if refs.get("revision_id")
+            else None
+        )
+        parameters = param_model(
+            operation=operation,
+            gid=gid,
+            payload=dict(revision.proposed or {}) if revision is not None else {},
+        )
     elif operation == "odoo.stock_move_create":
         parameters = param_model(operation=operation, values={"source": "commerce-orchestrator"})
     else:
-        # product_update / product_create / credit_note_* etc.: parameters
-        # depend on adapter read-back contracts owned by WP5.
-        raise ValueError(
-            f"no parameter builder for effect operation {operation!r} "
-            "(pending WP5 adapter mapping)"
-        )
+        raise ValueError(f"no parameter builder for effect operation {operation!r}")
 
     return EffectExecutionRequest(
         intent_id=effect_id,
@@ -367,10 +514,80 @@ def finalize_after_effect(
         if order is not None:
             order.odoo_po_id = remote or order.odoo_po_id
 
+    elif operation == "odoo.bill_create":
+        order = db.get(ProcurementOrder, uuid.UUID(refs["po_id"])) if refs.get("po_id") else None
+        if order is not None:
+            order.odoo_bill_id = remote or order.odoo_bill_id
+            # P7 整改第 2 点: bill posting only advances after the remote
+            # effect succeeded (never simulated at approval time).
+            if order.status == ProcurementStatus.RECEIVED:
+                advance_entity(
+                    db,
+                    order,
+                    "ProcurementOrder",
+                    "bill_posted",
+                    correlation_id=run.correlation_id,
+                    context={"auto": False},
+                )
+            if order.status == ProcurementStatus.BILL_POSTED:
+                advance_entity(
+                    db,
+                    order,
+                    "ProcurementOrder",
+                    "in_payment",
+                    correlation_id=run.correlation_id,
+                    context={"auto": False},
+                )
+
     elif operation in {"odoo.sale_order_create", "odoo.sale_order_confirm"}:
         order = _resolve_sales_order(db, run)
         if order is not None:
             order.odoo_sale_order_id = remote or order.odoo_sale_order_id
+            if (
+                operation == "odoo.sale_order_confirm"
+                and order.status == SalesOrderStatus.ODO_DRAFTED
+            ):
+                # The intake completes only once the remote sale order is
+                # created AND confirmed (mirrors the v1 slice's ordering).
+                advance_entity(
+                    db,
+                    order,
+                    "SalesOrder",
+                    "confirmed",
+                    correlation_id=run.correlation_id,
+                    context={"auto": True},
+                )
+
+    elif operation == "odoo.picking_create":
+        order = _resolve_sales_order(db, run)
+        if order is not None:
+            order.odoo_picking_id = remote or order.odoo_picking_id
+
+    elif operation == "odoo.invoice_create":
+        order = _resolve_sales_order(db, run)
+        if order is not None:
+            order.odoo_invoice_id = remote or order.odoo_invoice_id
+
+    elif operation == "odoo.credit_note_create":
+        case = db.get(ReturnCase, uuid.UUID(refs["case_id"])) if refs.get("case_id") else None
+        if case is not None:
+            if remote:
+                # The business credit-note number comes from the remote
+                # effect (never a synthetic CN-* value).
+                case.odoo_credit_note_id = remote
+                case.credit_note_id = remote
+            if case.status == ReturnStatus.DISPOSITION_APPROVED:
+                # Credit notes are only posted against a posted invoice
+                # (state machine invariant; effect_transition_context passes
+                # the same ``invoice_posted`` attestation to the ledger).
+                advance_entity(
+                    db,
+                    case,
+                    "ReturnCase",
+                    "credit_note_posted",
+                    correlation_id=run.correlation_id,
+                    context={"auto": False, "invoice_posted": True},
+                )
 
 
 def apply_effect_outcome(

@@ -11,10 +11,13 @@ Fixed routing:
   definition with ``SetWorkflowID(str(workflow_run_id))`` (deterministic id:
   replayed events return the original execution);
 - ``workflow.decision_recorded`` -> ``DBOS.send`` to the workflow id, topic =
-  work item id, idempotency key = decision id (durable approval message);
-- ``order.received`` / ``return.case_requested`` -> legacy v1 slice workflows
-  (webhook-driven in-flight runs; ``app.services.webhooks`` is not part of
-  WP4 and keeps creating v1 runs until WP6 migrates it).
+  work item id, idempotency key = decision id (durable approval message).
+
+Webhook-driven domain events (``order.received`` / ``return.case_requested``)
+have no relay action: webhooks now create DBOS v2 runs and emit
+``workflow.accepted``, which carries the start action.  Planning such an event
+raises (fail-closed) so a stale v1 event is dead-lettered instead of silently
+dropped.
 """
 
 from __future__ import annotations
@@ -36,9 +39,6 @@ DECISION_MESSAGE_KEYS = (
     "reason",
     "submitted_version",
 )
-
-V1_WORKFLOW_TYPES = frozenset({"order-to-cash", "return-to-refund"})
-
 
 @dataclass(frozen=True)
 class InboxAction:
@@ -81,33 +81,11 @@ def plan_inbox_action(event: OutboxEvent) -> InboxAction:
             idempotency_key=str(payload["decision_id"]),
         )
 
-    if event_type == "order.received":
-        return InboxAction(
-            kind="start",
-            workflow_type="order-to-cash",
-            workflow_version=1,
-            start_kwargs={"payload": payload, "correlation_id": event.correlation_id},
-        )
-    if event_type == "return.case_requested":
-        return InboxAction(
-            kind="start",
-            workflow_type="return-to-refund",
-            workflow_version=1,
-            start_kwargs={"payload": payload, "correlation_id": event.correlation_id},
-        )
-
     raise ValueError(f"no inbox action for event type {event_type!r}")
 
 
 def _resolve_definition(workflow_type: str, workflow_version: int) -> Any:
     """Resolve the workflow function for start actions."""
-    if workflow_version == 1 and workflow_type in V1_WORKFLOW_TYPES:
-        from app.workflows import vertical_slice
-
-        return {
-            "order-to-cash": vertical_slice.order_to_cash_workflow,
-            "return-to-refund": vertical_slice.return_to_refund_workflow,
-        }[workflow_type]
     from app.workflows.definitions import resolve_definition
 
     return resolve_definition(workflow_type, workflow_version)

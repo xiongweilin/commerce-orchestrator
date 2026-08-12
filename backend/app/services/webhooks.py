@@ -1,15 +1,22 @@
-"""Shopify webhook ingestion: dedup, encrypted raw storage, domain events.
+"""Shopify webhook ingestion: dedup, vaulted raw storage, v2 domain events.
 
 Webhooks are deduplicated by their ``X-Shopify-Webhook-Id`` using an inbox row
-with consumer ``shopify-webhook``.  The encrypted raw body is stored on a
-:class:`Projection` row (owner ``shopify_webhook``) -- no new table is needed.
-Each recognised topic then emits the corresponding domain event and starts the
-domain workflow state machine (a :class:`WorkflowRun`).
+with consumer ``shopify-webhook``.  The raw body is encrypted into the
+:class:`SensitivePayload` vault (purpose ``shopify_webhook``) under the same
+30-day retention as every other sensitive payload (docs/architecture.md 6.1);
+the :class:`Projection` row (owner ``shopify_webhook``) only keeps a vault
+reference plus non-sensitive metadata -- never the body or any PII.
+
+Recognised topics emit the corresponding minimal domain event (stable
+references only, no raw payload expansion) and create a DBOS v2
+:class:`WorkflowRun` (``orchestration_engine='dbos'``, ``workflow_version=2``)
+with a minimal input.  A ``workflow.accepted`` inbox event lets the worker
+relay start the deterministic v2 definition with ``SetWorkflowID`` -- the
+legacy v1 slice is no longer used for webhooks.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import uuid
 from decimal import Decimal
@@ -20,13 +27,13 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import ValidationError
 from app.core.logging import get_logger
-from app.core.security import encrypt_payload
 from app.core.time import utc_now
 from app.core.uuid7 import uuid7
 from app.models.messaging import InboxEvent
 from app.models.order import SalesOrder, SalesOrderStatus
 from app.models.projections import Projection
 from app.models.returns import ReturnCase, ReturnStatus
+from app.models.sensitive_payload import SensitivePayload
 from app.models.workflow import WorkflowRun, WorkflowRunStatus
 from app.services.outbox_inbox import emit_event
 from app.services.privacy import hmac_ref, store_sensitive_payload
@@ -35,6 +42,11 @@ logger = get_logger("commerce.webhooks")
 
 SHOPIFY_WEBHOOK_CONSUMER = "shopify-webhook"
 PROJECTION_OWNER = "shopify_webhook"
+WEBHOOK_VAULT_PURPOSE = "shopify_webhook"
+WEBHOOK_VAULT_OWNER = "shopify_webhook"
+DBOS_WORKFLOW_VERSION = 2
+DBOS_ORCHESTRATION_ENGINE = "dbos"
+WORKFLOW_ACCEPTED_CONSUMER = "worker"
 
 # topic -> (event_type, aggregate_type, producer, workflow_type)
 TOPIC_EVENT_MAP: dict[str, tuple[str, str, str, str | None]] = {
@@ -132,6 +144,62 @@ def _start_domain_entity(
     return None, None
 
 
+def _minimal_event_payload(
+    *,
+    webhook_id: str,
+    topic: str,
+    aggregate_id: str,
+    vault_id: str,
+) -> dict[str, Any]:
+    """Minimal domain-event payload: stable refs only, never raw webhook PII."""
+    return {
+        "webhook_id": webhook_id,
+        "topic": topic,
+        "entity_id": aggregate_id,
+        "sensitivePayloadId": vault_id,
+    }
+
+
+def _minimal_run_input(
+    *,
+    topic: str,
+    payload: dict[str, Any],
+    webhook_id: str,
+    entity_id: str,
+    vault_id: str,
+) -> dict[str, Any]:
+    """Minimal v2 run input: stable refs + non-sensitive business fields.
+
+    The full raw body lives only in the encrypted vault; domain events and
+    workflow inputs never carry plaintext email / shipping / line-item data.
+    """
+    base = {
+        "webhook_id": webhook_id,
+        "topic": topic,
+        "entity_id": entity_id,
+        "sensitivePayloadId": vault_id,
+    }
+    if topic == "orders/create":
+        shopify_id = payload.get("id")
+        return {
+            **base,
+            "shopify_order_id": str(shopify_id) if shopify_id is not None else None,
+            "order_ref": str(payload.get("name") or "") or None,
+        }
+    if topic == "refunds/create":
+        shopify_id = payload.get("order_id")
+        return {
+            **base,
+            "case_id": entity_id,
+            "shopify_order_id": str(shopify_id) if shopify_id is not None else None,
+            "refund_amount": (
+                str(payload.get("amount")) if payload.get("amount") is not None else None
+            ),
+            "currency": str(payload.get("currency") or "CNY"),
+        }
+    return base
+
+
 def ingest_shopify_webhook(
     db,
     *,
@@ -165,19 +233,34 @@ def ingest_shopify_webhook(
     with db.begin_nested():
         db.add(InboxEvent(consumer=SHOPIFY_WEBHOOK_CONSUMER, event_id=webhook_uuid))
 
-    encrypted = base64.b64encode(encrypt_payload(raw_body)).decode("ascii")
+    # Raw webhook body -> unified vault (Fernet, 30-day retention; the same
+    # cleanup job that clears shipping/customer payloads covers it).
+    vault = store_sensitive_payload(
+        db,
+        purpose=WEBHOOK_VAULT_PURPOSE,
+        classification="PII",
+        owner=WEBHOOK_VAULT_OWNER,
+        source_type="webhook",
+        source_id=webhook_id,
+        plaintext=raw_body.decode("utf-8", errors="replace"),
+    )
     projection = Projection(
         owner=PROJECTION_OWNER,
         source=topic,
         external_id=webhook_id,
         observed_at=utc_now(),
-        payload={"enc": encrypted, "headers": _safe_headers(headers), "topic": topic},
+        payload={
+            "vaultId": str(vault.id),
+            "headers": _safe_headers(headers),
+            "topic": topic,
+        },
     )
     db.add(projection)
     try:
         db.flush()
     except IntegrityError:
-        # Duplicate projection (already ingested): update in place.
+        # Duplicate projection (already ingested): reuse the existing vault
+        # row (one encrypted copy per webhook) and update metadata in place.
         row = db.execute(
             select(Projection).where(
                 Projection.owner == PROJECTION_OWNER,
@@ -185,6 +268,17 @@ def ingest_shopify_webhook(
                 Projection.external_id == webhook_id,
             )
         ).scalar_one()
+        existing_vault = db.execute(
+            select(SensitivePayload).where(
+                SensitivePayload.purpose == WEBHOOK_VAULT_PURPOSE,
+                SensitivePayload.source_id == webhook_id,
+            )
+        ).scalars().first()
+        if existing_vault is not None:
+            existing_vault.ciphertext = vault.ciphertext
+            existing_vault.expires_at = vault.expires_at
+            db.delete(vault)
+            vault = existing_vault
         row.payload = projection.payload
         row.observed_at = utc_now()
 
@@ -205,6 +299,8 @@ def ingest_shopify_webhook(
     )
     aggregate_id = entity_id or _entity_id_for(topic, payload, webhook_id)
 
+    # Minimal domain event: stable refs + vault reference only (no raw body,
+    # no plaintext email/shipping/line items).
     event = emit_event(
         db,
         event_type=event_type,
@@ -212,22 +308,48 @@ def ingest_shopify_webhook(
         aggregate_id=aggregate_id,
         correlation_id=correlation_id,
         producer=producer,
-        payload={"webhook_id": webhook_id, "topic": topic, **payload},
-        consumers=["worker"],
+        payload=_minimal_event_payload(
+            webhook_id=webhook_id,
+            topic=topic,
+            aggregate_id=aggregate_id,
+            vault_id=str(vault.id),
+        ),
     )
 
     run_id: str | None = None
     if workflow_type is not None:
         run = WorkflowRun(
             workflow_type=workflow_type,
-            workflow_version=1,
-            status=WorkflowRunStatus.RUNNING,
+            workflow_version=DBOS_WORKFLOW_VERSION,
+            orchestration_engine=DBOS_ORCHESTRATION_ENGINE,
+            status=WorkflowRunStatus.ACCEPTED,
             correlation_id=correlation_id,
-            input_json={"webhook_id": webhook_id, "topic": topic, **payload},
+            input_json=_minimal_run_input(
+                topic=topic,
+                payload=payload,
+                webhook_id=webhook_id,
+                entity_id=aggregate_id,
+                vault_id=str(vault.id),
+            ),
         )
         db.add(run)
         db.flush()
         run_id = str(run.id)
+        emit_event(
+            db,
+            event_type="workflow.accepted",
+            aggregate_type="workflow",
+            aggregate_id=run_id,
+            correlation_id=correlation_id,
+            producer="workflow",
+            payload={
+                "workflow_id": run_id,
+                "workflow_type": workflow_type,
+                "workflow_version": DBOS_WORKFLOW_VERSION,
+                "correlation_id": correlation_id,
+            },
+            consumers=[WORKFLOW_ACCEPTED_CONSUMER],
+        )
 
     return {
         "received": True,
@@ -236,6 +358,7 @@ def ingest_shopify_webhook(
         "event_id": str(event.event_id),
         "aggregate_id": aggregate_id,
         "workflow_id": run_id,
+        "workflow_version": DBOS_WORKFLOW_VERSION if run_id is not None else None,
     }
 
 

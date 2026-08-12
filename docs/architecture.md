@@ -69,7 +69,7 @@ flowchart LR
 
 ## 4a. 新工作流状态（DBOS v2 单一主线）
 
-新流程全部经 API 受理（`accept_command` 只建 `WorkflowRun` + `workflow.accepted`，不推进领域状态）→ worker relay 以 `SetWorkflowID(str(run.id))` 启动 v2 definition（`(workflow_type, workflow_version)` 注册表解析，新流程 `workflow_version=2`）：
+新流程（API command 与 Shopify 订单/退货 webhook）全部创建 DBOS v2 工作流：API 经 `accept_command` 受理（只建 `WorkflowRun` + `workflow.accepted`，不推进领域状态）；webhook 在摄取时创建领域实体 + v2 `WorkflowRun`（`workflow_version=2`）并发出 `workflow.accepted`，原始 payload 仅加密进 vault，事件与工作流输入只带稳定引用。worker relay 以 `SetWorkflowID(str(run.id))` 启动 v2 definition（`(workflow_type, workflow_version)` 注册表解析，含 `order-to-cash` / `return-to-refund` v2 定义）：
 
 ```text
 accepted
@@ -89,7 +89,7 @@ accepted
 - `failed`：配置错误、确定性 guard 失败、不可重试错误或重试次数耗尽。
 - `cancelled`：人工拒绝、取消或审批超期。
 
-在途兼容：既有 `legacy_inline` 非终态流程由 v1 切片兼容 adapter 完成；所有新命令只创建 DBOS v2 workflow（ADR-0011）。
+在途兼容：既有 `legacy_inline` 非终态流程由 v1 切片兼容 adapter 完成；所有新命令与 webhook 只创建 DBOS v2 workflow，不再新建 v1 run（ADR-0011）。
 
 ## 5. 可靠性模型
 

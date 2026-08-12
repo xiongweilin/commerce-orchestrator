@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 /**
  * Failed inbox 查看 + retry 页面（仅 system_admin，计划 §2.2 / §四.2）。
  * GET /v1/ops/inbox?status=failed；retry 必须携带 Idempotency-Key。
- * 后端 ops 接口由 WP6 在 Wave 2 实现；未就绪时列表显示「待 WP6 联调」。
+ * 后端 ops 接口已实现（WP6 落地）；未就绪时列表显示错误提示。
  */
 export default async function OpsInboxPage() {
   const user = await getServerUser();
@@ -35,7 +35,7 @@ export default async function OpsInboxPage() {
     data = await api.get<PageEnvelope<OpsInboxEvent>>("/v1/ops/inbox?status=failed", { token });
   } catch (err) {
     if (err instanceof ApiError && (err.status === 404 || err.status === 501 || err.status === 405)) {
-      error = `接口未就绪：${err.message}（后端 /v1/ops/inbox 由 WP6 在 Wave 2 实现，待联调）`;
+      error = `接口未就绪：${err.message}`;
     } else {
       error =
         err instanceof ApiError

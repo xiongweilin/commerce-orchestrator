@@ -15,7 +15,7 @@ const NOT_READY_CODES = new Set([
 
 /**
  * 失败 inbox 重试按钮：POST /v1/ops/inbox/{id}/retry（必须携带 Idempotency-Key，计划 §2.2）。
- * 后端 ops 接口由 WP6 在 Wave 2 实现；未就绪（404/405/501）时提示「待 WP6 联调」。
+ * 后端 ops 接口已实现（WP6 落地）；未就绪（404/405/501）时提示接口错误。
  */
 export default function RetryInboxButton({ eventId }: { eventId: string }) {
   const router = useRouter();
@@ -39,7 +39,7 @@ export default function RetryInboxButton({ eventId }: { eventId: string }) {
           err.status === 501 ||
           NOT_READY_CODES.has(err.code)
         ) {
-          setMessage({ kind: "not_ready", text: `接口未就绪：后端尚未实现（${err.message}，待 WP6 联调）。` });
+          setMessage({ kind: "not_ready", text: `接口未就绪：后端返回 ${err.message}。` });
         } else {
           setMessage({
             kind: "error",
