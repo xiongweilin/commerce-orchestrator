@@ -55,9 +55,8 @@ class IdempotencyInProgressError(IdempotencyConflictError):
 def _work_item_summary(item: WorkItem) -> dict[str, Any]:
     """Canonical work-item shape (计划 §四.1).
 
-    Returns ``expectedWorkflowVersion`` as the canonical field and keeps
-    ``expectedVersion`` during the compatibility window; adds ``workflowId``
-    and ``createdAt``.
+    Returns ``expectedWorkflowVersion`` as the canonical field, plus
+    ``workflowId`` and ``createdAt``.
     """
     return {
         "workItemId": str(item.id),
@@ -68,7 +67,6 @@ def _work_item_summary(item: WorkItem) -> dict[str, Any]:
         "requiredRoles": item.required_roles or [],
         "assigneeUserId": str(item.assignee_user_id) if item.assignee_user_id else None,
         "expectedWorkflowVersion": item.expected_version,
-        "expectedVersion": item.expected_version,
         "expiresAt": item.expires_at.isoformat() if item.expires_at else None,
         "decidedByUserId": str(item.decided_by_user_id) if item.decided_by_user_id else None,
         "decidedAt": item.decided_at.isoformat() if item.decided_at else None,

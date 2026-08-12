@@ -1,4 +1,4 @@
-"""Idempotency guarantees of ``dispatch_command``."""
+"""Idempotency guarantees of ``accept_command`` (DBOS v2)."""
 
 from __future__ import annotations
 
@@ -7,116 +7,71 @@ import uuid
 import pytest
 from sqlalchemy import func, select
 
-from app.core.errors import IdempotencyConflictError
+from app.core.errors import IdempotencyConflictError, ValidationError
 from app.models.catalog import CatalogRevision
 from app.models.effect import EffectLedgerEntry
 from app.models.messaging import IdempotencyRecord
 from app.models.workflow import WorkflowRun
-from app.services.commands import dispatch_command
+from app.services.commands import accept_command
 
 
 def _count(db, model) -> int:
     return db.execute(select(func.count()).select_from(model)).scalar_one()
 
 
+def _command(sku: str) -> dict:
+    return {"type": "catalog-revision", "payload": {"sku": sku, "title": "Widget"}}
+
+
 def test_same_key_and_body_is_replayed_exactly_once(db) -> None:
-    payload = {"sku": "SKU-1", "title": "Widget", "proposed": {"price": "9.99"}}
     results = [
-        dispatch_command(
+        accept_command(
             db,
-            scope="catalog",
-            key="replay-key-1",
-            command_type="catalog-revision",
-            payload=payload,
+            command=_command("SKU-1"),
+            idempotency_key="replay-key-1",
         )
         for _ in range(10)
     ]
 
-    assert results[0]["replayed"] is False
+    assert results[0].replayed is False
     for result in results[1:]:
-        assert result["replayed"] is True
-        assert result["workflowId"] == results[0]["workflowId"]
-        assert result["statusUrl"] == results[0]["statusUrl"]
+        assert result.replayed is True
+        assert result.workflow_id == results[0].workflow_id
+        assert result.status_url == results[0].status_url
 
-    # Exactly one run, one idempotency record and one domain entity.
+    # Exactly one run and one idempotency record; accept-only creates no
+    # domain entity and no effect-ledger side effect.
     assert _count(db, WorkflowRun) == 1
     assert _count(db, IdempotencyRecord) == 1
-    assert _count(db, CatalogRevision) == 1
-    # No effect-ledger side effect is duplicated by the replays.
+    assert _count(db, CatalogRevision) == 0
     assert _count(db, EffectLedgerEntry) == 0
 
 
 def test_same_key_different_body_raises_conflict(db) -> None:
-    dispatch_command(
-        db,
-        scope="catalog",
-        key="conflict-key",
-        command_type="catalog-revision",
-        payload={"sku": "SKU-1"},
-    )
+    accept_command(db, command=_command("SKU-1"), idempotency_key="conflict-key")
     with pytest.raises(IdempotencyConflictError):
-        dispatch_command(
-            db,
-            scope="catalog",
-            key="conflict-key",
-            command_type="catalog-revision",
-            payload={"sku": "SKU-2"},
-        )
+        accept_command(db, command=_command("SKU-2"), idempotency_key="conflict-key")
     assert _count(db, WorkflowRun) == 1
 
 
-def test_same_key_in_different_scope_is_independent(db) -> None:
-    payload = {"sku": "SKU-1"}
-    first = dispatch_command(
-        db,
-        scope="catalog-a",
-        key="shared-key",
-        command_type="catalog-revision",
-        payload=payload,
-    )
-    second = dispatch_command(
-        db,
-        scope="catalog-b",
-        key="shared-key",
-        command_type="catalog-revision",
-        payload=payload,
-    )
-    assert first["replayed"] is False
-    assert second["replayed"] is False
-    assert first["workflowId"] != second["workflowId"]
+def test_different_keys_are_independent(db) -> None:
+    first = accept_command(db, command=_command("SKU-1"), idempotency_key="key-a")
+    second = accept_command(db, command=_command("SKU-1"), idempotency_key="key-b")
+    assert first.replayed is False
+    assert second.replayed is False
+    assert first.workflow_id != second.workflow_id
     assert _count(db, WorkflowRun) == 2
-    assert _count(db, CatalogRevision) == 2
 
 
-def test_dispatch_without_scope_or_key_raises(db) -> None:
-    from app.core.errors import ValidationError
-
+def test_accept_without_key_raises(db) -> None:
     with pytest.raises(ValidationError):
-        dispatch_command(
-            db,
-            scope="",
-            key="k",
-            command_type="catalog-revision",
-            payload={"sku": "SKU-1"},
-        )
-    with pytest.raises(ValidationError):
-        dispatch_command(
-            db,
-            scope="catalog",
-            key="",
-            command_type="catalog-revision",
-            payload={"sku": "SKU-1"},
-        )
+        accept_command(db, command=_command("SKU-1"), idempotency_key=None)
 
 
 def test_unknown_command_type_raises(db) -> None:
-    from app.core.errors import ValidationError
-
     with pytest.raises(ValidationError):
-        dispatch_command(
+        accept_command(
             db,
-            scope="catalog",
-            key=f"key-{uuid.uuid4()}",
-            command_type="no-such-command",
-            payload={"sku": "SKU-1"},
+            command={"type": "no-such-command", "payload": {"sku": "SKU-1"}},
+            idempotency_key=f"key-{uuid.uuid4()}",
         )

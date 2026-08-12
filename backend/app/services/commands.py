@@ -1,19 +1,15 @@
-"""Command dispatch with idempotency, plus the v1 inline domain state machines.
+"""Write-command acceptance for the DBOS v2 mainline.
 
-``dispatch_command`` is the single entry point for write commands:
+``accept_command`` is the single entry point for write commands:
 
 1. Idempotency lookup on ``(scope, key)`` -- same request hash replays the
    stored result; a different hash raises :class:`IdempotencyConflictError`.
-2. Creates the :class:`WorkflowRun` (status ``running``).
-3. Runs the domain entry for the command type synchronously inside the
-   caller's transaction (v1; DBOS wrapping lives in ``app/workflows``).
-4. Persists the idempotency record with the stored result.
-
-The domain entries advance each entity's state machine to its first approval
-gate and create the corresponding work item.  Approving a work item runs the
-registered continuation (see :func:`register_next_step` in
-``app.services.approvals``) which advances the machine to the next gate or,
-for external effects, records planned effects for the worker to execute.
+2. Creates the DBOS v2 :class:`WorkflowRun` (``orchestration_engine='dbos'``,
+   ``workflow_version=2``, status ``accepted``) and emits
+   ``workflow.accepted`` for the worker relay.
+3. The worker starts the registered v2 definition; the shared domain entries
+   (``COMMAND_HANDLERS``) and next-step continuations below seed each entity
+   and advance it through its human gates.
 """
 
 from __future__ import annotations
@@ -56,8 +52,8 @@ logger = get_logger("commerce.commands")
 COMMAND_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {}
 
 # New commands are accepted as DBOS v2 workflows (orchestration_engine="dbos",
-# workflow_version=2).  The legacy inline path (dispatch_command) stays as the
-# compatibility adapter that finishes in-flight legacy_inline runs.
+# workflow_version=2).  The domain entries and next-step continuations below
+# are shared with the v2 driver (COMMAND_HANDLERS / register_next_step).
 DBOS_WORKFLOW_VERSION = 2
 DBOS_ORCHESTRATION_ENGINE = "dbos"
 ACCEPTED_EVENT_CONSUMER = "worker"
@@ -229,32 +225,22 @@ def _run_result(run: WorkflowRun, extras: dict[str, Any] | None = None) -> dict[
 def _complete_run(db, run: WorkflowRun, *, extras: dict[str, Any] | None = None) -> None:
     """Finalise a run as completed.
 
-    For DBOS v2 runs the terminal transition is owned by the workflow driver
-    (``app.workflows.definitions._complete_txn``): the v1 continuation (e.g.
-    the closing gate) only records the result here and leaves the run in
-    ``running`` so planned effects are executed first and outcome_unknown /
-    failed can still settle on the run (plan 二.4 execution order).  Legacy
-    inline runs keep the immediate completion.
+    The terminal transition is owned by the workflow driver
+    (``app.workflows.definitions._complete_txn``): the closing continuation
+    only records the result here and leaves the run in ``running`` so planned
+    effects are executed first and outcome_unknown / failed can still settle
+    on the run (plan 二.4 execution order).
     """
-    if run.orchestration_engine == "dbos":
-        run.result_json = _run_result(run, extras)
-        db.flush()
-        return
-    run.status = WorkflowRunStatus.COMPLETED
+    if run.orchestration_engine != "dbos":
+        raise ValueError(
+            f"_complete_run supports only dbos runs; got {run.orchestration_engine!r}"
+        )
     run.result_json = _run_result(run, extras)
-    emit_event(
-        db,
-        event_type="workflow.completed",
-        aggregate_type="workflow",
-        aggregate_id=str(run.id),
-        correlation_id=run.correlation_id,
-        producer="workflow",
-        payload={"workflow_id": str(run.id), "workflow_type": run.workflow_type},
-    )
+    db.flush()
 
 
 # ---------------------------------------------------------------------------
-# Domain entries (v1 inline state machines)
+# Domain entries (shared with the v2 driver via COMMAND_HANDLERS)
 # ---------------------------------------------------------------------------
 
 
@@ -472,8 +458,8 @@ def _order_for_run(db, run: WorkflowRun) -> SalesOrder | None:
     """Resolve the sales order owned by an order-to-cash run.
 
     v2 webhook runs carry ``entity_id`` (our SalesOrder uuid) plus stable
-    refs; legacy v1 runs carried the Shopify order id under ``id``.  Falls
-    back to the most recent order only for in-flight legacy compatibility.
+    refs; older fixtures may carry the Shopify order id under ``id``.  Falls
+    back by Shopify order id when the entity reference is absent.
     """
     payload = run.input_json or {}
     entity_id = payload.get("entity_id")
@@ -1034,9 +1020,8 @@ def _approve_return_refund(db, run: WorkflowRun, item, user_id) -> dict[str, Any
 
 
 # ---------------------------------------------------------------------------
-# Order-to-cash continuations (mirror of app.workflows.vertical_slice's
-# order_to_cash_workflow gates, driven through the approval service so the
-# run can be completed without a live DBOS worker).
+# Order-to-cash continuations (registered via register_next_step; invoked by
+# the v2 driver inside app.workflows.definitions after a durable approval).
 # ---------------------------------------------------------------------------
 
 
@@ -1202,69 +1187,6 @@ register_next_step("order-to-cash", "invoice", _approve_order_invoice)
 register_next_step("order-to-cash", "close", _approve_order_close)
 
 
-def dispatch_command(
-    db,
-    *,
-    scope: str,
-    key: str,
-    command_type: str,
-    payload: dict[str, Any],
-    actor_user_id: Any = None,
-    correlation_id: str | None = None,
-) -> dict[str, Any]:
-    """Dispatch a write command with idempotency and run the inline state machine.
-
-    The caller owns the transaction: nothing here commits.  Idempotency
-    records, business writes and the workflow run are all written in the same
-    transaction so a commit either persists everything or nothing.
-    """
-    if not scope or not key:
-        raise ValidationError("scope and key are required")
-    request_hash = canonical_hash(payload)
-
-    existing = db.execute(
-        select(IdempotencyRecord).where(
-            IdempotencyRecord.scope == scope,
-            IdempotencyRecord.key == key,
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        if existing.request_hash != request_hash:
-            raise IdempotencyConflictError(
-                f"idempotency key {key!r} was already used with a different request body"
-            )
-        return {**(existing.result_json or {}), "replayed": True}
-
-    handler = COMMAND_HANDLERS.get(command_type)
-    if handler is None:
-        raise ValidationError(f"unknown command type: {command_type}")
-
-    correlation_id = correlation_id or str(uuid7())
-    run = WorkflowRun(
-        workflow_type=command_type,
-        workflow_version=1,
-        status=WorkflowRunStatus.RUNNING,
-        correlation_id=correlation_id,
-        input_json=payload,
-    )
-    db.add(run)
-    db.flush()
-
-    extras = handler(db, run, payload, actor_user_id, correlation_id)
-    result = _run_result(run, extras)
-    db.add(
-        IdempotencyRecord(
-            scope=scope,
-            key=key,
-            request_hash=request_hash,
-            status="completed",
-            result_json=result,
-        )
-    )
-    db.flush()
-    return {**result, "replayed": False}
-
-
 @dataclass(frozen=True)
 class AcceptedCommand:
     """Result of accepting a write command as a DBOS v2 workflow run."""
@@ -1411,5 +1333,4 @@ __all__ = [
     "accept_command",
     "advance_entity",
     "canonical_hash",
-    "dispatch_command",
 ]

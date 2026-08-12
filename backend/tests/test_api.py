@@ -10,12 +10,10 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from v2_helpers import start_v2_run
 
 from app.api.deps import require_roles
 from app.core.errors import PermissionDeniedError
-from app.models.workflow import WorkItem
-from app.services.commands import dispatch_command
 
 
 def _seed_procurement_work_item(db, actor_user_id) -> tuple[str, str, int]:
@@ -23,15 +21,13 @@ def _seed_procurement_work_item(db, actor_user_id) -> tuple[str, str, int]:
 
     The API command path is accept-only for DBOS v2 runs (WP4); without a
     live worker no work item would exist for the decision endpoints.  Seeding
-    through ``dispatch_command`` (the legacy inline engine) exercises the
-    decision HTTP contract independently of the command endpoint's engine.
+    through ``v2_helpers.start_v2_run`` exercises the decision HTTP contract
+    independently of the command endpoint's engine.
     """
-    result = dispatch_command(
+    run, items = start_v2_run(
         db,
-        scope=f"seed-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="procurement",
-        payload={
+        "procurement",
+        {
             "sku": "SKU-API-D",
             "qty": "1",
             "supplier": "ACME",
@@ -39,14 +35,9 @@ def _seed_procurement_work_item(db, actor_user_id) -> tuple[str, str, int]:
         },
         actor_user_id=actor_user_id,
     )
-    workflow_id = result["workflowId"]
-    item = (
-        db.execute(select(WorkItem).where(WorkItem.workflow_id == uuid.UUID(workflow_id)))
-        .scalars()
-        .one()
-    )
+    item = items[0]
     db.commit()
-    return workflow_id, str(item.id), item.expected_version or 1
+    return str(run.id), str(item.id), item.expected_version or 1
 
 
 def assert_error_envelope(body: dict) -> None:
@@ -247,15 +238,13 @@ def test_get_workflow_documented_shape(
 ) -> None:
     owner = make_user(["catalog_owner"])
     auth = auth_headers(owner, ["catalog_owner"])
-    result = dispatch_command(
+    run, _items = start_v2_run(
         db,
-        scope=f"shape-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="catalog-revision",
-        payload={"sku": "SKU-SHAPE", "title": "Shaped"},
+        "catalog-revision",
+        {"sku": "SKU-SHAPE", "title": "Shaped"},
         actor_user_id=owner,
     )
-    workflow_id = result["workflowId"]
+    workflow_id = str(run.id)
     db.commit()
     response = client.get(f"/v1/workflows/{workflow_id}", headers=auth)
     assert response.status_code == 200

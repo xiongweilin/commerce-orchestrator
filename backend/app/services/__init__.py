@@ -18,7 +18,6 @@ from app.services.commands import (
     COMMAND_HANDLERS,
     advance_entity,
     canonical_hash,
-    dispatch_command,
 )
 from app.services.effect_ledger import mark_effect, record_effect
 from app.services.outbox_inbox import (
@@ -88,7 +87,6 @@ __all__ = [
     "check_money_invariants",
     "create_work_item",
     "deliver_outbox",
-    "dispatch_command",
     "emit_event",
     "ensure_roles",
     "envelope_for",

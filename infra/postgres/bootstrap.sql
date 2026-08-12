@@ -178,6 +178,8 @@ DECLARE obj record;
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'dbos') THEN
     ALTER SCHEMA dbos OWNER TO commerce_worker;
+  ELSE
+    CREATE SCHEMA dbos AUTHORIZATION commerce_worker;
   END IF;
   FOR obj IN
     SELECT c.relname, c.relkind

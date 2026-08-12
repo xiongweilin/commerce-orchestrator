@@ -1,7 +1,7 @@
 """P5 模拟：对 Shopify 订单 #1001 执行整单退货退款闭环（无真实客户）。
 
 数据流（全部真实系统，数据为模拟）：
-  dispatch_command(return) → ReturnCase(requested) → 审批链：
+  accept_command(return, DBOS v2) → ReturnCase(requested) → 审批链：
   eligibility(customer_service) → 收货确认(warehouse_staff) → 质检/处置(warehouse_staff)
   → 贷项通知单(accountant) → 退款金额(finance_approver, 四眼) → refund_pending
   → worker 执行：Odoo credit note（真实 JSON-2）+ Shopify refundCreate（开发店手动网关）

@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import func, select
+from v2_helpers import apply_v2_decision, start_v2_run
 
 from app.core.errors import (
     ConflictError,
@@ -23,7 +24,6 @@ from app.models.workflow import (
     WorkItemStatus,
 )
 from app.services.approvals import create_work_item, submit_decision
-from app.services.commands import dispatch_command
 
 
 def _work_items(db, run_id: uuid.UUID) -> list[WorkItem]:
@@ -37,12 +37,10 @@ def _work_items(db, run_id: uuid.UUID) -> list[WorkItem]:
 
 
 def _dispatch_procurement(db, actor_user_id: uuid.UUID) -> tuple[uuid.UUID, WorkItem]:
-    result = dispatch_command(
+    run, items = start_v2_run(
         db,
-        scope=f"approval-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="procurement",
-        payload={
+        "procurement",
+        {
             "sku": "SKU-PO-1",
             "qty": "10",
             "uom": "unit",
@@ -52,10 +50,8 @@ def _dispatch_procurement(db, actor_user_id: uuid.UUID) -> tuple[uuid.UUID, Work
         },
         actor_user_id=actor_user_id,
     )
-    run_id = uuid.UUID(result["workflowId"])
-    items = _work_items(db, run_id)
     assert len(items) == 1
-    return run_id, items[0]
+    return run.id, items[0]
 
 
 def test_approve_by_required_role_runs_continuation(db, make_user) -> None:
@@ -65,7 +61,7 @@ def test_approve_by_required_role_runs_continuation(db, make_user) -> None:
     assert item.required_roles == ["budget_owner"]
     assert (item.payload_json or {}).get("four_eyes_area") == "po"
 
-    outcome = submit_decision(
+    outcome = apply_v2_decision(
         db,
         work_item_id=item.id,
         user_id=budget_owner,
@@ -108,7 +104,7 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
     for idx, (work_item, user, decision) in enumerate(steps):
         if work_item is None:
             work_item = _work_items(db, run_id)[-1]
-        outcome = submit_decision(
+        outcome = apply_v2_decision(
             db,
             work_item_id=work_item.id,
             user_id=user,
@@ -154,7 +150,7 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
 
     # The close gate (created with the bill gate) now completes the run.
     close_item = _work_items(db, run_id)[-1]
-    outcome = submit_decision(
+    outcome = apply_v2_decision(
         db,
         work_item_id=close_item.id,
         user_id=accountant_b,
@@ -166,7 +162,9 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
     assert outcome["workflowId"] == str(run_id)
 
     run = db.get(WorkflowRun, run_id)
-    assert run.status == WorkflowRunStatus.COMPLETED
+    # Terminal normalization belongs to the DBOS driver (_complete_txn); the
+    # shared continuation records the result and closes the domain entity.
+    assert run.result_json is not None
     db.refresh(order)
     assert order.status.value == "closed"
     # Every gate decision was audited.
@@ -175,12 +173,10 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
 
 
 def _dispatch_return(db, actor_user_id: uuid.UUID) -> tuple[uuid.UUID, WorkItem]:
-    result = dispatch_command(
+    run, items = start_v2_run(
         db,
-        scope=f"return-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="return",
-        payload={
+        "return",
+        {
             "customer_ref": "cust-1",
             "reason": "damaged on arrival",
             "return_ref": "RET-TEST-1",
@@ -190,8 +186,7 @@ def _dispatch_return(db, actor_user_id: uuid.UUID) -> tuple[uuid.UUID, WorkItem]
         },
         actor_user_id=actor_user_id,
     )
-    run_id = uuid.UUID(result["workflowId"])
-    return run_id, _work_items(db, run_id)[0]
+    return run.id, items[0]
 
 
 def test_return_credit_note_chain_is_effect_gated(db, make_user) -> None:
@@ -217,7 +212,7 @@ def test_return_credit_note_chain_is_effect_gated(db, make_user) -> None:
     for idx, (work_item, user, decision) in enumerate(gates):
         if work_item is None:
             work_item = _work_items(db, run_id)[-1]
-        submit_decision(
+        apply_v2_decision(
             db,
             work_item_id=work_item.id,
             user_id=user,
@@ -273,7 +268,7 @@ def test_return_credit_note_chain_is_effect_gated(db, make_user) -> None:
     # The finance approver then approves the refund amount; the Shopify
     # refund effect is planned.
     refund_gate = _work_items(db, run_id)[-1]
-    submit_decision(
+    apply_v2_decision(
         db,
         work_item_id=refund_gate.id,
         user_id=finance,
@@ -373,20 +368,18 @@ def test_compliance_can_veto_but_not_approve(db, make_user) -> None:
     proposer = make_user(["catalog_owner"])
     compliance = make_user(["compliance"])
 
-    result = dispatch_command(
+    run, items = start_v2_run(
         db,
-        scope=f"veto-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="catalog-revision",
-        payload={"sku": "SKU-VETO", "proposed": {"title": "x"}},
+        "catalog-revision",
+        {"sku": "SKU-VETO", "proposed": {"title": "x"}},
         actor_user_id=proposer,
     )
-    run_id = uuid.UUID(result["workflowId"])
-    item = _work_items(db, run_id)[0]
+    run_id = run.id
+    item = items[0]
     assert (item.payload_json or {}).get("compliance_vetoable") is True
 
     # Compliance may reject (veto), which cancels the run.
-    outcome = submit_decision(
+    apply_v2_decision(
         db,
         work_item_id=item.id,
         user_id=compliance,
@@ -394,7 +387,6 @@ def test_compliance_can_veto_but_not_approve(db, make_user) -> None:
         reason="compliance veto",
         expected_workflow_version=item.expected_version,
     )
-    assert outcome["workflowStatus"] == "cancelled"
     assert db.get(WorkflowRun, run_id).status == WorkflowRunStatus.CANCELLED
 
 
@@ -404,15 +396,13 @@ def test_compliance_cannot_approve_and_others_cannot_veto(db, make_user) -> None
     warehouse = make_user(["warehouse_staff"])
 
     def _fresh_item() -> WorkItem:
-        result = dispatch_command(
+        _run, items = start_v2_run(
             db,
-            scope=f"veto-{uuid.uuid4()}",
-            key=f"key-{uuid.uuid4()}",
-            command_type="catalog-revision",
-            payload={"sku": "SKU-VETO-2"},
+            "catalog-revision",
+            {"sku": "SKU-VETO-2"},
             actor_user_id=proposer,
         )
-        return _work_items(db, uuid.UUID(result["workflowId"]))[0]
+        return items[0]
 
     item = _fresh_item()
     with pytest.raises(PermissionDeniedError):

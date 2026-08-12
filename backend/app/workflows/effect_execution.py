@@ -1,7 +1,7 @@
 """Shared, DBOS-free effect execution helpers (P7 二.4 seam).
 
-The DBOS workflow v2 definitions and the v1 legacy slice both drive effects
-through WP5's typed seam (``app.services.effect_ledger.execute_effect``):
+The DBOS v2 workflow definitions drive effects through WP5's typed seam
+(``app.services.effect_ledger.execute_effect``):
 
 1. build an :class:`EffectExecutionRequest` from the ledger row + run domain
    state (:func:`build_effect_execution_request` — fail-closed: an effect

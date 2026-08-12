@@ -522,38 +522,6 @@ def test_submit_decision_v2_version_conflict(db, make_user) -> None:
     assert _count(db, WorkItemDecision) == 0
 
 
-def test_legacy_submit_decision_still_runs_inline_continuation(db, make_user) -> None:
-    """The legacy engine keeps the synchronous continuation behavior."""
-    from app.services.commands import dispatch_command
-
-    proposer = make_user(["procurement_lead"])
-    budget_owner = make_user(["budget_owner"])
-    result = dispatch_command(
-        db,
-        scope=f"legacy-{uuid.uuid4()}",
-        key=f"key-{uuid.uuid4()}",
-        command_type="procurement",
-        payload={"sku": "SKU-L", "supplier": "S", "qty": "1", "unit_cost": "2"},
-        actor_user_id=proposer,
-    )
-    run_id = uuid.UUID(result["workflowId"])
-    item = db.execute(
-        select(WorkItem).where(WorkItem.workflow_id == run_id)
-    ).scalars().one()
-    outcome = submit_decision(
-        db,
-        work_item_id=item.id,
-        user_id=budget_owner,
-        decision="approve",
-        expected_workflow_version=item.expected_version,
-    )
-    assert outcome.decision_recorded is False
-    assert outcome["workflowStatus"] == "awaiting_approval"
-    assert _count(db, WorkItem, WorkItem.workflow_id == run_id) == 2
-    run = db.get(WorkflowRun, run_id)
-    assert run.orchestration_engine == "legacy_inline"
-
-
 # ---------------------------------------------------------------------------
 # Inbox dispatch planning (worker relay)
 # ---------------------------------------------------------------------------
@@ -631,7 +599,7 @@ def test_plan_inbox_action_unknown_event_raises() -> None:
 def test_plan_inbox_action_webhook_domain_events_have_no_relay_action() -> None:
     """Webhooks now create DBOS v2 runs; the worker relay is driven by
     ``workflow.accepted``, so planning a raw webhook domain event fails
-    closed instead of starting the legacy v1 slice."""
+    closed (webhook domain events never start a workflow directly)."""
     from app.models.messaging import OutboxEvent
     from app.workflows.inbox_dispatch import plan_inbox_action
 
