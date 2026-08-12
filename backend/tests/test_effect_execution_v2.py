@@ -488,7 +488,7 @@ def _seed_matrix_domain(db, operation: str) -> WorkflowRun:
         return run
     if operation in _ORDER_MATRIX_OPS:
         run = _run_with_item(db, workflow_type="order-to-cash")
-        _make_order(db, run, shopify_id="SO-M")
+        order = _make_order(db, run, shopify_id="SO-M")
         if operation == "odoo.sale_order_confirm":
             entry = _effect(db, run, "sale_order_create")
             _succeed(db, entry, remote="701", operation="odoo.sale_order_create")
@@ -498,6 +498,11 @@ def _seed_matrix_domain(db, operation: str) -> WorkflowRun:
         elif operation == "odoo.invoice_validate":
             entry = _effect(db, run, "invoice_create")
             _succeed(db, entry, remote="703", operation="odoo.invoice_create")
+        elif operation in {"odoo.picking_create", "odoo.invoice_create"}:
+            entry = _effect(db, run, "sale_order_create")
+            _succeed(db, entry, remote="701", operation="odoo.sale_order_create")
+            order.odoo_sale_order_id = "701"
+            db.flush()
         return run
     if operation in _PROCUREMENT_MATRIX_OPS:
         run = _run_with_item(db, workflow_type="procurement")
@@ -581,9 +586,9 @@ def test_effect_parameter_matrix_builds_typed_request(db, operation) -> None:
             "price": "9.90",
         }
     elif operation == "shopify.fulfillment_create":
-        assert request.parameters.order_gid == "SO-M"
+        assert request.parameters.order_gid == "gid://shopify/Order/SO-M"
     elif operation == "shopify.refund_create":
-        assert request.parameters.order_gid == "SO-M"
+        assert request.parameters.order_gid == "gid://shopify/Order/SO-M"
         assert request.parameters.amount == 7.50
         assert request.parameters.allow_real_money is False
     elif operation == "odoo.product_create":
@@ -596,21 +601,20 @@ def test_effect_parameter_matrix_builds_typed_request(db, operation) -> None:
             "price": "9.90",
         }
     elif operation == "odoo.sale_order_create":
-        assert request.parameters.values["order_ref"] == "ORD-SO-M"
+        assert request.parameters.values["items"] == []
         assert request.parameters.values["currency"] == "CNY"
         assert request.parameters.values["total"] == "100.00"
+        assert request.parameters.values["partner_name"] == "Shopify Customer"
     elif operation == "odoo.sale_order_confirm":
         assert request.parameters.odoo_id == 701  # create effect's remote ref
     elif operation == "odoo.stock_move_create":
         assert request.parameters.values == {"source": "commerce-orchestrator"}
     elif operation == "odoo.picking_create":
-        assert request.parameters.values["order_ref"] == "ORD-SO-M"
-        assert request.parameters.values["currency"] == "CNY"
+        assert request.parameters.values == {"sale_order_id": 701}
     elif operation == "odoo.picking_validate":
         assert request.parameters.odoo_id == 702  # create effect's remote ref
     elif operation == "odoo.invoice_create":
-        assert request.parameters.values["order_ref"] == "ORD-SO-M"
-        assert request.parameters.values["currency"] == "CNY"
+        assert request.parameters.values == {"sale_order_id": 701, "order_ref": "ORD-SO-M"}
     elif operation == "odoo.invoice_validate":
         assert request.parameters.odoo_id == 703  # create effect's remote ref
     elif operation == "odoo.credit_note_create":

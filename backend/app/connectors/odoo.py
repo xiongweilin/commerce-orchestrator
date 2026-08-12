@@ -451,10 +451,16 @@ class OdooConnector:
     ) -> EffectResult:
         """Create a draft sales order idempotently.
 
+        Accepts Odoo-native ``partner_id`` + ``order_line`` values or the
+        domain business fields (``items`` / ``customer_ref`` / ``currency`` /
+        ``total``) which are resolved against the live Odoo catalog first
+        (partner by name, product by SKU; never duplicates).
+
         ``CO:<intent_id>`` is stamped into ``client_order_ref`` and searched
         first; an existing order with the same marker is reported
         ``succeeded(replayed=True)`` (plan 二.4 read-before-create).
         """
+        values = self._normalize_sale_order_values(values)
         values, marker = self._apply_marker(values, intent_id, field="client_order_ref")
         if marker:
             existing = self._search_one(
@@ -512,6 +518,71 @@ class OdooConnector:
             "stock.move", "create", {"vals_list": [values]}, operation="stock_move_create"
         )
 
+    def _normalize_sale_order_values(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Resolve business sale-order fields to Odoo-native values."""
+        if "partner_id" in values or "order_line" in values:
+            return values
+        items = values.get("items") or []
+        if not items:
+            # No business fields: keep the raw values (marker replay path).
+            return values
+        partner = self._ensure_partner(str(values.get("partner_name") or "Shopify Customer"))
+        order_lines = []
+        for item in items:
+            sku = str(item.get("sku") or "").strip()
+            if not sku:
+                raise ExternalSystemError(
+                    "odoo.sale_order_create: line item missing 'sku'"
+                )
+            product = self._search_one(
+                "product.template",
+                [["default_code", "=", sku]],
+                ["id", "default_code", "name"],
+            )
+            if product is None:
+                raise ExternalSystemError(
+                    f"odoo.sale_order_create: product with default_code {sku!r} not found"
+                )
+            qty = float(item.get("quantity") or item.get("qty") or 1)
+            price = float(item.get("price") or values.get("total") or 0)
+            order_lines.append(
+                (
+                    0,
+                    0,
+                    {
+                        "product_id": int(product["id"]),
+                        "name": product.get("name") or sku,
+                        "product_uom_qty": qty,
+                        "price_unit": price,
+                    },
+                )
+            )
+        result: dict[str, Any] = {
+            "partner_id": int(partner["id"]),
+            "order_line": order_lines,
+        }
+        currency = str(values.get("currency") or "").strip()
+        if currency:
+            cur = self._search_one(
+                "res.currency", [["name", "=", currency]], ["id", "name"]
+            )
+            if cur is not None:
+                result["currency_id"] = int(cur["id"])
+        return result
+
+    def _ensure_partner(self, name: str) -> dict[str, Any]:
+        """Find a res.partner by name or create it (sandbox helper)."""
+        partner = self._search_one("res.partner", [["name", "=", name]], ["id", "name"])
+        if partner is not None:
+            return partner
+        created = self._write(
+            "res.partner",
+            "create",
+            {"vals_list": [{"name": name}]},
+            operation="partner_create",
+        )
+        pid = created.remote_reference
+        return {"id": pid, "name": name}
     def create_picking(
         self,
         values: dict[str, Any],
@@ -519,7 +590,28 @@ class OdooConnector:
         idempotency_key: str | None = None,
         intent_id=None,
     ) -> EffectResult:
-        """Create a picking idempotently (``origin=CO:<intent_id>``)."""
+        """Resolve/create a picking idempotently.
+
+        When ``sale_order_id`` is provided the picking is resolved from the
+        confirmed sale order (``sale.order.action_confirm`` auto-creates it);
+        otherwise the legacy marker path is kept (``origin=CO:<intent_id>``).
+        """
+        sale_order_id = values.get("sale_order_id")
+        if sale_order_id:
+            picking = self._search_one(
+                "stock.picking",
+                [["sale_id", "=", int(sale_order_id)]],
+                ["id", "origin"],
+            )
+            if picking is None:
+                raise ExternalSystemError(
+                    f"odoo.picking_create: no picking for sale order {sale_order_id}"
+                )
+            return EffectResult.succeeded(
+                remote_reference=str(picking["id"]),
+                response_hash=payload_hash({"picking": picking}),
+                replayed=False,
+            )
         values, marker = self._apply_marker(values, intent_id, field="origin")
         if marker:
             existing = self._search_one(
@@ -665,7 +757,41 @@ class OdooConnector:
         idempotency_key: str | None = None,
         intent_id=None,
     ) -> EffectResult:
-        """Create a customer invoice idempotently (``ref=CO:<intent_id>``)."""
+        """Create a customer invoice idempotently.
+
+        When ``sale_order_id`` is provided the invoice is generated from the
+        confirmed sale order (``sale.order.action_create_invoice``) and looked
+        up by ``invoice_origin``; otherwise the legacy marker path is kept
+        (``ref=CO:<intent_id>``).
+        """
+        sale_order_id = values.get("sale_order_id")
+        order_ref = str(values.get("order_ref") or "")
+        if sale_order_id:
+            self._write(
+                "sale.order",
+                "action_create_invoice",
+                {"ids": [int(sale_order_id)]},
+                operation="invoice_create",
+                odoo_id=int(sale_order_id),
+            )
+            if order_ref:
+                move = self._search_one(
+                    "account.move",
+                    [
+                        ["invoice_origin", "=", order_ref],
+                        ["move_type", "=", "out_invoice"],
+                    ],
+                    ["id", "invoice_origin"],
+                )
+                if move is not None:
+                    return EffectResult.succeeded(
+                        remote_reference=str(move["id"]),
+                        response_hash=payload_hash({"move": move}),
+                        replayed=False,
+                    )
+            raise ExternalSystemError(
+                f"odoo.invoice_create: no invoice for sale order {sale_order_id}"
+            )
         body = dict(values)
         body.setdefault("move_type", "out_invoice")
         body, marker = self._apply_marker(body, intent_id, field="ref")
