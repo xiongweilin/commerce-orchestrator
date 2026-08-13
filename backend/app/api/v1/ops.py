@@ -66,9 +66,7 @@ def list_inbox(
     )
     total = db.execute(count_stmt).scalar_one()
     events = (
-        db.execute(
-            stmt.order_by(InboxEvent.received_at.desc()).limit(limit).offset(offset)
-        )
+        db.execute(stmt.order_by(InboxEvent.received_at.desc()).limit(limit).offset(offset))
         .scalars()
         .all()
     )
@@ -123,13 +121,7 @@ def _worker_snapshot(db: Session) -> dict[str, Any]:
 
 
 def _inbox_snapshot(db: Session) -> dict[str, Any]:
-    rows = (
-        db.execute(
-            select(InboxEvent.status, func.count())
-            .group_by(InboxEvent.status)
-        )
-        .all()
-    )
+    rows = db.execute(select(InboxEvent.status, func.count()).group_by(InboxEvent.status)).all()
     counts = {status.value: count for status, count in rows}
     oldest = db.execute(
         select(func.min(InboxEvent.received_at)).where(
@@ -149,12 +141,9 @@ def _inbox_snapshot(db: Session) -> dict[str, Any]:
 
 
 def _effect_snapshot(db: Session) -> dict[str, Any]:
-    rows = (
-        db.execute(
-            select(EffectLedgerEntry.status, func.count()).group_by(EffectLedgerEntry.status)
-        )
-        .all()
-    )
+    rows = db.execute(
+        select(EffectLedgerEntry.status, func.count()).group_by(EffectLedgerEntry.status)
+    ).all()
     counts = {status.value: count for status, count in rows}
     alerting = counts.get("outcome_unknown", 0) + counts.get("failed", 0)
     return {
@@ -165,9 +154,7 @@ def _effect_snapshot(db: Session) -> dict[str, Any]:
 
 def _reconciliation_snapshot(db: Session) -> dict[str, Any]:
     run = (
-        db.execute(
-            select(ReconciliationRun).order_by(ReconciliationRun.created_at.desc()).limit(1)
-        )
+        db.execute(select(ReconciliationRun).order_by(ReconciliationRun.created_at.desc()).limit(1))
         .scalars()
         .first()
     )

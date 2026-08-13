@@ -40,6 +40,7 @@ DECISION_MESSAGE_KEYS = (
     "submitted_version",
 )
 
+
 @dataclass(frozen=True)
 class InboxAction:
     """A relay action for one inbox event (serializable plan)."""

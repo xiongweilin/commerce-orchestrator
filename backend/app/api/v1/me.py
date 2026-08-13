@@ -34,9 +34,7 @@ def me(
     """
     user = db.get(User, user_id)
     assignments = (
-        db.execute(select(RoleAssignment).where(RoleAssignment.user_id == user_id))
-        .scalars()
-        .all()
+        db.execute(select(RoleAssignment).where(RoleAssignment.user_id == user_id)).scalars().all()
     )
     roles = sorted({assignment.role.value for assignment in assignments})
     exp = claims.get("exp")

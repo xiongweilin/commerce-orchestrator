@@ -426,9 +426,7 @@ def resolve_diff_with_idempotency(
     ``idempotency_key`` is optional for compatibility with the current console
     resolve form; when present, replay / conflict / in-progress apply.
     """
-    request_hash = canonical_hash(
-        {"run_id": str(run_id), "diff_id": str(diff_id), "note": note}
-    )
+    request_hash = canonical_hash({"run_id": str(run_id), "diff_id": str(diff_id), "note": note})
     if idempotency_key:
         existing = check_idempotency(
             db,

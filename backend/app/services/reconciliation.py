@@ -698,9 +698,7 @@ class ShopifyReconciliationReader:
             elif operation == "shopify.fulfillment_create" and ref:
                 fulfillment = self.connector.get_fulfillment(str(ref))
                 remote_status = (
-                    (fulfillment or {}).get("status")
-                    if fulfillment is not None
-                    else "missing"
+                    (fulfillment or {}).get("status") if fulfillment is not None else "missing"
                 )
             elif operation == "shopify.refund_create" and ref:
                 refund = self.connector.get_refund(str(ref))
@@ -1054,9 +1052,7 @@ def run_reconciliation(
     db.flush()
 
     if readers is None:
-        return _run_legacy(
-            db, run, run_type=run_type, domains=domains, connectors=connectors or {}
-        )
+        return _run_legacy(db, run, run_type=run_type, domains=domains, connectors=connectors or {})
     return _run_canonical(
         db,
         run,
@@ -1161,9 +1157,7 @@ def _run_canonical(
         legacy = DEPRECATED_DOMAINS.get(domain)
         if legacy:
             expanded.extend(legacy)
-            deprecations.append(
-                f"domain {domain!r} is deprecated; expanded to {', '.join(legacy)}"
-            )
+            deprecations.append(f"domain {domain!r} is deprecated; expanded to {', '.join(legacy)}")
         else:
             expanded.append(domain)
 

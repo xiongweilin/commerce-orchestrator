@@ -247,9 +247,7 @@ def apply_domain_continuation(
         continuation = _step_for(db, run, item)
         if continuation is not None:
             step_result = continuation(db, run, item, actor) or {}
-        item.status = (
-            WorkItemStatus.APPROVED if decision == "approve" else WorkItemStatus.COMPLETED
-        )
+        item.status = WorkItemStatus.APPROVED if decision == "approve" else WorkItemStatus.COMPLETED
     elif decision == "reject":
         reject_step = (item.payload_json or {}).get("reject_step")
         if reject_step is not None:
@@ -371,8 +369,7 @@ def _decision_replay(
         return None
     if existing.request_hash != request_hash:
         raise IdempotencyConflictError(
-            f"idempotency key {idempotency_key!r} was already used with a "
-            "different decision body"
+            f"idempotency key {idempotency_key!r} was already used with a different decision body"
         )
     stored = existing.result_json or {}
     return DecisionResult(
@@ -472,9 +469,7 @@ def submit_decision(
     if run.status in terminal:
         raise ConflictError(f"workflow run {run.id} is {run.status.value}")
 
-    submitted_version = (
-        item.expected_version if item.expected_version is not None else run.version
-    )
+    submitted_version = item.expected_version if item.expected_version is not None else run.version
     decision_row = WorkItemDecision(
         work_item_id=item.id,
         decision=WorkItemDecisionType(decision),

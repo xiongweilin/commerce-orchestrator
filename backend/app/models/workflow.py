@@ -68,17 +68,11 @@ class WorkflowRun(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     workflow_version: Mapped[int] = mapped_column(Integer, nullable=False)
     # All runs use the DBOS v2 engine; server default stays "legacy_inline"
     # only as a historical migration artifact.
-    orchestration_engine: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="dbos"
-    )
+    orchestration_engine: Mapped[str] = mapped_column(String(32), nullable=False, default="dbos")
     dbos_workflow_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     initiated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
-    started_at: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    finished_at: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[WorkflowRunStatus] = mapped_column(
         Enum(
             WorkflowRunStatus,

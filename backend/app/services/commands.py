@@ -232,9 +232,7 @@ def _complete_run(db, run: WorkflowRun, *, extras: dict[str, Any] | None = None)
     on the run (plan 二.4 execution order).
     """
     if run.orchestration_engine != "dbos":
-        raise ValueError(
-            f"_complete_run supports only dbos runs; got {run.orchestration_engine!r}"
-        )
+        raise ValueError(f"_complete_run supports only dbos runs; got {run.orchestration_engine!r}")
     run.result_json = _run_result(run, extras)
     db.flush()
 
@@ -475,11 +473,7 @@ def _order_for_run(db, run: WorkflowRun) -> SalesOrder | None:
             ).scalar_one_or_none()
             if order is not None:
                 return order
-    return (
-        db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1))
-        .scalars()
-        .first()
-    )
+    return db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1)).scalars().first()
 
 
 def _case_for_run(db, run: WorkflowRun) -> ReturnCase | None:
@@ -492,9 +486,11 @@ def _case_for_run(db, run: WorkflowRun) -> ReturnCase | None:
             return case
     order_id = payload.get("shopify_order_id")
     if order_id:
-        case = db.execute(
-            select(ReturnCase).where(ReturnCase.shopify_order_id == str(order_id))
-        ).scalars().first()
+        case = (
+            db.execute(select(ReturnCase).where(ReturnCase.shopify_order_id == str(order_id)))
+            .scalars()
+            .first()
+        )
         if case is not None:
             return case
     return None
@@ -1263,9 +1259,7 @@ def accept_command(
             status="accepted",
             status_url=stored.get("statusUrl", f"/v1/workflows/{stored['workflowId']}"),
             workflow_version=int(stored.get("workflowVersion", DBOS_WORKFLOW_VERSION)),
-            orchestration_engine=str(
-                stored.get("orchestrationEngine", DBOS_ORCHESTRATION_ENGINE)
-            ),
+            orchestration_engine=str(stored.get("orchestrationEngine", DBOS_ORCHESTRATION_ENGINE)),
             replayed=True,
             correlation_id=stored.get("correlationId"),
         )
