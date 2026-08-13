@@ -123,7 +123,7 @@ accepted
 
 ### 5.5 对账（canonical）
 
-- 以领域 **canonical facts** 比较（ADR-0013）：`ReconciliationReader.read_actual(domain, scope) -> list[CanonicalExternalState]`；生产 readers 覆盖 Shopify（listing/order/return/effect）与 Odoo（catalog/order/procurement/inventory/return-credit-note/effect），`CompositeReconciliationReader`/`EffectReconciliationReader` 合并双端。
+- 以领域 **canonical facts** 比较（ADR-0013）：`ReconciliationReader.read_actual(domain, scope) -> list[CanonicalExternalState]`；readers 覆盖 Shopify（listing/order/return/effect）与 Odoo（catalog/order/procurement/inventory/return-credit-note/effect），`CompositeReconciliationReader`/`EffectReconciliationReader` 合并双端。
 - 六域比较字段：listing（SKU/product GID/published/content_hash）、order（currency/total/双外部 id）、procurement（po_id/sku/qty/currency）、return（refund id/amount/currency/credit note id）、catalog（sku/odoo_product_id/content_hash）、effect（operation/intent_id/remote_reference/remote_present）；`status` 类字段不做跨词汇表硬比较。
 - **缺 reader 即失败**：必需域缺 reader → 整个 run `failed` + `errorCode=reconciliation_incomplete` + `failedDomains`；scheduled run 的 `skippedDomains` 必须为空。
 - **“0 差异”收紧**：仅当每个必需域 `checked > 0` 或 `provenEmpty=True` 时成立；摘要固定键 `checked`/`diffs`/`failedDomains`/`skippedDomains`/`byDomain`。
@@ -150,7 +150,7 @@ accepted
 - `prometheus-client` 暴露指标：API（`commerce_http_requests_total`、`http_request_duration_seconds`、`idempotency_total`、`rbac_denials_total`）、worker（heartbeat/inbox/workflow/effect/reconciliation/privacy cleanup，见 WP3 指标契约）。
 - 健康探针：api `/livez`（进程存活）、`/readyz`（数据库 + Alembic head + adapter 配置 + worker heartbeat 30s）、`/healthz`（livez 别名）；worker `/livez` + `/metrics`（9101）。
 - 运维接口（仅 `system_admin`）：`GET /v1/ops/inbox?status=failed`、`POST /v1/ops/inbox/{id}/retry`（必带 Idempotency-Key）、`GET /v1/ops/runtime`。
-- 告警 10 条（worker unavailable 30s / inbox backlog 120s / failed inbox / outcome_unknown / API 5xx / API p99 / reconciliation incomplete / reconciliation drift / cleanup overdue / approval expiry 29d），每条带 runbook_url；影子环境 Alertmanager 只投递仓库内本地 receiver（不记录业务 payload），见 [runbooks/alerting.md](runbooks/alerting.md)。
+- 告警 10 条（worker unavailable 30s / inbox backlog 120s / failed inbox / outcome_unknown / API 5xx / API p99 / reconciliation incomplete / reconciliation drift / cleanup overdue / approval expiry 29d），每条带 runbook_url；试验环境 Alertmanager 只投递仓库内本地 receiver（不记录业务 payload），见 [runbooks/alerting.md](runbooks/alerting.md)。
 - Grafana 预置 6 块看板（API RED / worker-runtime / workflow-approval / effect-ledger / reconciliation / privacy-cleanup），provisioning 自动加载；采集范围与保留策略见 `infra/`。
 
 ## 7. 首条纵向切片（21 步）

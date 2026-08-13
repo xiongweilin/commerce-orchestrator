@@ -2,6 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-10
+- **Superseded-by（生产提升条款）**: ADR-0015
 
 ## Context
 

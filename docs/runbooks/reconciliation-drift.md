@@ -7,7 +7,7 @@
 ## 1. 对账机制
 
 - 触发：`POST /v1/reconciliations`（受理后由 worker/DBOS 执行；scheduled run 定时触发）。
-- 读回：`ReconciliationReader.read_actual(domain, scope) -> list[CanonicalExternalState]`；生产 readers 覆盖 Shopify（listing/order/return/effect）与 Odoo（catalog/order/procurement/inventory/return-credit-note/effect），`CompositeReconciliationReader`/`EffectReconciliationReader` 合并双端。
+- 读回：`ReconciliationReader.read_actual(domain, scope) -> list[CanonicalExternalState]`；readers 覆盖 Shopify（listing/order/return/effect）与 Odoo（catalog/order/procurement/inventory/return-credit-note/effect），`CompositeReconciliationReader`/`EffectReconciliationReader` 合并双端。
 - 六域比较字段：listing（SKU/product GID/published/content_hash）、order（currency/total/双外部 id）、procurement（po_id/sku/qty/currency）、return（refund id/amount/currency/credit note id）、catalog（sku/odoo_product_id/content_hash）、effect（operation/intent_id/remote_reference/remote_present）。`status` 类字段不做跨词汇表硬比较（保留在 facts 供人工参考）。
 - 摘要固定键：`checked`、`diffs`、`failedDomains`、`skippedDomains`、`byDomain`（另附 runType/scheduled/startedAt/finishedAt/verified/deprecationWarnings）。
 - 兼容：旧 `"shopify"` 域输入展开为 `listing + order + return` 并返回 `deprecationWarnings`；新客户端使用领域名。

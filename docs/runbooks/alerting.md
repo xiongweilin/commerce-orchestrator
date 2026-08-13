@@ -2,7 +2,7 @@
 
 ## 目标
 
-汇总影子环境全部告警的条件、级别与处置 runbook；每条告警必须能链接到具体处置文档。影子环境 Alertmanager 只投递到仓库内本地 alert-receiver（记录 alert 名称/级别/runbook URL，**不记录业务 payload**）；生产外部通知渠道留待切换阶段指定。
+汇总试验环境全部告警的条件、级别与处置 runbook；每条告警必须能链接到具体处置文档。试验环境 Alertmanager 只投递到仓库内本地 alert-receiver（记录 alert 名称/级别/runbook URL，**不记录业务 payload**）；外部通知渠道（邮件/Slack/PagerDuty 等）当前不启用。
 
 ## 告警总表
 
@@ -22,8 +22,8 @@
 | `ApprovalExpiryRisk` | pending work item 超过 29 天（临近 30 天审批到期） | warning | [worker-failure.md](worker-failure.md)（审批积压处置见下） |
 
 > 说明：`ApprovalExpiryRisk` 规则当前 `runbook_url` 指向 `docs/runbooks/approval-expiry.md`
-> （WP3 编写规则时的占位，该文件不在 WP8 清单内）；影子环境联调时由 root 决定改为
-> 本文件 `alerting.md` 或新建专用文件。审批积压通用处置：通知业务负责人，逐条评估
+> （WP3 编写规则时的占位，该文件不在 WP8 清单内）；试验环境联调时由 root 决定改为
+> 本文件 `alerting.md` 或新建专用文件。审批积压通用处置：通知项目所有者，逐条评估
 > pending work item（30 天超期自动取消语义，DBOS.recv 超时取消），必要时人工审批
 > 或取消；清理积压后告警自动恢复。
 
