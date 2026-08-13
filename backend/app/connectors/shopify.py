@@ -560,8 +560,10 @@ class ShopifyConnector:
         publish is skipped and reported ``succeeded(replayed=True)``.
         """
         status = self.get_product_publish_status(gid)
-        if status is not None and status["isPublished"] and (
-            publication_id is None or publication_id in status["publicationIds"]
+        if (
+            status is not None
+            and status["isPublished"]
+            and (publication_id is None or publication_id in status["publicationIds"])
         ):
             logger.info(
                 "shopify_product_publish_replayed",

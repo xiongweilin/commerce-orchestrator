@@ -151,9 +151,7 @@ def create_reconciliation(
     idempotency_key: Annotated[str, Header(alias=IDEMPOTENCY_KEY_HEADER)],
     db: Annotated[Session, Depends(get_session)],
     actor_user_id: Annotated[uuid.UUID, Depends(get_current_user)],
-    _authorized: Annotated[
-        bool, Depends(require_roles(*COMMAND_INITIATE_ROLES["reconciliation"]))
-    ],
+    _authorized: Annotated[bool, Depends(require_roles(*COMMAND_INITIATE_ROLES["reconciliation"]))],
 ) -> AcceptedResponse:
     """Trigger a reconciliation run.
 

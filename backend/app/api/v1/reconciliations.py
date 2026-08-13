@@ -70,9 +70,7 @@ def resolve_diff_endpoint(
     body: DiffResolveRequest,
     db: Annotated[Session, Depends(get_session)],
     user_id: Annotated[uuid.UUID, Depends(get_current_user)],
-    _authorized: Annotated[
-        bool, Depends(require_roles(*RECONCILIATION_RESOLVE_ROLES))
-    ],
+    _authorized: Annotated[bool, Depends(require_roles(*RECONCILIATION_RESOLVE_ROLES))],
     idempotency_key: Annotated[str, Header(alias=IDEMPOTENCY_KEY_HEADER)],
 ) -> DiffResolveResponse:
     """Manually resolve a MANUAL_RECONCILIATION diff (never auto-resolved).

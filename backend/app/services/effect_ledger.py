@@ -112,9 +112,7 @@ def validate_effect_dispatch_coverage() -> None:
     validate_effect_parameter_coverage()
     missing = EFFECT_OPS - set(_OP_METHOD)
     if missing:
-        raise RuntimeError(
-            f"missing adapter dispatch for effect operations: {sorted(missing)}"
-        )
+        raise RuntimeError(f"missing adapter dispatch for effect operations: {sorted(missing)}")
 
 
 def record_effect(
@@ -218,9 +216,9 @@ def apply_outcome(
 
     if isinstance(outcome, EffectSucceeded):
         if current == "succeeded":
-            if (
-                outcome.remote_reference
-                and entry.remote_reference not in (None, outcome.remote_reference)
+            if outcome.remote_reference and entry.remote_reference not in (
+                None,
+                outcome.remote_reference,
             ):
                 raise ConflictError(
                     f"effect {intent_id} already succeeded with reference "
@@ -243,9 +241,7 @@ def apply_outcome(
         if current == "failed":
             return entry
         if current in {"succeeded", "outcome_unknown"}:
-            raise ConflictError(
-                f"effect {intent_id} already {current}; refusing to apply failed"
-            )
+            raise ConflictError(f"effect {intent_id} already {current}; refusing to apply failed")
         return mark_effect(
             db,
             intent_id,
@@ -269,9 +265,7 @@ def apply_outcome(
     )
 
 
-def _dispatch_kwargs(
-    method: Callable[..., Any], request: EffectExecutionRequest
-) -> dict[str, Any]:
+def _dispatch_kwargs(method: Callable[..., Any], request: EffectExecutionRequest) -> dict[str, Any]:
     """Build adapter kwargs from the typed parameters (fail-closed)."""
     signature = inspect.signature(method)
     parameters = set(signature.parameters)
@@ -316,18 +310,14 @@ def execute_effect(
     read-back idempotency ``replayed`` flag through.
     """
     if request.operation not in _OP_METHOD:
-        raise ConnectorError(
-            f"no adapter dispatch for effect operation {request.operation!r}"
-        )
+        raise ConnectorError(f"no adapter dispatch for effect operation {request.operation!r}")
     system = request.operation.split(".", 1)[0]
     connector = connector_provider(system)
     method = getattr(connector, _OP_METHOD[request.operation])
     try:
         result = method(**_dispatch_kwargs(method, request))
     except OutcomeUnknownError as exc:
-        return EffectOutcomeUnknown(
-            error_code=ERROR_OUTCOME_UNKNOWN, detail=truncate(exc.detail)
-        )
+        return EffectOutcomeUnknown(error_code=ERROR_OUTCOME_UNKNOWN, detail=truncate(exc.detail))
     except RetryableEffectError as exc:
         return EffectFailed(
             error_code=ERROR_RETRYABLE,

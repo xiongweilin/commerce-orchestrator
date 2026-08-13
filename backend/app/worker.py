@@ -103,7 +103,9 @@ def _upsert_heartbeat(
 def _inbox_counts(session: Session, consumer: str) -> tuple[int, int, int]:
     def _count(status: InboxStatus) -> int:
         return session.execute(
-            select(func.count()).select_from(InboxEvent).where(
+            select(func.count())
+            .select_from(InboxEvent)
+            .where(
                 InboxEvent.consumer == consumer,
                 InboxEvent.status == status,
             )

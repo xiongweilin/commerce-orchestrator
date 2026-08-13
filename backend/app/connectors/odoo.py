@@ -509,9 +509,7 @@ class OdooConnector:
         """Create a stock move idempotently (``origin=CO:<intent_id>``)."""
         values, marker = self._apply_marker(values, intent_id, field="origin")
         if marker:
-            existing = self._search_one(
-                "stock.move", [["origin", "=", marker]], ["id", "origin"]
-            )
+            existing = self._search_one("stock.move", [["origin", "=", marker]], ["id", "origin"])
             if existing:
                 return self._replayed_result(str(existing["id"]), existing)
         return self._write(
@@ -531,9 +529,7 @@ class OdooConnector:
         for item in items:
             sku = str(item.get("sku") or "").strip()
             if not sku:
-                raise ExternalSystemError(
-                    "odoo.sale_order_create: line item missing 'sku'"
-                )
+                raise ExternalSystemError("odoo.sale_order_create: line item missing 'sku'")
             product = self._search_one(
                 "product.template",
                 [["default_code", "=", sku]],
@@ -563,9 +559,7 @@ class OdooConnector:
         }
         currency = str(values.get("currency") or "").strip()
         if currency:
-            cur = self._search_one(
-                "res.currency", [["name", "=", currency]], ["id", "name"]
-            )
+            cur = self._search_one("res.currency", [["name", "=", currency]], ["id", "name"])
             if cur is not None:
                 result["currency_id"] = int(cur["id"])
         return result
@@ -583,6 +577,7 @@ class OdooConnector:
         )
         pid = created.remote_reference
         return {"id": pid, "name": name}
+
     def create_picking(
         self,
         values: dict[str, Any],
@@ -1052,9 +1047,7 @@ class OdooConnector:
             model, [["id", "in", [int(i) for i in ids]]], fields, limit=min(limit, 500)
         )
 
-    def list_products(
-        self, *, offset: int = 0, limit: int = 500
-    ) -> list[dict[str, Any]]:
+    def list_products(self, *, offset: int = 0, limit: int = 500) -> list[dict[str, Any]]:
         """List product templates for the catalog reconciliation domain."""
         return self._search(
             "product.template",
@@ -1064,9 +1057,7 @@ class OdooConnector:
             offset=offset,
         )
 
-    def list_sale_orders(
-        self, *, offset: int = 0, limit: int = 500
-    ) -> list[dict[str, Any]]:
+    def list_sale_orders(self, *, offset: int = 0, limit: int = 500) -> list[dict[str, Any]]:
         """List sale orders for the order reconciliation domain."""
         return self._search(
             "sale.order",
@@ -1076,9 +1067,7 @@ class OdooConnector:
             offset=offset,
         )
 
-    def list_purchase_orders(
-        self, *, offset: int = 0, limit: int = 500
-    ) -> list[dict[str, Any]]:
+    def list_purchase_orders(self, *, offset: int = 0, limit: int = 500) -> list[dict[str, Any]]:
         """List purchase orders for the procurement reconciliation domain."""
         return self._search(
             "purchase.order",

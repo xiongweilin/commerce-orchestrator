@@ -181,9 +181,7 @@ def envelope_for(event: OutboxEvent) -> dict[str, Any]:
         "producer": event.producer,
         "schemaVersion": event.schema_version,
         "payload": {
-            k: v
-            for k, v in payload.items()
-            if k not in (TRACE_PARENT_KEY, TRACE_STATE_KEY)
+            k: v for k, v in payload.items() if k not in (TRACE_PARENT_KEY, TRACE_STATE_KEY)
         },
         "traceparent": payload.get(TRACE_PARENT_KEY),
         "tracestate": payload.get(TRACE_STATE_KEY),

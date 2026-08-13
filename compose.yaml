@@ -109,7 +109,6 @@ services:
       migrate:
         condition: service_completed_successfully
     # 顺序要求 api "ready"（DB、Alembic head、adapter 配置、worker heartbeat）。
-    # /readyz 由 WP6 实现；若 WP6 未落地，可临时回退 /healthz。
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
       interval: 10s

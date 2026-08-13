@@ -31,12 +31,8 @@ class SensitivePayload(UUIDPkMixin, Base):
     source_id: Mapped[str] = mapped_column(String(128), nullable=False)
     ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     key_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    expires_at: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    deleted_at: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

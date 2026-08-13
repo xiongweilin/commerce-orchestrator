@@ -371,11 +371,7 @@ def _drive_effects(
             )
             status = normalized["status"]
             record_effect_attempt(target_system=target_system, operation=op, status=status)
-            if (
-                status == "failed"
-                and normalized["retryable"]
-                and attempts < max_retries
-            ):
+            if status == "failed" and normalized["retryable"] and attempts < max_retries:
                 # Ledger: dispatched -> failed (attempt recorded), then re-dispatch.
                 from app.schemas.effects import EffectFailed
 
@@ -400,8 +396,7 @@ def _drive_effects(
             if status == "failed":
                 _fail_txn(
                     workflow_id,
-                    f"effect {operation} failed definitively: "
-                    f"{(normalized['error'] or '')[:300]}",
+                    f"effect {operation} failed definitively: {(normalized['error'] or '')[:300]}",
                 )
                 return "failed"
             break

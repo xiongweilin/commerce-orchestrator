@@ -135,6 +135,7 @@ def _shopify_order_gid(value: str | None) -> str | None:
     text = str(value)
     return text if text.startswith("gid://") else f"gid://shopify/Order/{text}"
 
+
 def _resolve_sales_order(db, run: WorkflowRun) -> SalesOrder | None:
     """Resolve the sales order owned by an order-to-cash run.
 
@@ -158,11 +159,7 @@ def _resolve_sales_order(db, run: WorkflowRun) -> SalesOrder | None:
             ).scalar_one_or_none()
             if order is not None:
                 return order
-    return (
-        db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1))
-        .scalars()
-        .first()
-    )
+    return db.execute(select(SalesOrder).order_by(SalesOrder.created_at).limit(1)).scalars().first()
 
 
 def _prior_effect_remote_reference(db, run: WorkflowRun, operation: str) -> str | None:
@@ -179,9 +176,7 @@ def _prior_effect_remote_reference(db, run: WorkflowRun, operation: str) -> str 
             .where(
                 EffectLedgerEntry.approval_ref == run.id,
                 EffectLedgerEntry.operation == operation,
-                EffectLedgerEntry.status.in_(
-                    (EffectStatus.SUCCEEDED, EffectStatus.RECONCILED)
-                ),
+                EffectLedgerEntry.status.in_((EffectStatus.SUCCEEDED, EffectStatus.RECONCILED)),
             )
             .order_by(EffectLedgerEntry.created_at.desc())
         )
@@ -425,9 +420,7 @@ def build_effect_execution_request(
         listing = _resolve_listing(db, run, refs)
         gid = _product_gid_for(db, listing)
         if not gid:
-            raise ValueError(
-                f"cannot build {operation} parameters: shopify product gid unknown"
-            )
+            raise ValueError(f"cannot build {operation} parameters: shopify product gid unknown")
         revision = (
             db.get(CatalogRevision, uuid.UUID(refs["revision_id"]))
             if refs.get("revision_id")
@@ -485,9 +478,11 @@ def finalize_after_effect(
                 correlation_id=run.correlation_id,
                 context={"auto": True},
             )
-        revision = db.get(CatalogRevision, uuid.UUID(refs["revision_id"])) if refs.get(
-            "revision_id"
-        ) else None
+        revision = (
+            db.get(CatalogRevision, uuid.UUID(refs["revision_id"]))
+            if refs.get("revision_id")
+            else None
+        )
         if revision is not None:
             advance_entity(
                 db,

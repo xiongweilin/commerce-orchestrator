@@ -48,9 +48,7 @@ OWNER_COMMERCE = "commerce"
 def _pii_hash_key() -> bytes:
     key = get_settings().pii_hash_key
     if not key:
-        raise RuntimeError(
-            "COMMERCE_PII_HASH_KEY is not configured; privacy jobs refuse to run"
-        )
+        raise RuntimeError("COMMERCE_PII_HASH_KEY is not configured; privacy jobs refuse to run")
     return key.encode("utf-8")
 
 
@@ -81,9 +79,7 @@ def store_sensitive_payload(
 ) -> SensitivePayload:
     """Encrypt a plaintext into the vault and return the vault row."""
     settings = get_settings()
-    expires_days = (
-        expires_days if expires_days is not None else settings.privacy_retention_days
-    )
+    expires_days = expires_days if expires_days is not None else settings.privacy_retention_days
     ciphertext = encrypt_payload(plaintext.encode("utf-8")).decode("ascii")
     payload = SensitivePayload(
         purpose=purpose,
@@ -267,9 +263,7 @@ def should_run_cleanup(
         return True
     settings = get_settings()
     hours = (
-        interval_hours
-        if interval_hours is not None
-        else settings.privacy_cleanup_interval_hours
+        interval_hours if interval_hours is not None else settings.privacy_cleanup_interval_hours
     )
     return (now - last_run) >= timedelta(hours=hours)
 

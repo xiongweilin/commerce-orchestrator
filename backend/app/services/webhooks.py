@@ -268,12 +268,16 @@ def ingest_shopify_webhook(
                 Projection.external_id == webhook_id,
             )
         ).scalar_one()
-        existing_vault = db.execute(
-            select(SensitivePayload).where(
-                SensitivePayload.purpose == WEBHOOK_VAULT_PURPOSE,
-                SensitivePayload.source_id == webhook_id,
+        existing_vault = (
+            db.execute(
+                select(SensitivePayload).where(
+                    SensitivePayload.purpose == WEBHOOK_VAULT_PURPOSE,
+                    SensitivePayload.source_id == webhook_id,
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if existing_vault is not None:
             existing_vault.ciphertext = vault.ciphertext
             existing_vault.expires_at = vault.expires_at

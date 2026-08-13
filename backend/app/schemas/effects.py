@@ -279,9 +279,7 @@ def validate_effect_parameter_coverage() -> None:
     """Fail fast when ``EFFECT_OPS`` and the parameter models drift apart."""
     missing = EFFECT_OPS - set(EFFECT_PARAMETER_MODELS)
     if missing:
-        raise RuntimeError(
-            f"missing parameter models for effect operations: {sorted(missing)}"
-        )
+        raise RuntimeError(f"missing parameter models for effect operations: {sorted(missing)}")
 
 
 class EffectExecutionRequest(BaseModel):
