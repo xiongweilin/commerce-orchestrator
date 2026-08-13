@@ -1,9 +1,9 @@
-# P7 告警规则（整改计划「五.4」告警表）
+# 告警规则（整改计划「五.4」告警表）
 #
 # 指标名为 WP4/WP5/WP6 落地契约（见 WP3-REPORT 指标清单）；规则在指标未落地时
 # 不产生数据、不误报，落地后自动生效。
 # runbook_url 为仓库内相对路径；WP8 需补充对应 runbook（worker-failure /
-# privacy-cleanup / approval-expiry / alerting），提升到生产前替换为仓库真实 URL。
+# privacy-cleanup / approval-expiry / alerting）。
 
 groups:
   - name: commerce.rules

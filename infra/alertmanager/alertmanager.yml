@@ -1,8 +1,8 @@
-# Alertmanager 配置（P7 影子运行）
+# Alertmanager 配置（试验环境）
 #
-# 影子环境只投递到仓库内本地 alert receiver（compose 服务 alert-receiver，
+# 试验环境只投递到仓库内本地 alert receiver（compose 服务 alert-receiver，
 # 记录 alert 名称/级别/runbook URL，不记录业务 payload）。
-# 生产外部通知渠道（邮件/Slack/PagerDuty 等）留待切换阶段指定。
+# 外部通知渠道（邮件/Slack/PagerDuty 等）当前不启用。
 
 route:
   receiver: local-receiver

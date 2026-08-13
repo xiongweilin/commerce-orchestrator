@@ -1,4 +1,4 @@
-# Prometheus 抓取配置（P7 影子运行）
+# Prometheus 抓取配置（试验环境）
 #
 # 抓取目标（Compose 内网）：
 #   - api:8000/metrics     API 指标（HTTP RED、idempotency、RBAC denial）

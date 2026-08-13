@@ -5,7 +5,7 @@
 # API 与 worker 共用同一镜像（backend/Dockerfile），仅启动命令不同；
 # console 使用 console/Dockerfile；alert-receiver 使用 infra/alert-receiver/Dockerfile。
 #
-# 启动顺序（P7 整改计划「五.1」）：
+# 启动顺序（整改计划「五.1」）：
 #   postgres healthy
 #   → db-bootstrap completed（幂等角色/权限引导，infra/postgres/bootstrap.sql）
 #   → migrate completed（uv run alembic upgrade head，以 commerce_migrator 角色执行 DDL）
@@ -22,7 +22,7 @@
 #     migrate 用 commerce_migrator 角色、DBOS 系统库用 dbos_app、Metabase 应用库用
 #     metabase_app、Odoo 库用 odoo_app。角色与口令（开发占位符）由
 #     infra/postgres/bootstrap.sql 幂等创建，与下面的 URL 一一对应；
-#     影子/生产环境必须通过 secret 注入真实口令，禁止提交真实值。
+#     试验环境必须通过 secret 注入真实口令，禁止提交真实值。
 #   - PostgreSQL/Odoo/Prometheus/Grafana 等默认只绑定 127.0.0.1 或 Compose 内网。
 # ============================================================================
 
@@ -38,7 +38,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commerce}
       POSTGRES_DB: ${POSTGRES_DB:-commerce}
     ports:
-      # P7：默认只绑定本机回环，避免暴露到局域网
+      # 默认只绑定本机回环，避免暴露到局域网
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -108,7 +108,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    # P7 顺序要求 api "ready"（DB、Alembic head、adapter 配置、worker heartbeat）。
+    # 顺序要求 api "ready"（DB、Alembic head、adapter 配置、worker heartbeat）。
     # /readyz 由 WP6 实现；若 WP6 未落地，可临时回退 /healthz。
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
@@ -204,7 +204,7 @@ services:
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     volumes:
-      # 预置 datasource（Prometheus）与 dashboard（P7 六块）
+      # 预置 datasource（Prometheus）与 dashboard（六块）
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
@@ -216,7 +216,7 @@ services:
       worker:
         condition: service_healthy
 
-  # 影子环境告警出口：Alertmanager 只投递到仓库内本地 receiver
+  # 试验环境告警出口：Alertmanager 只投递到仓库内本地 receiver
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: commerce-alertmanager

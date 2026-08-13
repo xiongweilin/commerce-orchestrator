@@ -1,6 +1,6 @@
 # Commerce Orchestrator — 电商运营控制塔
 
-面向电商组织的**内部运营控制塔（Operations Control Tower）**：把跨系统工作流、候选版本、审批、幂等、effect ledger 与对账，编排在 **Odoo 19（权威账本）** 与 **Shopify 开发店（首个外部渠道）** 之上，通过 Next.js 控制台操作、Metabase 只读投影观测。
+个人全栈试验项目：以模拟数据 + Shopify 开发店 + Odoo 19 沙盒验证跨系统工作流编排、候选/审批、幂等、effect ledger 与对账；无真实用户与真实订单，不设生产提升路径，持续运行供学习与迭代。
 
 > 全仓库文档默认中文；代码、路径、命令与英文 identifier 保持原样。
 
@@ -43,7 +43,7 @@ flowchart LR
 | 长流程引擎 | DBOS OSS + 独立 PostgreSQL | 工作流从最后完成步骤恢复；step 至少一次、事务恰好一次 |
 | 渠道集成 | Shopify Admin GraphQL（冻结版本 2026-07）；Odoo 19 External JSON-2 API | 详见 ADR-0007 / ADR-0008 |
 | 前端 | Next.js（React） + TypeScript | 运营控制台；BFF 安全会话（HttpOnly cookie + CSRF + allowlist 代理，ADR-0014） |
-| 可观测性 | OpenTelemetry / Prometheus / Grafana / Alertmanager | correlationId 贯穿；10 条告警带 runbook 链接，影子环境只投递本地 receiver |
+| 可观测性 | OpenTelemetry / Prometheus / Grafana / Alertmanager | correlationId 贯穿；10 条告警带 runbook 链接，试验环境只投递本地 receiver |
 | 健康/运维 | `/livez` `/readyz` `/healthz` `/v1/me` `/v1/ops/*` | readiness 含 DB/Alembic/adapter/worker heartbeat；ops 仅 system_admin |
 | 编排 | Docker Compose | v1 不引入 Redis / RabbitMQ / Kafka / ES / K8s |
 
@@ -71,7 +71,7 @@ commerce-orchestrator/
     ├── glossary.md      # 领域术语表
     ├── architecture.md  # 总体架构与信任边界
     ├── development.md   # 开发与契约变更流程
-    ├── adr/             # 架构决策记录（0001-0014）
+    ├── adr/             # 架构决策记录（0001-0015）
     ├── runbooks/        # 运维手册（环境/备份/对账）
     └── contracts/       # 契约唯一事实源（API/事件/数据所有权）
 ```
@@ -108,7 +108,7 @@ npm run dev
 
 环境变量：全部来自环境（`backend/.env` 或进程环境），样例见 `.env.example`；真实密钥禁止入库。
 
-> P7 整改后新命令统一走 **API 受理（accept）→ inbox relay → DBOS v2 workflow → typed effect seam → canonical 对账** 的单一主线；worker bootstrap/DBOS launch 失败非零退出（fail-closed）。详见 ADR-0011/0012/0013。
+> 新命令统一走 **API 受理（accept）→ inbox relay → DBOS v2 workflow → typed effect seam → canonical 对账** 的单一主线；worker bootstrap/DBOS launch 失败非零退出（fail-closed）。详见 ADR-0011/0012/0013。
 
 ## 领域事实所有权
 
@@ -153,7 +153,6 @@ npm run dev
 
 - **故障测试**：单 effect 重放 10 次无重复副作用；1000 次 kill injection 指标达标；重启恢复 ≤ 5 分钟；30 天人审等待不占用 worker 槽位；差异一律进 `MANUAL_RECONCILIATION`。
 - **性能门禁**：p95/p99 与压力测试基准达标（详见 ADR-0010）。
-- **首个生产提升条件**：首条纵向切片端到端通过故障注入与对账演练、观察窗口内零未解差异、性能达标、备份恢复与对账 runbook 演练完成、审批边界与四眼原则经合规/财务确认。
 
 ## 文档导航
 
@@ -162,7 +161,7 @@ npm run dev
 | [docs/glossary.md](docs/glossary.md) | 领域术语表（中文术语 + 英文 identifier） |
 | [docs/architecture.md](docs/architecture.md) | 总体架构、信任边界、可靠性模型、首条纵向切片 21 步 |
 | [docs/development.md](docs/development.md) | 开发约定、契约变更流程、ADR 流程 |
-| [docs/adr/](docs/adr/) | 架构决策记录（0001-0014；0011-0014 为 P7 整改新增） |
+| [docs/adr/](docs/adr/) | 架构决策记录（0001-0015；0011-0014 为 DBOS v2 单一主线整改新增，0015 为个人试验定位） |
 | [docs/runbooks/](docs/runbooks/) | 运维手册（dev-environment / backup-restore / reconciliation-drift / worker-failure / privacy-cleanup / alerting） |
 | [docs/contracts/](docs/contracts/) | **契约唯一事实源**（api-contract / event-contract / data-ownership） |
 | backend/README.md | 后端开发说明 |

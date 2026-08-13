@@ -84,7 +84,7 @@ npm run dev
 
   客户端只访问同源 BFF（`/api/session`、`/api/me`、`/api/backend/[...path]`），不再向 `NEXT_PUBLIC_API_BASE` 直连发 token；JWT 不再入 `localStorage`。
   会话 cookie `commerce_session`（HttpOnly / SameSite=Strict / 非 dev Secure / Max Age=min(JWT TTL, 8h)）+ `commerce_csrf`（非 HttpOnly）；非 GET 请求需 `X CSRF Token` 与 `Origin` 校验（ADR 0014）。
-  服务端私有环境变量 `COMMERCE_API_BASE`（指向 `http://api:8000` 或本地 8000）；联调 mock `COMMERCE_SESSION_MOCK=1` 仅限开发（生产永不生效，联调后移除）。
+  服务端私有环境变量 `COMMERCE_API_BASE`（指向 `http://api:8000` 或本地 8000）；联调 mock `COMMERCE_SESSION_MOCK=1` 仅限开发（正式运行永不生效，联调后移除）。
 
 ### 5. Odoo 19（P0/P7 沙盒验证用，可选 profile）
 
