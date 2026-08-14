@@ -65,6 +65,9 @@ commerce-orchestrator/
 │   └── README.md        # 后端开发说明
 ├── console/             # Next.js 运营控制台
 │   └── README.md
+├── services/            # 并入的独立服务（2026-08-14；经 compose.yaml include 纳入同一项目）
+│   ├── catalog/         # 商品上架运营自动化
+│   └── feedback/        # 客户反馈结构化分析
 ├── infra/               # PostgreSQL、监控等基础设施
 │   └── README.md
 └── docs/                # 文档（中文）
@@ -81,7 +84,7 @@ commerce-orchestrator/
 **方式一：Docker Compose 全栈（推荐联调/演示）**
 
 ```bash
-docker compose up -d     # 空数据卷自动：postgres → db-bootstrap → migrate → api+worker → console+监控
+docker compose up -d     # 空数据卷自动：postgres → db-bootstrap → migrate → api+worker → console+监控；services/（catalog、feedback）经 include 纳入同一 compose 项目（各自说明见 services/*/README.md）
 ```
 
 服务清单、健康检查与数据目录见 [infra/README.md](infra/README.md)。
