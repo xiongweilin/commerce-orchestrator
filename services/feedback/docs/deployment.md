@@ -3,7 +3,7 @@
 ## WSL2
 
 ```bash
-cd /srv/stack/feedback-analysis-agent
+cd <deploy-dir>
 docker compose up -d --build
 docker compose ps
 curl http://127.0.0.1:18100/feedback
@@ -24,12 +24,12 @@ sudo tailscale serve --bg --yes --tcp=8100 tcp://127.0.0.1:18100
 
 ## 云端
 
-云端 Nginx 的 `/feedback` 与 `/feedback/` 转发至 `metratio.tail1f4641.ts.net:8100`。`^~ /feedback/` 用于防止 Next.js 的 JS/CSS 被静态资源正则截获。
+云端 Nginx 的 `/feedback` 与 `/feedback/` 转发至 `<tailnet-host>:8100`。`^~ /feedback/` 用于防止 Next.js 的 JS/CSS 被静态资源正则截获。
 
 静态作品页位于：
 
 ```text
-/srv/stack/nginx/metratio-static/feedback/index.html
+<nginx-static-root>/feedback/index.html
 ```
 
 云端 Nginx 已为 `/feedback` 和 `/feedback/` 配置静态作品页路由（/feedback, /catalog-ops）；必须放在通用 `/index` location 之前，否则请求会回落到站点总首页。
@@ -37,7 +37,7 @@ sudo tailscale serve --bg --yes --tcp=8100 tcp://127.0.0.1:18100
 ## 监控
 
 - Prometheus job：`feedback-analysis`。
-- Blackbox：`https://metratio.com/feedback`。
+- Blackbox：`https://<your-domain>/feedback`。
 - Grafana UID：`feedback-analysis`。
 - 指标：工单、问题簇、候选 SOP、待复核、请求率和 p95 延迟。
 
@@ -66,7 +66,7 @@ curl -fsS http://127.0.0.1:18100/feedback/api/health
 四个 DSL 导入、发布与 API Key 配置完成后执行：
 
 ```bash
-cd /srv/stack/feedback-analysis-agent
+cd <deploy-dir>
 ./tools/run_v5_suite_evaluation.sh
 ```
 

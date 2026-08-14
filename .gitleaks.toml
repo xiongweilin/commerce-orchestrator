@@ -1,0 +1,10 @@
+# Gitleaks allowlist：测试文件中的幂等键示例（非真实密钥）
+# 2026-08-14 公开前体检：backend/tests/test_api_v2.py 的 Idempotency-Key 测试值
+# compliance-approve-1 / compliance-veto-1 被 generic-api-key 规则误报。
+title = "Gitleaks config for commerce-orchestrator"
+
+[allowlist]
+description = "测试夹具中的幂等键示例，非真实凭据"
+regexes = [
+  '''compliance-(approve|veto)-1''',
+]
