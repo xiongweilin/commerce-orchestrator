@@ -27,11 +27,10 @@ Shopify 是首个外部渠道，涉及产品发布、更新、履约与退款效
    前提：应用必须先**安装**到店铺（否则 `app_not_installed`），且安装版本需声明 scope 并经授权页重新同意
    （安装链接 `https://admin.shopify.com/store/{shop}/oauth/install?client_id={client_id}`）。
    已授 scope：`write_products/write_orders/write_inventory/write_assigned_fulfillment_orders/write_publications`
-   （write 隐含 read）。`COMMERCE_SHOPIFY_SHOP_NAME` 只填店铺前缀（如 `metratio`），连接器自行拼接 `.myshopify.com`；
+   （write 隐含 read）。`COMMERCE_SHOPIFY_SHOP_NAME` 只填店铺前缀（如 `<your-shop>`），连接器自行拼接 `.myshopify.com`；
    填全域名会拼出双后缀导致 DNS 通配劫持（伪证书）——踩坑记录。
-2. **webhook 公网入口**：`https://metratio.com/webhooks/shopify`（云端 nginx 精确匹配 → tailnet 8086 →
-   Windows `127.0.0.1:18086`），路由已写入 metratio.com 基础设施文档。订阅了 `ORDERS_CREATE/REFUNDS_CREATE/PRODUCTS_UPDATE`
-   （GraphQL `webhookSubscriptionCreate`，API 2026-07）。
+2. **webhook 公网入口**：`https://<your-domain>/webhooks/shopify`（经反向代理转发到本地服务，路由见部署文档）。订阅了 `ORDERS_CREATE/REFUNDS_CREATE/PRODUCTS_UPDATE`
+   （GraphQL `webhookSubscriptionCreate`，API 2026-07）。注：该公网入口已于 2026-08-14 退役，webhook 统一走通用 `/webhooks/` 转发。
 3. **端到端验证通过**：HMAC（client secret 为密钥）+ `X-Shopify-Webhook-Id`（UUID）去重；同 id 重放返回
    `{received:true, deduplicated:true}`；`orders/create`→`order.received`、`refunds/create`→`return.case_requested`
    事件入库（producer=`shopify_adapter`），并创建 `order-to-cash`/`return-to-refund` 工作流；原始 payload 加密留存
