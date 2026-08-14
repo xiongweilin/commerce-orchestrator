@@ -1,0 +1,11 @@
+{
+  "api_base_url": "http://127.0.0.1:18200",
+  "run_id": "replace-with-catalog-run-id",
+  "rpa_token": "store-as-ShadowBot-secret-variable",
+  "odoo_login_url": "http://127.0.0.1:18069/web/login?db=catalog_erp",
+  "odoo_product_list_url": "http://127.0.0.1:18069/odoo/action-282",
+  "odoo_username": "admin",
+  "odoo_password": "store-as-ShadowBot-secret-variable",
+  "max_items": 20,
+  "dry_run": "true"
+}

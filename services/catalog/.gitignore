@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+coverage.xml
+.ruff_cache/
+*.db
+artifacts/runtime/
+
+.sonarlint/
+sonar-project.properties

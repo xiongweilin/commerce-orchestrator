@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+__pycache__
+.pytest_cache
+*.db
+web/node_modules
+web/.next
+data/generated/tickets_all_with_gold.csv
+data/generated/tickets_development_with_gold.csv
+data/generated/tickets_holdout_locked.csv
+

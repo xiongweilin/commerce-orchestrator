@@ -1,0 +1,128 @@
+services:
+  catalog-postgres:
+    container_name: catalog-postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: catalog_ops
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: ${CATALOG_DB_PASSWORD:?set CATALOG_DB_PASSWORD}
+    volumes:
+      - catalog_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog -d catalog_ops"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [catalog-net]
+
+  catalog-api:
+    container_name: catalog-api
+    build: .
+    image: catalog-ops-app:latest
+    restart: unless-stopped
+    command: >-
+      sh -c "alembic upgrade head &&
+      uvicorn catalog_app.main:app --host 0.0.0.0 --port 8201"
+    environment: &catalog-environment
+      DATABASE_URL: postgresql+psycopg://catalog:${CATALOG_DB_PASSWORD}@catalog-postgres:5432/catalog_ops
+      DIFY_BASE_URL: ${DIFY_BASE_URL:-http://host.docker.internal:18080/v1}
+      DIFY_CATALOG_WORKFLOW_API_KEY: ${DIFY_CATALOG_WORKFLOW_API_KEY:-}
+      CATALOG_WORKFLOW_VERSION: ${CATALOG_WORKFLOW_VERSION:-catalog-copy-v1-candidate}
+      ALLOW_DEMO_COPYWRITER: ${ALLOW_DEMO_COPYWRITER:-true}
+      DIFY_TIMEOUT_SECONDS: ${DIFY_TIMEOUT_SECONDS:-60}
+      RPA_TOKEN: ${RPA_TOKEN:?set RPA_TOKEN}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      catalog-postgres:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:18200:8201
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8201/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [catalog-net]
+
+  catalog-worker:
+    container_name: catalog-worker
+    image: catalog-ops-app:latest
+    restart: unless-stopped
+    command: ["python", "-m", "catalog_app.worker"]
+    environment: *catalog-environment
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      catalog-api:
+        condition: service_healthy
+    networks: [catalog-net]
+
+  catalog-odoo-init:
+    container_name: catalog-odoo-init
+    image: odoo:19.0-20260630
+    profiles: ["init"]
+    command: ["odoo", "-d", "catalog_erp", "-i", "base,product,stock", "--stop-after-init", "--without-demo=all"]
+    environment:
+      HOST: catalog-postgres
+      USER: catalog
+      PASSWORD: ${CATALOG_DB_PASSWORD}
+    depends_on:
+      catalog-postgres:
+        condition: service_healthy
+    volumes:
+      - odoo_data:/var/lib/odoo
+    networks: [catalog-net]
+
+  catalog-odoo:
+    container_name: catalog-odoo
+    image: odoo:19.0-20260630
+    restart: unless-stopped
+    environment:
+      HOST: catalog-postgres
+      USER: catalog
+      PASSWORD: ${CATALOG_DB_PASSWORD}
+    depends_on:
+      catalog-postgres:
+        condition: service_healthy
+    volumes:
+      - odoo_data:/var/lib/odoo
+    ports:
+      - 127.0.0.1:18069:8069
+    networks: [catalog-net]
+
+  catalog-metabase:
+    container_name: catalog-metabase
+    image: metabase/metabase:v0.62.3.5
+    restart: unless-stopped
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_DB_PORT: 5432
+      MB_DB_USER: catalog
+      MB_DB_PASS: ${CATALOG_DB_PASSWORD}
+      MB_DB_HOST: catalog-postgres
+    depends_on:
+      catalog-postgres:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:18300:3000
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+    networks: [catalog-net]
+
+networks:
+  catalog-net:
+
+volumes:
+  catalog_pgdata:
+    external: true
+    name: catalog-ops-automation_catalog_pgdata
+  odoo_data:
+    external: true
+    name: catalog-ops-automation_odoo_data

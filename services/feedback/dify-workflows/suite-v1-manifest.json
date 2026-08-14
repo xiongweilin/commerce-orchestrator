@@ -1,0 +1,74 @@
+{
+  "suite": "customer-feedback-four-workflow-suite-v1",
+  "state": "promoted_for_portfolio_demo",
+  "generated_at": "2026-07-19",
+  "dify_dsl_version": "0.6.0",
+  "model": "deepseek-v4-flash",
+  "model_config": {
+    "thinking": true,
+    "reasoning_format": "separated",
+    "min_pairwise_precision": 0.9,
+    "note": "Thinking mode enabled on all four workflows on 2026-08-01; reasoning_format=separated keeps downstream text free of <think> content. Promoted as thinking v2 baseline on 2026-08-01."
+  },
+  "workflows": [
+    {
+      "file": "feedback-structuring-v3-candidate.yml",
+      "app_name": "客户反馈结构化-v3-candidate",
+      "state": "promoted_for_portfolio_demo",
+      "sha256": "56c8a2773bc4347277b59b131581b4d53998ff51271524629d7e84759c57547d",
+      "api_key_env": "DIFY_FEEDBACK_WORKFLOW_API_KEY"
+    },
+    {
+      "file": "issue-cluster-narrative-v1-candidate.yml",
+      "app_name": "问题簇命名与解释-v1-candidate",
+      "state": "promoted_for_portfolio_demo",
+      "sha256": "a2d4fdf5f987d3891be9090a77fd3bb1ea8803f2f9a45ad414ca7fe8af04a217",
+      "api_key_env": "DIFY_CLUSTER_WORKFLOW_API_KEY"
+    },
+    {
+      "file": "sop-draft-v1-candidate.yml",
+      "app_name": "候选SOP草案-v1-candidate",
+      "state": "promoted_for_portfolio_demo",
+      "sha256": "0b164deb5f4cf66be3dbbdcdfeafcebb9e29653d91d4a0f0a1b341579a04a080",
+      "api_key_env": "DIFY_SOP_WORKFLOW_API_KEY"
+    },
+    {
+      "file": "weekly-report-narrative-v1-candidate.yml",
+      "app_name": "运营周报叙事-v1-candidate",
+      "state": "promoted_for_portfolio_demo",
+      "sha256": "c7f87a3890fb5a8e00b64a693b21f0ce6b06f27b2084bba25802fc163ad344a1",
+      "api_key_env": "DIFY_REPORT_WORKFLOW_API_KEY"
+    }
+  ],
+  "evaluation": {
+    "status": "promoted_for_portfolio_demo_thinking_v2",
+    "current_model_results_available": true,
+    "thinking_v2_frozen_dataset_version": "v7-thinking-v2-frozen-signature-clustering-holdout-20260801",
+    "thinking_v2_structural_evaluation": "artifacts/evaluation-v7-thinking-v2-candidate/evaluation.json",
+    "thinking_v2_structural_status": "artifacts/evaluation-v7-thinking-v2-candidate/status.json",
+    "thinking_v2_content_suite_evaluation": "artifacts/workflow-suite-v1-thinking-candidate/evaluation.json",
+    "thinking_v2_promotion_record": "artifacts/evaluation-v7-thinking-v2-candidate/promotion-record-thinking-v2.json",
+    "structural_gates_all_passed": true,
+    "content_suite_gates_all_passed": true,
+    "flash_frozen_dataset_version": "v7-flash-frozen-signature-clustering-holdout-20260719",
+    "flash_structural_evaluation": "artifacts/evaluation-v7-flash-candidate/evaluation.json",
+    "flash_content_suite_evaluation": "artifacts/workflow-suite-v1-flash-candidate/evaluation.json",
+    "flash_promotion_record": "artifacts/evaluation-v7-flash-candidate/promotion-record-flash.json",
+    "content_suite_success_rates": {
+      "cluster": 1.0,
+      "sop": 1.0,
+      "report": 1.0,
+      "evidence_valid": 1.0,
+      "safe_action": 1.0
+    },
+    "previous_frozen_dataset_version": "v7-frozen-signature-clustering-holdout-20260702",
+    "previous_results_apply_to_current_model": false,
+    "historical_artifacts": [
+      "artifacts/evaluation-v7-candidate/evaluation.json",
+      "artifacts/evaluation-v7-candidate/promotion-record.json",
+      "artifacts/workflow-suite-v1-candidate/evaluation.json",
+      "artifacts/evaluation-v7-flash-candidate/promotion-record-flash.json"
+    ]
+  },
+  "boundary": "Promoted to portfolio-demo baseline on 2026-08-01 via promotion-record-thinking-v2.json (thinking: true, reasoning_format separated, min_pairwise_precision 0.90). Structural nine gates passed (B3 F1 0.889, duplicate precision 1.0); content suite 30/30, 5/5, 6/6. Supersedes the flash-without-thinking baseline (promotion-record-flash.json, historical). AI-assisted review is not an independent human audit and does not establish real-business validity."
+}

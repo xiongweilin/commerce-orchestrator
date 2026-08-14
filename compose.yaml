@@ -28,6 +28,10 @@
 
 name: commerce-orchestrator
 
+include:
+  - services/feedback/docker-compose.yml
+  - services/catalog/docker-compose.yml
+
 services:
   postgres:
     image: postgres:16-alpine

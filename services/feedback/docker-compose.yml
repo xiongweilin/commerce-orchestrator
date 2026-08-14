@@ -1,0 +1,127 @@
+services:
+  feedback-postgres:
+    container_name: feedback-postgres
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: feedback
+      POSTGRES_USER: feedback
+      POSTGRES_PASSWORD: ${FEEDBACK_DB_PASSWORD:?set FEEDBACK_DB_PASSWORD in .env}
+    volumes:
+      - feedback_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U feedback -d feedback"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [feedback-net]
+
+  feedback-api:
+    container_name: feedback-api
+    image: feedback-analysis-agent-app:latest
+    build: .
+    restart: unless-stopped
+    command: >-
+      sh -c "alembic upgrade head &&
+      uvicorn feedback_app.main:app --host 0.0.0.0 --port 8101"
+    environment: &feedback-environment
+      DATABASE_URL: postgresql+psycopg://feedback:${FEEDBACK_DB_PASSWORD}@feedback-postgres:5432/feedback
+      DIFY_BASE_URL: ${DIFY_BASE_URL:-http://host.docker.internal:18080/v1}
+      DIFY_FEEDBACK_WORKFLOW_API_KEY: ${DIFY_FEEDBACK_WORKFLOW_API_KEY:-}
+      DIFY_CLUSTER_WORKFLOW_API_KEY: ${DIFY_CLUSTER_WORKFLOW_API_KEY:-}
+      DIFY_SOP_WORKFLOW_API_KEY: ${DIFY_SOP_WORKFLOW_API_KEY:-}
+      DIFY_REPORT_WORKFLOW_API_KEY: ${DIFY_REPORT_WORKFLOW_API_KEY:-}
+      WORKFLOW_VERSION: ${WORKFLOW_VERSION:-feedback-structuring-v3-candidate}
+      ROUTING_POLICY_VERSION: ${ROUTING_POLICY_VERSION:-feedback-routing-v3-candidate}
+      CLUSTER_LINKAGE: ${CLUSTER_LINKAGE:-complete}
+      CLUSTER_RAW_TEXT_WEIGHT: ${CLUSTER_RAW_TEXT_WEIGHT:-0.2}
+      CLUSTER_BLOCK_BY_PROBLEM_TYPE: ${CLUSTER_BLOCK_BY_PROBLEM_TYPE:-true}
+      DIFY_TIMEOUT_SECONDS: ${DIFY_TIMEOUT_SECONDS:-20}
+      ALLOW_DEMO_ANALYZER: ${ALLOW_DEMO_ANALYZER:-true}
+      LIVE_SESSION_DAILY_LIMIT: ${LIVE_SESSION_DAILY_LIMIT:-5}
+      LIVE_IP_DAILY_LIMIT: ${LIVE_IP_DAILY_LIMIT:-10}
+      LIVE_GLOBAL_DAILY_LIMIT: ${LIVE_GLOBAL_DAILY_LIMIT:-100}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      ENVIRONMENT: production
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      feedback-postgres:
+        condition: service_healthy
+    volumes:
+      # Public evaluation endpoints read versioned host artifacts without write access.
+      - ./artifacts:/app/artifacts:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [feedback-net, shared-net]
+
+  feedback-worker:
+    container_name: feedback-worker
+    image: feedback-analysis-agent-app:latest
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "feedback_app.worker"]
+    environment: *feedback-environment
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      feedback-api:
+        condition: service_healthy
+    volumes:
+      - feedback_model_cache:/models/huggingface
+      # Evaluation fixtures and frozen candidate contracts are read-only inputs.
+      - ./data:/app/data:ro
+      - ./dify-workflows:/app/dify-workflows:ro
+    networks: [feedback-net]
+
+  feedback-web:
+    container_name: feedback-web
+    build: ./web
+    image: feedback-analysis-agent-feedback-web:latest
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://feedback-api:8101
+    ports:
+      - 127.0.0.1:18100:3000
+    depends_on:
+      feedback-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/feedback').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [feedback-net]
+
+  feedback-seed:
+    container_name: feedback-seed
+    image: feedback-analysis-agent-app:latest
+    build: .
+    profiles: [seed]
+    command: >-
+      sh -c "python tools/generate_dataset.py &&
+      python tools/evaluate.py --analyzer demo --embedding bge &&
+      python tools/seed_database.py --embedding bge"
+    environment: *feedback-environment
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      feedback-api:
+        condition: service_healthy
+    volumes:
+      - feedback_model_cache:/models/huggingface
+    networks: [feedback-net]
+
+networks:
+  feedback-net:
+  shared-net:
+    external: true
+
+volumes:
+  feedback_pgdata:
+    external: true
+    name: feedback-analysis-agent_feedback_pgdata
+  feedback_model_cache:
