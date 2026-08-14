@@ -73,7 +73,7 @@ services:
       catalog-postgres:
         condition: service_healthy
     volumes:
-      - odoo_data:/var/lib/odoo
+      - catalog_odoo_data:/var/lib/odoo
     networks: [catalog-net]
 
   catalog-odoo:
@@ -88,7 +88,7 @@ services:
       catalog-postgres:
         condition: service_healthy
     volumes:
-      - odoo_data:/var/lib/odoo
+      - catalog_odoo_data:/var/lib/odoo
     ports:
       - 127.0.0.1:18069:8069
     networks: [catalog-net]
@@ -123,6 +123,6 @@ volumes:
   catalog_pgdata:
     external: true
     name: catalog-ops-automation_catalog_pgdata
-  odoo_data:
+  catalog_odoo_data:
     external: true
     name: catalog-ops-automation_odoo_data
