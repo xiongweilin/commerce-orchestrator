@@ -1,98 +1,96 @@
-# 运营控制台（Operations Console）
+# Operations Console
 
-电商运营控制塔的**内部运营控制台**（Next.js 16 + TypeScript，App Router）。用于查看工作流、审批收件箱、对账差异、失败 inbox 运维，以及发起运营命令。后端为 FastAPI（默认 `http://localhost:8000`，API v1），通过同源 **BFF 安全会话**访问，不再直连后端或保存 JWT 到 localStorage。
+The **internal operations console** of the e-commerce control tower (Next.js 16 + TypeScript, App Router). Used to view workflows, the approval inbox, reconciliation differences, failed-inbox operations, and to issue operations commands. The backend is FastAPI (default `http://localhost:8000`, API v1), accessed through a same-origin **BFF secure session** — no direct backend connection, no JWT in localStorage.
 
-## 技术栈
+## Tech stack
 
-- Next.js 16.x（`output: "standalone"`，App Router，服务端组件 + 客户端表单）
-- React 19.x、TypeScript（strict）
-- 零额外运行时依赖：无 Tailwind、无 UI 库，样式为手写 CSS（`app/globals.css`，浅色主题 + 深色头部，中文界面）
+- Next.js 16.x (`output: "standalone"`, App Router, server components + client forms)
+- React 19.x, TypeScript (strict)
+- Zero extra runtime dependencies: no Tailwind, no UI library; hand-written CSS (`app/globals.css`, light theme + dark header, Chinese UI)
 
-## 快速开始
+## Quick start
 
-要求：Node.js >= 20.9（推荐 24）、npm 11。
+Requirements: Node.js >= 20.9 (24 recommended), npm 11.
 
 ```bash
 npm install
-npm run dev        # 开发模式 http://localhost:3000
-npm run build      # 生产构建（输出 .next/standalone，供 Dockerfile 使用）
-npm start          # 生产启动 http://localhost:3000
-npm run gen:types  # 从后端 OpenAPI 生成 TypeScript 类型（lib/generated/openapi.ts）
+npm run dev        # dev mode http://localhost:3000
+npm run build      # production build (outputs .next/standalone, used by the Dockerfile)
+npm start          # production start http://localhost:3000
+npm run gen:types  # generate TypeScript types from the backend OpenAPI (lib/generated/openapi.ts)
 ```
 
-> Windows 注意：本机 3001-3100 端口属于系统保留段（`netsh interface ipv4 show excludedportrange protocol=tcp`），
-> 绑定会报 `EACCES`。开发时请用保留段之外的端口，例如 `npm run dev -- -p 3200` 或
-> `npm start -- -H 127.0.0.1 -p 3200`。
+> Windows note: ports 3001–3100 are in the system reserved range on this machine (`netsh interface ipv4 show excludedportrange protocol=tcp`), and binding fails with `EACCES`. Use a port outside the reserved range for development, e.g. `npm run dev -- -p 3200` or `npm start -- -H 127.0.0.1 -p 3200`.
 
-## 环境变量
+## Environment variables
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Notes |
 | --- | --- | --- |
-| `COMMERCE_API_BASE` | `http://localhost:8000` | 后端 FastAPI 地址（**服务器私有**，仅 BFF/服务端组件使用；客户端只访问同源 BFF） |
-| `COMMERCE_CONSOLE_ORIGIN` | 请求自身 origin | 允许的 console origin（BFF 非 GET 请求的 Origin 校验；优先读取，兼容 `CONSOLE_ORIGIN` 回退；未配置时取请求自身 origin） |
-| `COMMERCE_SESSION_MOCK` | 未设置 | 仅开发模式（非 production）可用：`1` 时 POST /api/session 跳过后端 `/v1/me` 验证 |
-| `OPENAPI_URL` | `<COMMERCE_API_BASE>/openapi.json` | `npm run gen:types` 拉取 OpenAPI 的完整地址 |
+| `COMMERCE_API_BASE` | `http://localhost:8000` | backend FastAPI address (**server-private**, used only by BFF/server components; the client only reaches the same-origin BFF) |
+| `COMMERCE_CONSOLE_ORIGIN` | request's own origin | allowed console origin (Origin check for BFF non-GET requests; read first, falls back to `CONSOLE_ORIGIN`; when unset, the request's own origin) |
+| `COMMERCE_SESSION_MOCK` | unset | dev mode only (non-production): `1` makes POST /api/session skip the backend `/v1/me` verification |
+| `OPENAPI_URL` | `<COMMERCE_API_BASE>/openapi.json` | full URL `npm run gen:types` pulls the OpenAPI from |
 
-## 认证
+## Authentication
 
-采用 **Next.js BFF 安全会话**（整改计划 §四.3）：
+Uses the **Next.js BFF secure session** (rework plan §4.3):
 
-- 右上角输入一次 JWT，`POST /api/session` 由 BFF 调后端 `/v1/me` 验证后，把 JWT 写入 **HttpOnly cookie**（`commerce_session`，`SameSite=Strict`、`Path=/`、非 dev 强制 `Secure`，Max-Age 不超过 JWT 剩余 TTL 且 ≤ 8 小时），同时生成非敏感 `commerce_csrf` cookie。
-- 客户端组件一律访问同源 BFF `/api/backend[...]`，绝不接触 JWT；非 GET 请求携带 `X-CSRF-Token`（与 `commerce_csrf` cookie 一致）+ `Origin` 校验。
-- 服务端组件经 `lib/server-auth.ts` 读取 HttpOnly 会话并直连 `COMMERCE_API_BASE`。
-- `DELETE /api/session` 退出并清除两个 cookie。
+- Enter a JWT once in the top-right; `POST /api/session` has the BFF verify it against the backend `/v1/me`, then writes the JWT to an **HttpOnly cookie** (`commerce_session`, `SameSite=Strict`, `Path=/`, `Secure` forced outside dev, Max-Age no longer than the JWT's remaining TTL and ≤ 8 hours), and generates a non-sensitive `commerce_csrf` cookie.
+- Client components always reach the same-origin BFF `/api/backend[...]`, never touching the JWT; non-GET requests carry `X-CSRF-Token` (matching the `commerce_csrf` cookie) + an Origin check.
+- Server components read the HttpOnly session via `lib/server-auth.ts` and connect to `COMMERCE_API_BASE` directly.
+- `DELETE /api/session` logs out and clears both cookies.
 
-> 后端 `/v1/me` 已实现；开发模式可用 `COMMERCE_SESSION_MOCK=1` 临时跳过后端验证（仅 `NODE_ENV !== "production"` 时生效）。
+> The backend `/v1/me` is implemented; in dev mode `COMMERCE_SESSION_MOCK=1` can temporarily skip backend verification (effective only when `NODE_ENV !== "production"`).
 
-## 页面
+## Pages
 
-| 路径 | 页面 | 主要 API |
+| Route | Page | Main API |
 | --- | --- | --- |
-| `/` | 概览：工作流总数卡片、快捷入口、系统状态 | `GET /v1/workflows?limit=1`（读取 total） |
-| `/workflows` | 工作流列表：状态筛选、刷新、分页，行链接到详情 | `GET /v1/workflows?status=&limit=&offset=` |
-| `/workflows/[id]` | 工作流详情：状态头、当前步骤、版本、事件时间线、效果台账、工作项决策表单 | `GET /v1/workflows/{id}`、`POST /v1/work-items/{id}/decisions` |
-| `/approvals` | 审批收件箱：待审批工作项卡片 + 内联批准/拒绝表单 | `GET /v1/work-items?status=pending` |
-| `/reconciliations` | 对账：发起对账（带 Idempotency-Key）+ 运行列表 | `POST/GET /v1/reconciliations` |
-| `/reconciliations/[runId]` | 对账详情：差异表（MANUAL_RECONCILIATION 高亮）+ 解决备注表单 | `GET /v1/reconciliations/{runId}`、`POST /v1/reconciliations/{runId}/diffs/{diffId}/resolve` |
-| `/ops/inbox` | 运维收件箱：failed inbox 查看 + retry（仅 system_admin 可见导航） | `GET /v1/ops/inbox?status=failed`、`POST /v1/ops/inbox/{id}/retry` |
-| `/commands` | 命令发起：类型选择 + JSON 负载 + 每次新的 Idempotency-Key，展示 202 结果 | `POST /v1/catalog-revisions`、`/v1/listing-publications`、`/v1/procurements`、`/v1/returns`、`/v1/reconciliations` |
+| `/` | Overview: workflow-count cards, quick entries, system status | `GET /v1/workflows?limit=1` (reads total) |
+| `/workflows` | Workflow list: status filter, refresh, pagination; rows link to details | `GET /v1/workflows?status=&limit=&offset=` |
+| `/workflows/[id]` | Workflow details: status header, current step, version, event timeline, effect ledger, work-item decision form | `GET /v1/workflows/{id}`、`POST /v1/work-items/{id}/decisions` |
+| `/approvals` | Approval inbox: pending work-item cards + inline approve/reject forms | `GET /v1/work-items?status=pending` |
+| `/reconciliations` | Reconciliation: start a run (with Idempotency-Key) + run list | `POST/GET /v1/reconciliations` |
+| `/reconciliations/[runId]` | Reconciliation details: differences table (MANUAL_RECONCILIATION highlighted) + resolution-note form | `GET /v1/reconciliations/{runId}`、`POST /v1/reconciliations/{runId}/diffs/{diffId}/resolve` |
+| `/ops/inbox` | Ops inbox: failed-inbox view + retry (navigation visible only to system_admin) | `GET /v1/ops/inbox?status=failed`、`POST /v1/ops/inbox/{id}/retry` |
+| `/commands` | Command entry: type selection + JSON payload + a fresh Idempotency-Key each time, shows the 202 result | `POST /v1/catalog-revisions`、`/v1/listing-publications`、`/v1/procurements`、`/v1/returns`、`/v1/reconciliations` |
 
-概览页包含 worker / inbox / effect / reconciliation 四张健康卡片，数据源为 `GET /readyz` 与 `GET /v1/ops/runtime`。
+The overview page has four health cards (worker / inbox / effect / reconciliation), sourced from `GET /readyz` and `GET /v1/ops/runtime`.
 
-## 目录结构
+## Directory structure
 
 ```text
 console/
-├── app/                     # App Router 页面（layout / 概览 / 工作流 / 审批 / 对账 / 命令 / ops）
-│   ├── api/                 # BFF 路由：session / me / backend 代理（CSRF + Origin 校验）
-│   ├── globals.css          # 全局样式（手写 CSS）
-│   ├── workflows/[id]/     # 工作流详情
-│   ├── reconciliations/[runId]/  # 对账详情
-│   └── ops/inbox/           # failed inbox 查看 + retry（system_admin）
-├── components/              # StatusBadge / ErrorBox / Loading / 表单 / 刷新按钮 / 会话管理 / 健康卡片
+├── app/                     # App Router pages (layout / overview / workflows / approvals / reconciliations / commands / ops)
+│   ├── api/                 # BFF routes: session / me / backend proxy (CSRF + Origin check)
+│   ├── globals.css          # global styles (hand-written CSS)
+│   ├── workflows/[id]/     # workflow details
+│   ├── reconciliations/[runId]/  # reconciliation details
+│   └── ops/inbox/           # failed-inbox view + retry (system_admin)
+├── components/              # StatusBadge / ErrorBox / Loading / forms / refresh button / session management / health cards
 ├── lib/
-│   ├── api.ts               # fetch 封装：服务端直连 COMMERCE_API_BASE / 客户端走同源 BFF + CSRF
-│   ├── types.ts             # API v1 契约类型（读模型按 api-contract.md；命令类型来自 generated）
-│   ├── generated/openapi.ts # 由 scripts/gen-types.mjs 从 OpenAPI 生成（禁止手改）
-│   ├── session.ts           # 会话 cookie 常量（客户端/服务端共用）
-│   ├── session-server.ts    # 会话 cookie 读写 / CSRF / Max-Age 计算（服务端）
-│   ├── format.ts            # 时间 / 短 ID / JSON 展示辅助
-│   └── server-auth.ts       # 服务端从 HttpOnly 会话读取 JWT / 当前用户（fail-closed）
-├── scripts/gen-types.mjs    # OpenAPI -> TypeScript 类型生成（确定性输出）
+│   ├── api.ts               # fetch wrapper: server connects to COMMERCE_API_BASE / client goes through the same-origin BFF + CSRF
+│   ├── types.ts             # API v1 contract types (read models per api-contract.md; command types from generated)
+│   ├── generated/openapi.ts # generated from OpenAPI by scripts/gen-types.mjs (never hand-edit)
+│   ├── session.ts           # session cookie constants (client/server shared)
+│   ├── session-server.ts    # session cookie read/write / CSRF / Max-Age computation (server)
+│   ├── format.ts            # time / short-id / JSON display helpers
+│   └── server-auth.ts       # server reads JWT / current user from the HttpOnly session (fail-closed)
+├── scripts/gen-types.mjs    # OpenAPI -> TypeScript type generation (deterministic output)
 ├── public/favicon.svg
 ├── package.json
-├── package-lock.json        # 由 npm install 生成
+├── package-lock.json        # generated by npm install
 ├── tsconfig.json
 ├── next.config.ts           # output: "standalone"
 └── next-env.d.ts
 ```
 
-## 备注（实现时做的假设）
+## Notes (assumptions made while implementing)
 
-- 工作流状态、工作项状态、对账状态的取值以后端为准；未知状态显示原始字符串（中性灰徽章）。`MANUAL_RECONCILIATION` 会以紫色高亮徽章显示“人工对账”。
-- 对账 `summary` 的差异数字段名未固定，兼容 `diffCount / diff_count / unmatched / mismatchCount / unresolved` 等命名，取不到时显示“—”。
-- 工作流列表的状态筛选集合为计划 §二.1 的七个状态：`accepted / running / awaiting_approval / completed / needs_reconciliation / failed / cancelled`。
-- 对账差异的 resolve 接口可能尚未接线：后端返回 404/405/501 或对应错误码时，页面显示“接口未就绪”提示而不是崩溃。
-- 工作流事件契约字段为 `type`（不再使用 `eventType`）；审批决策提交 `expectedWorkflowVersion`（兼容读取 legacy `expectedVersion`）。
-- 后端 `/v1/me`、`/readyz`、`/livez`、`/v1/ops/*` 均已实现；后端不可达时对应卡片显示「未知」。
-- 所有数据页均为动态渲染（`force-dynamic`），构建时不请求后端；后端不可达时页面显示错误提示而不是构建失败。
+- Workflow/work-item/reconciliation status values are authoritative on the backend; unknown statuses show the raw string (neutral-gray badge). `MANUAL_RECONCILIATION` shows as a purple highlighted badge "人工对账".
+- The reconciliation `summary` difference-count field name is not fixed; compatible with `diffCount / diff_count / unmatched / mismatchCount / unresolved` naming, showing "—" when unavailable.
+- The workflow-list status filter set is the seven states of plan §2.1: `accepted / running / awaiting_approval / completed / needs_reconciliation / failed / cancelled`.
+- The reconciliation-difference resolve endpoint may not be wired yet: when the backend returns 404/405/501 or the corresponding error code, the page shows an "interface not ready" message instead of crashing.
+- The workflow event contract field is `type` (no longer `eventType`); approval decisions submit `expectedWorkflowVersion` (compatibly reads legacy `expectedVersion`).
+- The backend `/v1/me`, `/readyz`, `/livez`, `/v1/ops/*` are all implemented; when the backend is unreachable, the corresponding cards show "unknown".
+- All data pages render dynamically (`force-dynamic`), never requesting the backend at build time; when the backend is unreachable, pages show an error message instead of failing the build.

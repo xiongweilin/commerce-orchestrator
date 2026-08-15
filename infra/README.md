@@ -1,43 +1,43 @@
-# infra — 部署与运维
+# infra — Deployment & operations
 
-本目录承载 commerce-orchestrator 的容器化部署、数据库初始化与可观测性栈：
+This directory carries commerce-orchestrator's containerized deployment, database initialization, and observability stack:
 
 ```
 infra/
-├── README.md                    # 本文件：拓扑、启动/停止、环境变量、FAQ
+├── README.md                    # this file: topology, start/stop, environment variables, FAQ
 ├── postgres/
-│   ├── init.sql                 # Postgres 首次初始化（DBOS/metabase/odoo 库 + pgcrypto）
-│   └── bootstrap.sql            # 幂等角色/权限引导（db-bootstrap 服务执行）
+│   ├── init.sql                 # Postgres first-time init (DBOS/metabase/odoo databases + pgcrypto)
+│   └── bootstrap.sql            # idempotent role/permission bootstrap (run by the db-bootstrap service)
 ├── prometheus/
-│   ├── prometheus.yml           # 抓取 api/worker /metrics（容器内网）
-│   └── rules/alerts.yml         # P7 十类告警规则（每条带 runbook_url）
+│   ├── prometheus.yml           # scrapes api/worker /metrics (container network)
+│   └── rules/alerts.yml         # P7 ten alert-rule classes (each with runbook_url)
 ├── grafana/
-│   ├── provisioning/            # 预置 datasource（Prometheus）与 dashboard provider
-│   └── dashboards/              # 预置 6 块看板（API RED / worker-runtime /
+│   ├── provisioning/            # provisioned datasource (Prometheus) and dashboard provider
+│   └── dashboards/              # provisioned 6 dashboards (API RED / worker-runtime /
 │                                #   workflow-approval / effect-ledger /
-│                                #   reconciliation / privacy-cleanup）
+│                                #   reconciliation / privacy-cleanup)
 ├── alertmanager/
-│   └── alertmanager.yml         # 影子环境只投递到本地 alert-receiver
-├── alert-receiver/              # 本地告警接收器（记录名称/级别/runbook URL）
-└── scripts/                     # 部署/运维辅助脚本
+│   └── alertmanager.yml         # shadow environment delivers only to the local alert-receiver
+├── alert-receiver/              # local alert receiver (records name/level/runbook URL)
+└── scripts/                     # deployment/ops helper scripts
 ```
 
-## 部署拓扑（P7）
+## Deployment topology (P7)
 
 ```mermaid
 flowchart LR
     PG[(postgres:16-alpine\n127.0.0.1:5432)]
-    DBB[db-bootstrap\n一次性角色引导]
-    MIG[migrate\n一次性 alembic upgrade head]
+    DBB[db-bootstrap\none-shot role bootstrap]
+    MIG[migrate\none-shot alembic upgrade head]
     API[api\nFastAPI + uvicorn\n127.0.0.1:8000]
-    WK[worker\nDBOS 事件循环]
+    WK[worker\nDBOS event loop]
     CON[console\nNext.js BFF\n127.0.0.1:3200]
     PRO[prometheus\n127.0.0.1:9090]
     GRA[grafana\n127.0.0.1:3000]
     AM[alertmanager\n127.0.0.1:9093]
     AR[alert-receiver\n127.0.0.1:9116]
     MB[metabase\n127.0.0.1:3201]
-    OD[odoo19 可选\nprofile: odoo\n127.0.0.1:8069]
+    OD[odoo19 optional\nprofile: odoo\n127.0.0.1:8069]
 
     PG --> DBB --> MIG
     MIG --> API
@@ -53,48 +53,48 @@ flowchart LR
     OD --> PG
 ```
 
-### 启动顺序
+### Start order
 
 ```text
 postgres healthy → db-bootstrap completed → migrate completed
-→ api + worker（并行）→ api/worker ready
+→ api + worker (in parallel) → api/worker ready
 → console + prometheus + grafana + alertmanager + alert-receiver + metabase
 ```
 
-- **postgres**：`postgres:16-alpine`，首次空卷执行 `init.sql`（创建 dbos/metabase/odoo 库、启用 pgcrypto），健康检查 `pg_isready`。
-- **db-bootstrap**：一次性服务，幂等执行 `bootstrap.sql`——创建最小权限角色、移交应用库所有权、设置默认授权；覆盖非空卷升级场景。
-- **migrate**：一次性服务，与 api/worker 同一镜像，以 `commerce_migrator` 角色执行 `uv run alembic upgrade head`；API/worker 启动时不自行改 schema。
-- **api**：FastAPI 应用（`uv run uvicorn app.main:app`），对外 127.0.0.1:8000；healthcheck 命中 `/readyz`（WP6 实现：数据库、Alembic head、adapter 配置、worker heartbeat）。
-- **worker**：与 api **同一镜像**、不同进程（`uv run python -m app.worker`），跑 DBOS 工作流/队列，不暴露端口；独立 Docker healthcheck（主进程存活 + postgres 可达；WP4 保证 bootstrap/DBOS launch 失败时进程非零退出）。
-- **console**：Next.js 控制台（`console/Dockerfile`），服务端私有 `COMMERCE_API_BASE=http://api:8000`，BFF 安全会话（WP2）。
-- **prometheus**：抓取 `api:8000/metrics` 与 `worker:9101/metrics`（worker 端口为 WP4 契约），加载 `rules/alerts.yml`。
-- **grafana**：预置 Prometheus datasource 与 6 块 dashboard（provisioning 方式）。
-- **alertmanager**：影子环境只投递到仓库内本地 `alert-receiver`（不投外部渠道）。
-- **alert-receiver**：记录告警名称/级别/runbook URL（不记录业务 payload），写入命名卷 `alert-logs` 与 stdout。
-- **metabase**：自身应用库用独立角色 `metabase_app`；业务库连接在 Metabase 管理界面配置，**必须使用 `commerce_readonly`（仅 SELECT）**，不得用 owner/app 写账号。
-- **odoo19**：默认**不启动**（profile `odoo`），使用独立数据库 `odoo` 与角色 `odoo_app`。
-- v1 明确**不使用** Redis / RabbitMQ / Kafka / Elasticsearch / Kubernetes；异步/幂等能力由 DBOS + PostgreSQL 提供。
+- **postgres**: `postgres:16-alpine`, runs `init.sql` on first empty volume (creates dbos/metabase/odoo databases, enables pgcrypto), health check `pg_isready`.
+- **db-bootstrap**: one-shot service, idempotently runs `bootstrap.sql` — creates least-privilege roles, hands over application-database ownership, sets default privileges; covers non-empty-volume upgrade scenarios.
+- **migrate**: one-shot service, same image as api/worker, runs `uv run alembic upgrade head` as `commerce_migrator`; API/worker never alter the schema themselves at startup.
+- **api**: FastAPI app (`uv run uvicorn app.main:app`), externally on 127.0.0.1:8000; healthcheck hits `/readyz` (WP6 implementation: database, Alembic head, adapter config, worker heartbeat).
+- **worker**: **same image** as api, separate process (`uv run python -m app.worker`), runs DBOS workflows/queues, exposes no port; independent Docker healthcheck (main process alive + postgres reachable; WP4 guarantees non-zero exit when bootstrap/DBOS launch fails).
+- **console**: Next.js console (`console/Dockerfile`), server-private `COMMERCE_API_BASE=http://api:8000`, BFF secure session (WP2).
+- **prometheus**: scrapes `api:8000/metrics` and `worker:9101/metrics` (worker port is a WP4 contract), loads `rules/alerts.yml`.
+- **grafana**: provisioned Prometheus datasource and 6 dashboards (provisioning style).
+- **alertmanager**: shadow environment delivers only to the in-repo local `alert-receiver` (no external channel).
+- **alert-receiver**: records alert name/level/runbook URL (no business payload), writes to the named volume `alert-logs` and stdout.
+- **metabase**: its own app database uses the dedicated role `metabase_app`; the business-database connection is configured in the Metabase admin UI and **must use `commerce_readonly` (SELECT only)**, never an owner/app write account.
+- **odoo19**: not started by default (profile `odoo`), uses the dedicated database `odoo` and role `odoo_app`.
+- v1 explicitly uses **no** Redis / RabbitMQ / Kafka / Elasticsearch / Kubernetes; async/idempotency capability comes from DBOS + PostgreSQL.
 
-## 数据库最小权限角色
+## Database least-privilege roles
 
-由 `infra/postgres/bootstrap.sql` 幂等创建（口令为**开发占位符**，与 `.env.example`/`compose.yaml` 一致；影子/生产必须用 secret 注入真实口令）：
+Created idempotently by `infra/postgres/bootstrap.sql` (passwords are **dev placeholders**, consistent with `.env.example`/`compose.yaml`; shadow/production must inject real passwords via secrets):
 
-| 角色 | 用途 | 连接对象 |
+| Role | Purpose | Connects from |
 | --- | --- | --- |
-| `commerce`（既有 owner，兼容保留） | 容器超级用户/兼容旧部署 | — |
-| `commerce_migrator` | Alembic DDL（CREATE TABLE 等） | migrate 服务 |
-| `commerce_api` | command/webhook/decision 及读取 | api（`COMMERCE_API_DATABASE_URL`） |
-| `commerce_worker` | workflow/domain/effect/reconciliation 写权限 | worker（`COMMERCE_WORKER_DATABASE_URL`） |
-| `commerce_readonly` | 仅 SELECT projection/view | Metabase 业务库连接 |
-| `dbos_app` | DBOS 系统库（dbos） | api/worker（`COMMERCE_DBOS_SYSTEM_DATABASE_URL`） |
-| `metabase_app` | Metabase 自身应用库（metabase） | metabase（`MB_DB_*`） |
-| `odoo_app` | Odoo 数据库（odoo） | odoo19（`USER`/`PASSWORD`） |
+| `commerce` (existing owner, kept for compatibility) | container superuser / legacy-deployment compatibility | — |
+| `commerce_migrator` | Alembic DDL (CREATE TABLE etc.) | migrate service |
+| `commerce_api` | command/webhook/decision and reads | api (`COMMERCE_API_DATABASE_URL`) |
+| `commerce_worker` | workflow/domain/effect/reconciliation writes | worker (`COMMERCE_WORKER_DATABASE_URL`) |
+| `commerce_readonly` | SELECT-only projections/views | Metabase business-database connection |
+| `dbos_app` | DBOS system database (dbos) | api/worker (`COMMERCE_DBOS_SYSTEM_DATABASE_URL`) |
+| `metabase_app` | Metabase's own app database (metabase) | metabase (`MB_DB_*`) |
+| `odoo_app` | Odoo database (odoo) | odoo19 (`USER`/`PASSWORD`) |
 
-授权策略：`commerce_migrator` 建的表/序列通过 `ALTER DEFAULT PRIVILEGES` 自动按角色授权（api/worker 读写、readonly 仅 SELECT）；各应用库所有权与 public schema 归属对应 app 角色。PostgreSQL 15+ 下 public schema 不再默认对任意角色开放写权限。
+Authorization policy: tables/sequences created by `commerce_migrator` are granted per role via `ALTER DEFAULT PRIVILEGES` (api/worker read-write, readonly SELECT only); each app database's ownership and public schema belong to the corresponding app role. On PostgreSQL 15+, the public schema no longer grants write to arbitrary roles by default.
 
-## 快速开始
+## Quick start
 
-### 0. 准备 .env（必做）
+### 0. Prepare .env (required)
 
 ```bash
 # Linux/macOS
@@ -106,9 +106,9 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
-`.env.example` 是**变量名的单一事实来源**，每个变量都有注释；把真实密钥填进 `.env`（已被 git 忽略）。
+`.env.example` is the **single source of truth for variable names**, each with a comment; fill real secrets into `.env` (git-ignored).
 
-### 1. 启动完整栈（空数据卷自动迁移）
+### 1. Start the full stack (empty data volumes auto-migrate)
 
 ```powershell
 # Windows PowerShell
@@ -116,49 +116,49 @@ docker compose up -d
 ```
 
 ```bash
-# Linux/macOS（make 可选；Windows 请直接用上面的 docker compose 命令）
+# Linux/macOS (make optional; on Windows use the docker compose command directly above)
 make dev-up
 ```
 
-空数据卷首次启动会自动执行 `init.sql → db-bootstrap → migrate`，随后 api/worker 进入 ready 后启动 console 与监控栈。等价手动命令（Windows 无 make 时逐条执行）：
+First start on empty data volumes automatically runs `init.sql → db-bootstrap → migrate`; after api/worker become ready it starts the console and the monitoring stack. Equivalent manual commands (run one by one on Windows without make):
 
 ```powershell
-docker compose up -d                      # 启动（含一次性 db-bootstrap/migrate）
-docker compose up migrate                 # 仅重跑迁移（migrate-compose）
-docker compose up db-bootstrap            # 仅重跑角色引导（bootstrap-db）
-docker compose down                       # 停止并移除容器（保留数据卷）
-docker compose logs -f --tail=100         # 日志
-docker compose build                      # 重建镜像
+docker compose up -d                      # start (including one-shot db-bootstrap/migrate)
+docker compose up migrate                 # re-run only migrations (migrate-compose)
+docker compose up db-bootstrap            # re-run only role bootstrap (bootstrap-db)
+docker compose down                       # stop and remove containers (data volumes kept)
+docker compose logs -f --tail=100         # logs
+docker compose build                      # rebuild images
 ```
 
-启动后访问：
+Access after startup:
 
-| 服务 | 地址 |
+| Service | Address |
 | --- | --- |
-| API（readyz） | http://localhost:8000/readyz |
+| API (readyz) | http://localhost:8000/readyz |
 | Console | http://localhost:3200 |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000（admin/`GRAFANA_ADMIN_PASSWORD`，默认 grafana） |
+| Grafana | http://localhost:3000 (admin/`GRAFANA_ADMIN_PASSWORD`, default grafana) |
 | Alertmanager | http://localhost:9093 |
 | Metabase | http://localhost:3201 |
-| Odoo 19（需先启用 profile） | http://localhost:8069 |
+| Odoo 19 (enable the profile first) | http://localhost:8069 |
 
-### 2. 启用 Odoo 19（可选）
+### 2. Enable Odoo 19 (optional)
 
 ```bash
-# 启动完整栈 + Odoo
+# start the full stack + Odoo
 docker compose --profile odoo up -d
 
-# 仅启动 Odoo（其余服务已在运行）
+# start only Odoo (other services already running)
 docker compose --profile odoo up -d odoo19
 
-# 停止
+# stop
 docker compose --profile odoo down
 ```
 
-Odoo 使用独立数据库 `odoo` 与角色 `odoo_app`（与业务主库 `commerce` 隔离）。
+Odoo uses the dedicated database `odoo` and role `odoo_app` (isolated from the business main database `commerce`).
 
-### 3. 本地开发（不经 Docker）
+### 3. Local development (without Docker)
 
 ```bash
 # Linux/macOS
@@ -170,65 +170,65 @@ make console        # cd console && npm run dev
 ```
 
 ```powershell
-# Windows PowerShell 等价命令
+# Windows PowerShell equivalents
 cd backend; uv sync --frozen --extra dev; cd ..
 cd backend; uv run alembic upgrade head; cd ..
 cd backend; uv run pytest; cd ..
 cd console; npm run dev; cd ..
 ```
 
-裸机本地开发使用 owner 角色 `commerce`（`COMMERCE_DATABASE_URL`）；如需最小权限角色连接，先对本地库执行 `infra/postgres/bootstrap.sql` 并改用 `COMMERCE_API_DATABASE_URL` / `COMMERCE_WORKER_DATABASE_URL`。
+Bare-metal local development uses the owner role `commerce` (`COMMERCE_DATABASE_URL`); to use least-privilege role connections, first run `infra/postgres/bootstrap.sql` against the local database and switch to `COMMERCE_API_DATABASE_URL` / `COMMERCE_WORKER_DATABASE_URL`.
 
-## 监控与告警
+## Monitoring and alerting
 
-- Prometheus 规则：`infra/prometheus/rules/alerts.yml`（十类告警：worker unavailable / inbox backlog / failed inbox / outcome_unknown / API 5xx / API p99 / reconciliation incomplete / reconciliation drift / cleanup overdue / approval expiry risk），每条带 `runbook_url` 注解。
-- Grafana 看板：provisioning 自动加载 `infra/grafana/dashboards/` 下 6 块 JSON。
-- 告警出口：Alertmanager → 本地 `alert-receiver`（只记录 alert 名称/级别/runbook URL，不记录业务 payload；日志在 stdout 与命名卷 `alert-logs`）。生产外部通知渠道留待切换阶段指定。
-- 指标名契约：规则/看板引用的 `commerce_*` 指标由 WP4/WP5/WP6 落地（清单见 WP3-REPORT）；指标未落地前规则不产生数据、不误报。
+- Prometheus rules: `infra/prometheus/rules/alerts.yml` (ten alert classes: worker unavailable / inbox backlog / failed inbox / outcome_unknown / API 5xx / API p99 / reconciliation incomplete / reconciliation drift / cleanup overdue / approval expiry risk), each with a `runbook_url` annotation.
+- Grafana dashboards: provisioning auto-loads the 6 JSON files under `infra/grafana/dashboards/`.
+- Alert egress: Alertmanager → local `alert-receiver` (records only alert name/level/runbook URL, no business payload; logs to stdout and the named volume `alert-logs`). Production external notification channels are left for the switchover phase.
+- Metric-name contract: the `commerce_*` metrics referenced by rules/dashboards are implemented by WP4/WP5/WP6 (list in WP3-REPORT); until a metric is implemented, its rule produces no data and no false positives.
 
-## 环境变量说明
+## Environment variable notes
 
-全部变量名及注释见根目录 **`.env.example`**（权威文件），要点：
+All variable names and comments live in the root **`.env.example`** (authoritative file). Highlights:
 
-- `COMMERCE_*`：backend 应用配置（`config.py` 通过 `COMMERCE_` 前缀读取），包括数据库 URL、JWT、Fernet 加密密钥、Shopify/Odoo 连接、inbox/effect 参数、PII HMAC key、console origin、OTLP 与负载保留天数。
-- `POSTGRES_*`：仅 compose 插值使用（默认 `commerce`/`commerce`/`commerce`）；修改需同步 `COMMERCE_*_DATABASE_URL` 与 metabase/odoo 配置。
-- 角色口令占位符：`commerce_api`/`commerce_worker`/`commerce_migrator`/`commerce_readonly`/`dbos_app`/`metabase_app`/`odoo_app`（与 `bootstrap.sql` 一致）。
-- `DBOS__*`：可选；以 backend 的 DBOS 初始化代码为准。
-- 容器内数据库主机名是 `postgres`；`.env` 中的 `localhost` 值仅供本地裸机开发，compose 已在 api/worker 服务内用 `environment` 覆盖为服务名。
+- `COMMERCE_*`: backend application config (read by `config.py` via the `COMMERCE_` prefix), including database URLs, JWT, Fernet encryption key, Shopify/Odoo connections, inbox/effect parameters, PII HMAC key, console origin, OTLP, and payload-retention days.
+- `POSTGRES_*`: used only for compose interpolation (default `commerce`/`commerce`/`commerce`); changes must be synced with `COMMERCE_*_DATABASE_URL` and the metabase/odoo config.
+- Role-password placeholders: `commerce_api`/`commerce_worker`/`commerce_migrator`/`commerce_readonly`/`dbos_app`/`metabase_app`/`odoo_app` (consistent with `bootstrap.sql`).
+- `DBOS__*`: optional; the backend's DBOS initialization code is authoritative.
+- Inside containers the database hostname is `postgres`; the `localhost` values in `.env` are only for local bare-metal development — compose overrides them to the service name in the api/worker `environment` blocks.
 
-## 常见问题
+## FAQ
 
-### 端口占用（5432 / 8000 / 3200 / 9090 / 3000 / 9093 / 3201 / 8069）
+### Ports in use (5432 / 8000 / 3200 / 9090 / 3000 / 9093 / 3201 / 8069)
 
 ```powershell
 Get-NetTCPConnection -LocalPort 5432,8000,3200,9090,3000,9093,3201,8069 -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess
 ```
 
-若本机已有 Postgres 占用 5432，可临时改 compose 映射，例如 `"5433:5432"`，并同步修改 `.env` 中 `COMMERCE_DATABASE_URL` 的端口。监控栈宿主端口可用 `.env` 的 `API_PORT`/`CONSOLE_PORT`/`PROMETHEUS_PORT`/`GRAFANA_PORT`/`ALERTMANAGER_PORT`/`ALERT_RECEIVER_PORT`/`METABASE_PORT` 覆盖。
+If a local Postgres already occupies 5432, temporarily change the compose mapping, e.g. `"5433:5432"`, and sync the port in `COMMERCE_DATABASE_URL` in `.env`. Monitoring-stack host ports can be overridden with `API_PORT`/`CONSOLE_PORT`/`PROMETHEUS_PORT`/`GRAFANA_PORT`/`ALERTMANAGER_PORT`/`ALERT_RECEIVER_PORT`/`METABASE_PORT` in `.env`.
 
-> 注意：若本机已运行同名独立容器（如全局监控栈的 prometheus/grafana/alertmanager），compose 服务 `container_name` 已加 `commerce-` 前缀避免命名冲突，但宿主端口仍可能冲突，启动前请用上面的命令确认并调整端口。
+> Note: if standalone containers with the same names are already running on this machine (e.g., prometheus/grafana/alertmanager of the global monitoring stack), the compose service `container_name` already has the `commerce-` prefix to avoid name collisions, but host ports may still collide — confirm with the command above and adjust before starting.
 
-### Metabase 初始化
+### Metabase initialization
 
-- 首次启动 Metabase 需要约 30–60 秒初始化（创建 `metabase` 库表、生成管理员流程），访问 http://localhost:3201 时请耐心等待。
-- `metabase` 数据库由 `init.sql`/`bootstrap.sql` 自动创建并归 `metabase_app`。
-- 业务库连接在管理界面中配置：**使用 `commerce_readonly`（仅 SELECT）**，禁止使用 owner/app 写账号。
-- 忘记管理员密码：`docker compose exec metabase` 内用 Metabase 的 `reset-password` 命令处理（见 Metabase 官方文档）。
+- First Metabase startup takes about 30–60 seconds to initialize (creates the `metabase` database tables, generates the admin flow); be patient when visiting http://localhost:3201.
+- The `metabase` database is created automatically by `init.sql`/`bootstrap.sql` and owned by `metabase_app`.
+- Configure the business-database connection in the admin UI: **use `commerce_readonly` (SELECT only)**, never an owner/app write account.
+- Forgot the admin password: use Metabase's `reset-password` command inside `docker compose exec metabase` (see the official Metabase docs).
 
-### `docker compose` 报 `.env` 缺失 / 变量为空
+### `docker compose` reports missing/empty `.env`
 
-忘记 `cp .env.example .env`。`api`/`worker`/`migrate` 使用 `env_file: .env`，文件必须存在。
+You forgot `cp .env.example .env`. The `api`/`worker`/`migrate` services use `env_file: .env`; the file must exist.
 
-### 数据卷与重新初始化
+### Data volumes and re-initialization
 
-- `pgdata` 卷保存全部数据库数据；`docker compose down` 不删卷。
-- 如需彻底重置数据库（会丢数据）：`docker compose down -v` 后再 `up`，此时 `init.sql` 会重新执行一次。
-- 角色/权限在非空卷上通过 `docker compose up db-bootstrap` 幂等重放。
+- The `pgdata` volume holds all database data; `docker compose down` does not delete volumes.
+- To fully reset the database (data loss): `docker compose down -v`, then `up` — `init.sql` runs once again.
+- Roles/permissions replay idempotently on non-empty volumes via `docker compose up db-bootstrap`.
 
-### Odoo profile 用法
+### Using the Odoo profile
 
 ```bash
 docker compose --profile odoo up -d
 ```
 
-不加 `--profile odoo` 时 Odoo 不会启动，这是刻意设计（P0 验证用，默认不进日常栈）。
+Without `--profile odoo`, Odoo does not start — this is deliberate (used for P0 verification; not in the daily stack by default).
