@@ -1,172 +1,172 @@
-# Commerce Orchestrator — 电商运营控制塔
+# Commerce Orchestrator — E-commerce Operations Control Tower
 
-个人全栈试验项目：以模拟数据 + Shopify 开发店 + Odoo 19 沙盒验证跨系统工作流编排、候选/审批、幂等、effect ledger 与对账；无真实用户与真实订单，不设生产提升路径，持续运行供学习与迭代。
+A personal full-stack experimental project: verifies cross-system workflow orchestration, candidate/approval, idempotency, effect ledger, and reconciliation with simulated data + a Shopify development store + an Odoo 19 sandbox. No real users and no real orders; no production promotion path; kept running for learning and iteration.
 
-> 全仓库文档默认中文；代码、路径、命令与英文 identifier 保持原样。
+> Repository documentation is in English; code, paths, commands, and English identifiers stay as-is.
 
-## 项目定位与职责边界
+## Positioning and responsibility boundary
 
-**做什么**
+**What it does**
 
-- 把跨系统业务流编排为可靠、可审计、可回滚的长流程：反馈 → 聚类 → AI 候选 → 审批 → 目录/PIM → 渠道发布 → 效果记账 → 对账闭环。
-- 候选版本管理（draft → candidate → frozen → scored → official | rejected → deprecated）与审批控制（RBAC、四眼原则、审批边界、compliance 否决权）。
-- 对外部渠道（Shopify）的幂等效果执行，以及 effect ledger 全量记账与每日对账。
-- 以 Odoo 19 为权威账本的商品、库存、订单、财务数据集成；Metabase 只读投影运营视图。
+- Orchestrates cross-system business flows into reliable, auditable, rollback-able long-running processes: feedback → clustering → AI candidate → approval → catalog/PIM → channel publishing → effect accounting → reconciliation loop.
+- Candidate version management (draft → candidate → frozen → scored → official | rejected → deprecated) with approval control (RBAC, four-eyes principle, approval boundaries, compliance veto).
+- Idempotent effect execution against external channels (Shopify), with full effect-ledger accounting and daily reconciliation.
+- Product, inventory, order, and financial data integration with Odoo 19 as the authoritative ledger; Metabase as a read-only projection for operations views.
 
-**不做什么**
+**What it does not do**
 
-- 不替代 Odoo / Shopify：Odoo 是权威账本，Shopify 是首个渠道，本系统不复制其业务主数据。
-- 不做财务核算本身：发票/账单过账仍由 Odoo 与会计完成，已过账发票只能通过贷项通知单修正。
-- AI 只生成建议，不批准、不执行任何对外效果。
-- 不做动态定价、实时推荐等未在 v1 清单中的能力（见下文“v1 明确不做”）。
+- Does not replace Odoo / Shopify: Odoo is the authoritative ledger, Shopify is the first channel; this system does not duplicate their business master data.
+- Does not do financial accounting itself: invoice/bill posting still happens in Odoo and accounting; posted invoices can only be corrected through credit notes.
+- AI only generates suggestions; it does not approve or execute any external effect.
+- Does not do dynamic pricing, real-time recommendation, or other capabilities not on the v1 list (see "Explicitly not in v1" below).
 
-## 架构总览
+## Architecture overview
 
 ```mermaid
 flowchart LR
-    FB["反馈 Feedback<br/>(顾客/客服/内部)"] --> FI["Feedback Intelligence<br/>清洗·聚类·AI 建议"]
-    FI --> CA["候选 Candidate<br/>draft → frozen → scored"]
-    CA --> AP["审批 Approval<br/>RBAC·四眼·审批边界"]
-    AP --> PIM["Catalog-PIM<br/>目录修订·不可变版本"]
-    PIM --> OR["Orchestrator<br/>DBOS 工作流·幂等·effect ledger"]
-    OR <--> SH["Shopify 开发店<br/>Admin GraphQL 2026-07"]
-    OR <--> OD["Odoo 19<br/>权威账本·JSON-2 API"]
-    OR --> EV["Workflow Control<br/>events·outbox/inbox·对账"]
-    EV --> MB["Metabase<br/>只读投影"]
+    FB["Feedback<br/>(customer/service/internal)"] --> FI["Feedback Intelligence<br/>clean · cluster · AI suggestions"]
+    FI --> CA["Candidate<br/>draft → frozen → scored"]
+    CA --> AP["Approval<br/>RBAC · four-eyes · approval boundary"]
+    AP --> PIM["Catalog-PIM<br/>catalog revision · immutable versions"]
+    PIM --> OR["Orchestrator<br/>DBOS workflow · idempotency · effect ledger"]
+    OR <--> SH["Shopify dev store<br/>Admin GraphQL 2026-07"]
+    OR <--> OD["Odoo 19<br/>authoritative ledger · JSON-2 API"]
+    OR --> EV["Workflow Control<br/>events · outbox/inbox · reconciliation"]
+    EV --> MB["Metabase<br/>read-only projection"]
 ```
 
-## 技术栈
+## Tech stack
 
-| 层 | 选型 | 说明 |
+| Layer | Choice | Notes |
 |---|---|---|
-| 后端 | Python 3.12 / FastAPI / Pydantic / SQLAlchemy 2 / Alembic / uv | API 与 worker 同镜像、不同进程 |
-| 长流程引擎 | DBOS OSS + 独立 PostgreSQL | 工作流从最后完成步骤恢复；step 至少一次、事务恰好一次 |
-| 渠道集成 | Shopify Admin GraphQL（冻结版本 2026-07）；Odoo 19 External JSON-2 API | 详见 ADR-0007 / ADR-0008 |
-| 前端 | Next.js（React） + TypeScript | 运营控制台；BFF 安全会话（HttpOnly cookie + CSRF + allowlist 代理，ADR-0014） |
-| 可观测性 | OpenTelemetry / Prometheus / Grafana / Alertmanager | correlationId 贯穿；10 条告警带 runbook 链接，试验环境只投递本地 receiver |
-| 健康/运维 | `/livez` `/readyz` `/healthz` `/v1/me` `/v1/ops/*` | readiness 含 DB/Alembic/adapter/worker heartbeat；ops 仅 system_admin |
-| 编排 | Docker Compose | v1 不引入 Redis / RabbitMQ / Kafka / ES / K8s |
+| Backend | Python 3.12 / FastAPI / Pydantic / SQLAlchemy 2 / Alembic / uv | API and worker share one image, separate processes |
+| Long-running engine | DBOS OSS + dedicated PostgreSQL | Workflows resume from the last completed step; steps at-least-once, transactions exactly-once |
+| Channel integration | Shopify Admin GraphQL (frozen 2026-07); Odoo 19 External JSON-2 API | See ADR-0007 / ADR-0008 |
+| Frontend | Next.js (React) + TypeScript | Operations console; BFF secure session (HttpOnly cookie + CSRF + allowlist proxy, ADR-0014) |
+| Observability | OpenTelemetry / Prometheus / Grafana / Alertmanager | correlationId throughout; 10 alert rules with runbook links, test environment delivers only to the local receiver |
+| Health/ops | `/livez` `/readyz` `/healthz` `/v1/me` `/v1/ops/*` | readiness includes DB/Alembic/adapter/worker heartbeat; ops only for system_admin |
+| Orchestration | Docker Compose | v1 introduces no Redis / RabbitMQ / Kafka / ES / K8s |
 
-依赖快照以 `backend/uv.lock` 为准（fastapi 0.141.1、uvicorn 0.52.1、pydantic 2.13.4、sqlalchemy 2.0.51、alembic 1.19.1、psycopg 3.3.4、structlog 26.1.0、pyjwt 2.13.0、cryptography 49.0.0、uuid6 2025.0.1、OTEL 1.44.x、dbos 2.29）。
+The dependency snapshot is authoritative in `backend/uv.lock` (fastapi 0.141.1, uvicorn 0.52.1, pydantic 2.13.4, sqlalchemy 2.0.51, alembic 1.19.1, psycopg 3.3.4, structlog 26.1.0, pyjwt 2.13.0, cryptography 49.0.0, uuid6 2025.0.1, OTEL 1.44.x, dbos 2.29).
 
-## 仓库目录结构
+## Repository layout
 
 ```
 commerce-orchestrator/
-├── README.md            # 本文件（项目总览）
-├── compose.yaml         # Docker Compose 全栈编排
-├── Makefile             # 常用命令入口
-├── .env.example         # 环境变量样例（不含机密）
-├── .github/             # CI 工作流
-├── backend/             # Python 后端（FastAPI + DBOS）
-│   ├── app/             # 应用代码（api/worker 共用）
-│   ├── alembic/         # 数据库迁移
-│   ├── tests/           # 测试
-│   └── README.md        # 后端开发说明
-├── console/             # Next.js 运营控制台
+├── README.md            # this file (project overview)
+├── compose.yaml         # Docker Compose full-stack orchestration
+├── Makefile             # common command entry
+├── .env.example         # environment variable sample (no secrets)
+├── .github/             # CI workflows
+├── backend/             # Python backend (FastAPI + DBOS)
+│   ├── app/             # application code (api/worker shared)
+│   ├── alembic/         # database migrations
+│   ├── tests/           # tests
+│   └── README.md        # backend development notes
+├── console/             # Next.js operations console
 │   └── README.md
-├── services/            # 并入的独立服务（2026-08-14；经 compose.yaml include 纳入同一项目）
-│   ├── catalog/         # 商品上架运营自动化
-│   └── feedback/        # 客户反馈结构化分析
-├── infra/               # PostgreSQL、监控等基础设施
+├── services/            # merged standalone services (2026-08-14; included into the same project via compose.yaml include)
+│   ├── catalog/         # product listing operations automation
+│   └── feedback/        # structured customer-feedback analysis
+├── infra/               # infrastructure: PostgreSQL, monitoring, etc.
 │   └── README.md
-└── docs/                # 文档（中文）
-    ├── glossary.md      # 领域术语表
-    ├── architecture.md  # 总体架构与信任边界
-    ├── development.md   # 开发与契约变更流程
-    ├── adr/             # 架构决策记录（0001-0015）
-    ├── runbooks/        # 运维手册（环境/备份/对账）
-    └── contracts/       # 契约唯一事实源（API/事件/数据所有权）
+└── docs/                # documentation
+    ├── glossary.md      # domain glossary
+    ├── architecture.md  # overall architecture and trust boundaries
+    ├── development.md   # development and contract-change process
+    ├── adr/             # architecture decision records (0001-0015)
+    ├── runbooks/        # operations runbooks (environment/backup/reconciliation)
+    └── contracts/       # single source of truth for contracts (API/events/data ownership)
 ```
 
-## 快速开始
+## Quick start
 
-**方式一：Docker Compose 全栈（推荐联调/演示）**
+**Option 1: Docker Compose full stack (recommended for integration/demo)**
 
 ```bash
-docker compose up -d     # 空数据卷自动：postgres → db-bootstrap → migrate → api+worker → console+监控；services/（catalog、feedback）经 include 纳入同一 compose 项目（各自说明见 services/*/README.md）
+docker compose up -d     # empty data volumes automatically: postgres → db-bootstrap → migrate → api+worker → console+monitoring; services/ (catalog, feedback) join the same compose project via include (see services/*/README.md)
 ```
 
-服务清单、健康检查与数据目录见 [infra/README.md](infra/README.md)。
+Service list, health checks, and data directories: see [infra/README.md](infra/README.md).
 
-Odoo 19 默认不启动：`docker compose --profile odoo up -d`。
+Odoo 19 is not started by default: `docker compose --profile odoo up -d`.
 
-**方式二：本地开发**
+**Option 2: local development**
 
 ```bash
-# 1) 只启动依赖（PostgreSQL 等）
+# 1) start only dependencies (PostgreSQL etc.)
 docker compose up -d postgres
 
-# 2) 后端（完整说明见 backend/README.md）
+# 2) backend (full notes in backend/README.md)
 cd backend
 uv sync
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 
-# 3) 控制台（完整说明见 console/README.md）
+# 3) console (full notes in console/README.md)
 cd ../console
 npm install
 npm run dev
 ```
 
-环境变量：全部来自环境（`backend/.env` 或进程环境），样例见 `.env.example`；真实密钥禁止入库。
+Environment variables: all come from the environment (`backend/.env` or process env), sample in `.env.example`; real secrets must never be committed.
 
-> 新命令统一走 **API 受理（accept）→ inbox relay → DBOS v2 workflow → typed effect seam → canonical 对账** 的单一主线；worker bootstrap/DBOS launch 失败非零退出（fail-closed）。详见 ADR-0011/0012/0013。
+> New commands all go through the single mainline of **API accept → inbox relay → DBOS v2 workflow → typed effect seam → canonical reconciliation**; worker bootstrap/DBOS launch failure exits non-zero (fail-closed). See ADR-0011/0012/0013.
 
-## 领域事实所有权
+## Domain fact ownership
 
-每个领域有唯一事实所有者；跨系统投影必须携带 `sourceRevision` / `observedAt` / `owner`，禁止 last-writer-wins。契约详见 [docs/contracts/data-ownership.md](docs/contracts/data-ownership.md)。
+Every domain has a single fact owner; cross-system projections must carry `sourceRevision` / `observedAt` / `owner`; last-writer-wins is forbidden. Contract details: [docs/contracts/data-ownership.md](docs/contracts/data-ownership.md).
 
-| 领域 | 事实所有者 | 权威事实 | 备注 |
+| Domain | Fact owner | Authoritative facts | Notes |
 |---|---|---|---|
-| Feedback Intelligence | 反馈域 | 结构化反馈、聚类结果、AI 候选建议 | AI 只建议、不批准不执行 |
-| Operating Policy | 政策域 | 审批边界、SOP、敏感品类规则 | compliance 维护与否决 |
-| Catalog-PIM | 目录域 | 商品内容/上架修订与不可变版本 | 由 catalog_owner 审批 |
-| Offer&Pricing | 定价域 | 价格/促销规则 | 调价由 commerce_lead 审批 |
-| Shopify | 渠道适配器 | Shopify 侧产品/订单/退款状态 | Admin GraphQL 冻结 2026-07 |
-| Odoo Product | Odoo 集成 | 商品主数据（以 Odoo 为准） | External JSON-2 API |
-| Inventory | 库存域 | 库存量（仅 stock move/adjustment 改变） | inventory_supervisor 审批 |
-| Sales-Purchase | 交易域 | 订单、PO、收货发货 | 四眼原则 |
-| Finance | 财务域 | 发票/账单/贷项通知单（Odoo 权威账本） | 过账后只能贷项通知单修正 |
-| Workflow Control | 工作流控制 | workflows / events / effect ledger / 幂等记录 | DBOS OSS + PostgreSQL |
-| Metabase | 只读投影 | 运营看板（可重建） | 非权威，禁止回写 |
+| Feedback Intelligence | Feedback domain | Structured feedback, clustering results, AI candidate suggestions | AI suggests only; does not approve or execute |
+| Operating Policy | Policy domain | Approval boundaries, SOPs, sensitive-category rules | compliance maintains and vetoes |
+| Catalog-PIM | Catalog domain | Product content/listing revisions and immutable versions | approved by catalog_owner |
+| Offer&Pricing | Pricing domain | Price/promotion rules | price changes approved by commerce_lead |
+| Shopify | Channel adapter | Shopify-side product/order/refund state | Admin GraphQL frozen 2026-07 |
+| Odoo Product | Odoo integration | Product master data (Odoo authoritative) | External JSON-2 API |
+| Inventory | Inventory domain | Stock quantities (changed only by stock move/adjustment) | approved by inventory_supervisor |
+| Sales-Purchase | Transaction domain | Orders, POs, receiving/shipping | four-eyes principle |
+| Finance | Finance domain | Invoices/bills/credit notes (Odoo authoritative ledger) | after posting, corrected only by credit note |
+| Workflow Control | Workflow control | workflows / events / effect ledger / idempotency records | DBOS OSS + PostgreSQL |
+| Metabase | Read-only projection | Operations dashboards (rebuildable) | not authoritative; writes forbidden |
 
-## 核心状态机摘要
+## Core state machine summary
 
-- **AI 候选**：`draft → candidate → frozen → scored → official | rejected → deprecated`；冻结后不可修改原候选。
-- **Effect**：`planned → dispatched → succeeded | failed | outcome_unknown → reconciled | manual_reconciliation`。
-- **工作流**：`accepted → running → awaiting_approval → running → completed | needs_reconciliation | failed | cancelled`；`needs_reconciliation` 非失败终态（outcome_unknown/跨系统差异需人工处置）。
-- **inbox relay**：`pending → processing → processed | failed`（lease 30s / 指数退避 ≤10 次 / 启动回收过期 lease）。
-- **目录修订**：`catalog.revision_drafted → normalized → validated → approved → official → superseded`。
+- **AI candidate**: `draft → candidate → frozen → scored → official | rejected → deprecated`; once frozen, the original candidate cannot be modified.
+- **Effect**: `planned → dispatched → succeeded | failed | outcome_unknown → reconciled | manual_reconciliation`.
+- **Workflow**: `accepted → running → awaiting_approval → running → completed | needs_reconciliation | failed | cancelled`; `needs_reconciliation` is not a failed terminal state (outcome_unknown/cross-system differences need human handling).
+- **inbox relay**: `pending → processing → processed | failed` (lease 30s / exponential backoff ≤10 attempts / startup reclaim of expired leases).
+- **Catalog revision**: `catalog.revision_drafted → normalized → validated → approved → official → superseded`.
 
-## v1 明确不做
+## Explicitly not in v1
 
-- 不依赖 DBOS Conductor，不做多节点调度；未来需要时评估 Temporal/Hatchet，不自研控制面。
-- 不引入 Redis / RabbitMQ / Kafka / Elasticsearch / K8s。
-- 不做 last-writer-wins 冲突合并；对账差异禁止自动抹平；**skipped 域不算成功**（缺 reader 的必需域使整个 run failed）。
-- 仅 Shopify 开发店一个外部渠道。
-- Odoo External JSON-2 API 未在真实 Community 容器实测前，不进入写入阶段；不扩大 XML-RPC / `/jsonrpc` 依赖。
-- AI 不自动批准或执行任何效果。
-- 不自动反向补偿：`outcome_unknown` 不盲目重发，进 `needs_reconciliation` 人工处置；发票只能贷项通知单修正、库存只能 stock move/adjustment 改变。
-- 控制台不再把 JWT 放入 `localStorage`；浏览器只访问同源 BFF。
-- 不做动态定价、实时价格引擎、多渠道聚合。
-- 不新增自研队列或自研控制面。
+- No DBOS Conductor; no multi-node scheduling; evaluate Temporal/Hatchet when needed later, do not build a self-made control plane.
+- No Redis / RabbitMQ / Kafka / Elasticsearch / K8s.
+- No last-writer-wins conflict merging; reconciliation differences are forbidden to auto-flatten; **a skipped domain is not success** (a required domain missing a reader fails the whole run).
+- Only one external channel: the Shopify development store.
+- Odoo External JSON-2 API does not enter the write phase until tested against a real Community container; no expansion of XML-RPC / `/jsonrpc` dependencies.
+- AI does not auto-approve or execute any effect.
+- No automatic reverse compensation: `outcome_unknown` is not blindly resent; it enters `needs_reconciliation` for human handling; invoices are corrected only by credit notes, inventory only by stock move/adjustment.
+- The console no longer puts JWT into `localStorage`; the browser only accesses the same-origin BFF.
+- No dynamic pricing, real-time price engine, or multi-channel aggregation.
+- No new self-made queue or self-made control plane.
 
-## 验收门禁要点
+## Acceptance-gate highlights
 
-- **故障测试**：单 effect 重放 10 次无重复副作用；1000 次 kill injection 指标达标；重启恢复 ≤ 5 分钟；30 天人审等待不占用 worker 槽位；差异一律进 `MANUAL_RECONCILIATION`。
-- **性能门禁**：p95/p99 与压力测试基准达标（详见 ADR-0010）。
+- **Fault tests**: single effect replay 10 times without duplicate side effects; 1000 kill-injection runs meet metric targets; restart recovery ≤ 5 minutes; 30-day human-approval waits occupy no worker slot; every difference enters `MANUAL_RECONCILIATION`.
+- **Performance gates**: p95/p99 and stress-test baselines pass (see ADR-0010).
 
-## 文档导航
+## Documentation navigation
 
-| 文档 | 内容 |
+| Document | Content |
 |---|---|
-| [docs/glossary.md](docs/glossary.md) | 领域术语表（中文术语 + 英文 identifier） |
-| [docs/architecture.md](docs/architecture.md) | 总体架构、信任边界、可靠性模型、首条纵向切片 21 步 |
-| [docs/development.md](docs/development.md) | 开发约定、契约变更流程、ADR 流程 |
-| [docs/adr/](docs/adr/) | 架构决策记录（0001-0015；0011-0014 为 DBOS v2 单一主线整改新增，0015 为个人试验定位） |
-| [docs/runbooks/](docs/runbooks/) | 运维手册（dev-environment / backup-restore / reconciliation-drift / worker-failure / privacy-cleanup / alerting） |
-| [docs/contracts/](docs/contracts/) | **契约唯一事实源**（api-contract / event-contract / data-ownership） |
-| backend/README.md | 后端开发说明 |
-| console/README.md | 控制台开发说明 |
-| infra/README.md | 基础设施与 Compose 服务说明 |
+| [docs/glossary.md](docs/glossary.md) | Domain glossary (Chinese terms + English identifiers) |
+| [docs/architecture.md](docs/architecture.md) | Overall architecture, trust boundaries, reliability model, first vertical slice in 21 steps |
+| [docs/development.md](docs/development.md) | Development conventions, contract-change process, ADR process |
+| [docs/adr/](docs/adr/) | Architecture decision records (0001-0015; 0011-0014 added by the DBOS v2 single-mainline overhaul, 0015 is the personal-experiment positioning) |
+| [docs/runbooks/](docs/runbooks/) | Operations runbooks (dev-environment / backup-restore / reconciliation-drift / worker-failure / privacy-cleanup / alerting) |
+| [docs/contracts/](docs/contracts/) | **Single source of truth for contracts** (api-contract / event-contract / data-ownership) |
+| backend/README.md | Backend development notes |
+| console/README.md | Console development notes |
+| infra/README.md | Infrastructure and Compose service notes |
