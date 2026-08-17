@@ -88,11 +88,13 @@
 ```json
 {
   "run_type": "daily",
-  "domains": ["shopify", "odoo", "ledger"],
+  "domains": ["listing", "order", "procurement", "return", "catalog", "effect"],
   "scope": {}
 }
 ```
 
+域清单为六个 canonical 域（ADR-0013）；旧域 `shopify` 自动展开为 `listing+order+return`
+并返回 `deprecationWarnings`；不存在 `odoo`/`ledger` 域。
 差异一律进入 `MANUAL_RECONCILIATION`，禁止自动抹平；处置见 3.6。
 
 ### 2.6 POST /v1/work-items/{id}/decisions（→ 200）
@@ -103,7 +105,7 @@
 {
   "decision": "approve | reject | confirm | cancel",
   "reason": "str?",
-  "expectedWorkflowVersion": 1
+  "expectedWorkflowVersion": 2
 }
 ```
 
@@ -112,6 +114,8 @@
 - 两个并发审批只有一个能成功，另一个 → `409 state_conflict` / `409 workflow_version_conflict`。
 - 决策落库后由 worker 经 `DBOS.send`（`idempotency_key=decision_id`）durable 送达 workflow；workflow 收到后才执行后续状态迁移。
 - `Idempotency-Key` **必带**（计划 §四.1：work item decision 统一必带；缺失 → `422 validation_error`）。
+  过渡期兼容（2026-08-17 标注）：当前实现允许缺省（控制台与既有客户端尚未发送），
+  `backend/app/services/workflows.py::submit_decision` 保留兼容分支；客户端补发后移除兼容并强制执行。
 - 成功 → `200 {"workItemId": "uuid", "status": "str", "workflowId": "uuid"}`。
 
 ## 3. 只读端点（→ 200）
@@ -126,13 +130,13 @@
   "type": "str",
   "status": "accepted|running|awaiting_approval|completed|needs_reconciliation|failed|cancelled",
   "currentStep": "str",
-  "expectedWorkflowVersion": 1,
+  "expectedWorkflowVersion": 2,
   "input": "object?",
   "result": "object?",
   "error": "str?",
   "events": [ { "eventId": "uuid", "type": "str", "occurredAt": "ISO-8601" } ],
   "effects": [ { "effectId": "uuid", "operation": "str", "status": "str", "remoteReference": "str?", "attempt": 0, "errorDetail": "str?" } ],
-  "workItems": [ { "workItemId": "uuid", "workflowId": "uuid", "kind": "str", "title": "str", "status": "str", "requiredRoles": ["str"], "expectedWorkflowVersion": 1, "expectedVersion": 1, "expiresAt": "ISO-8601?", "createdAt": "ISO-8601", "payload": "object" } ],
+  "workItems": [ { "workItemId": "uuid", "workflowId": "uuid", "kind": "str", "title": "str", "status": "str", "requiredRoles": ["str"], "expectedWorkflowVersion": 2, "expectedVersion": 2, "expiresAt": "ISO-8601?", "createdAt": "ISO-8601", "payload": "object" } ],
   "createdAt": "ISO-8601",
   "updatedAt": "ISO-8601"
 }
@@ -158,7 +162,7 @@
 审批收件箱列表。
 
 ```json
-{ "items": [ { "workItemId": "uuid", "workflowId": "uuid", "kind": "str", "title": "str", "status": "str", "payload": "object", "expectedWorkflowVersion": 1, "expiresAt": "ISO-8601?", "createdAt": "ISO-8601" } ], "total": 0, "limit": 50, "offset": 0 }
+{ "items": [ { "workItemId": "uuid", "workflowId": "uuid", "kind": "str", "title": "str", "status": "str", "payload": "object", "expectedWorkflowVersion": 2, "expiresAt": "ISO-8601?", "createdAt": "ISO-8601" } ], "total": 0, "limit": 50, "offset": 0 }
 ```
 
 ### 3.4 GET /v1/reconciliations?limit=&offset=
