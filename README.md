@@ -1,6 +1,7 @@
 # Commerce Orchestrator — E-commerce Operations Control Tower
 
 [![CI](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
+- [Code of conduct](CODE_OF_CONDUCT.md) - [Contributing](CONTRIBUTING.md) - [MIT license](LICENSE) - [Security](SECURITY.md)
 
 
 
