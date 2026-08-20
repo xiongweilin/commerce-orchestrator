@@ -1,11 +1,6 @@
 # Commerce Orchestrator — E-commerce Operations Control Tower
 
 [![CI](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
-- [Code of conduct](CODE_OF_CONDUCT.md) - [Contributing](CONTRIBUTING.md) - [MIT license](LICENSE) - [Security](SECURITY.md)
-
-
-
-
 A personal full-stack experimental project: verifies cross-system workflow orchestration, candidate/approval, idempotency, effect ledger, and reconciliation with simulated data + a Shopify development store + an Odoo 19 sandbox. No real users and no real orders; no production promotion path; kept running for learning and iteration.
 
 > Repository documentation is in English; code, paths, commands, and English identifiers stay as-is.
@@ -176,3 +171,4 @@ Every domain has a single fact owner; cross-system projections must carry `sourc
 | backend/README.md | Backend development notes |
 | console/README.md | Console development notes |
 | infra/README.md | Infrastructure and Compose service notes |
+
