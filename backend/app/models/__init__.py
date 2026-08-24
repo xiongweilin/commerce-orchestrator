@@ -28,6 +28,10 @@ from app.models.order import SalesOrder, SalesOrderStatus
 from app.models.price import PriceOffer, PriceOfferStatus
 from app.models.procurement import ProcurementOrder, ProcurementStatus
 from app.models.projections import Projection
+from app.models.publication_qualification import (
+    PublicationQualificationAssessment,
+    PublicationQualificationStatus,
+)
 from app.models.reconciliation import (
     ReconciliationDiff,
     ReconciliationDiffStatus,
@@ -70,6 +74,8 @@ __all__ = [
     "OutboxStatus",
     "PriceOffer",
     "PriceOfferStatus",
+    "PublicationQualificationAssessment",
+    "PublicationQualificationStatus",
     "ProcurementOrder",
     "ProcurementStatus",
     "Projection",

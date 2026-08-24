@@ -44,6 +44,7 @@ from app.models.workflow import WorkflowRun, WorkflowRunStatus, WorkItem
 from app.services.approvals import create_work_item, register_next_step
 from app.services.effect_ledger import record_effect
 from app.services.outbox_inbox import emit_event
+from app.services.publication_qualification import require_current_publication_qualification
 from app.services.reconciliation import run_reconciliation
 from app.services.state_machines import can_transition
 
@@ -305,11 +306,16 @@ def listing_publication_entry(
     sku = payload.get("sku")
     if not sku:
         raise ValidationError("sku is required")
+    listing_payload = dict(payload.get("payload") or {})
+    if payload.get("catalog_revision_id") is not None:
+        listing_payload["catalog_revision_id"] = str(payload["catalog_revision_id"])
+    if payload.get("qualification_context") is not None:
+        listing_payload["qualification_context"] = dict(payload["qualification_context"])
     listing = ListingPublication(
         sku=str(sku),
         channel=str(payload.get("channel") or "shopify"),
         status=ListingStatus.DRAFT,
-        payload=payload.get("payload") or {},
+        payload=listing_payload,
     )
     db.add(listing)
     db.flush()
@@ -648,14 +654,29 @@ def _approve_catalog_revision(db, run: WorkflowRun, item, user_id) -> dict[str, 
     revision.approved_by = _uuid(user_id)
     revision.approved_at = utc_now()
 
-    # Content approval covers the listing gate: drive the publication to
-    # publishing and record the planned external effect for the worker.
+    # Content approval is not publication qualification. The external
+    # effect is gated by a fresh, exact-context append-only assessment.
+    qualification_context = (run.input_json or {}).get("qualification_context")
+    if not isinstance(qualification_context, dict):
+        raise ValidationError("publication qualification context is required")
+    require_current_publication_qualification(
+        db,
+        catalog_revision_id=revision.id,
+        expected_sku=revision.sku,
+        channel="shopify",
+        purpose=str(qualification_context.get("purpose") or ""),
+        policy_version=str(qualification_context.get("policy_version") or ""),
+        adapter_version=str(qualification_context.get("adapter_version") or ""),
+        environment_ref=str(qualification_context.get("environment_ref") or ""),
+    )
     listing = ListingPublication(
         sku=revision.sku,
         channel="shopify",
         status=ListingStatus.DRAFT,
         payload={
             "revision_id": str(revision.id),
+            "catalog_revision_id": str(revision.id),
+            "qualification_context": qualification_context,
             "title": revision.title,
             "description": revision.description,
         },
@@ -700,6 +721,21 @@ def _approve_listing_publication(db, run: WorkflowRun, item, user_id) -> dict[st
     listing = db.get(ListingPublication, _uuid(item.payload_json.get("listing_id")))
     if listing is None:
         raise NotFoundError("listing publication not found")
+    listing_payload = listing.payload or {}
+    revision_id = _uuid(listing_payload.get("catalog_revision_id"), field="catalog_revision_id")
+    qualification_context = listing_payload.get("qualification_context")
+    if revision_id is None or not isinstance(qualification_context, dict):
+        raise ValidationError("publication qualification binding is required")
+    require_current_publication_qualification(
+        db,
+        catalog_revision_id=revision_id,
+        expected_sku=listing.sku,
+        channel=listing.channel,
+        purpose=str(qualification_context.get("purpose") or ""),
+        policy_version=str(qualification_context.get("policy_version") or ""),
+        adapter_version=str(qualification_context.get("adapter_version") or ""),
+        environment_ref=str(qualification_context.get("environment_ref") or ""),
+    )
     advance_entity(
         db,
         listing,

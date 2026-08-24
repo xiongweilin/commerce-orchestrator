@@ -75,9 +75,7 @@ def test_me_requires_auth(client: TestClient) -> None:
     _assert_error_envelope(response.json(), "unauthenticated")
 
 
-def test_me_returns_db_roles_not_jwt_claims(
-    client: TestClient, make_user, auth_headers
-) -> None:
+def test_me_returns_db_roles_not_jwt_claims(client: TestClient, make_user, auth_headers) -> None:
     user_id = make_user(["catalog_owner"])
     # JWT role claims (system_admin) are informational: the DB assignment
     # (catalog_owner) is authoritative.
@@ -288,9 +286,10 @@ def test_decision_idempotent_replay(client: TestClient, make_user, auth_headers,
     assert replay.status_code == 200
     assert replay.json()["workItemId"] == first.json()["workItemId"]
     assert replay.json()["status"] == first.json()["status"]
-    assert db.execute(select(WorkItemDecision)).scalars().all() and len(
+    assert (
         db.execute(select(WorkItemDecision)).scalars().all()
-    ) == 1
+        and len(db.execute(select(WorkItemDecision)).scalars().all()) == 1
+    )
 
 
 def test_decision_same_key_different_body_409(
@@ -515,9 +514,7 @@ def test_diff_resolve_idempotent_replay_and_conflict(
 # ---------------------------------------------------------------------------
 
 
-def test_workflow_detail_normalized_fields(
-    client: TestClient, make_user, auth_headers, db
-) -> None:
+def test_workflow_detail_normalized_fields(client: TestClient, make_user, auth_headers, db) -> None:
     owner = make_user(["catalog_owner"])
     auth = auth_headers(owner, ["catalog_owner"])
     workflow_id = _seed_catalog_revision(db, owner, "SKU-NORM")
@@ -545,6 +542,28 @@ def test_workflow_detail_normalized_fields(
 
     run = db.get(WorkflowRun, uuid.UUID(workflow_id))
     item = db.get(WorkItem, uuid.UUID(item["workItemId"]))
+    from app.services.publication_qualification import (
+        append_publication_qualification_assessment,
+    )
+
+    qualification_context = {
+        "purpose": "publish",
+        "policy_version": "policy-v1",
+        "adapter_version": "shopify-v1",
+        "environment_ref": "test",
+    }
+    run.input_json = {**(run.input_json or {}), "qualification_context": qualification_context}
+    append_publication_qualification_assessment(
+        db,
+        catalog_revision_id=uuid.UUID(item.payload_json["revision_id"]),
+        channel="shopify",
+        purpose="publish",
+        policy_version="policy-v1",
+        adapter_version="shopify-v1",
+        environment_ref="test",
+        assessment_status="qualified",
+        evidence_refs=["evidence:test:normalized-fields"],
+    )
     run.version += 1
     apply_domain_continuation(
         db,
