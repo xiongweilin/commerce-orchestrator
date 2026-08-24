@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - m1/publication-qualification
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
