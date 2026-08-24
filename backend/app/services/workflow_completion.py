@@ -264,7 +264,9 @@ def _publication_qualification(
         listing_id = _uuid(_payload_value(items, "listing_id"))
         listing = db.get(ListingPublication, listing_id) if listing_id else None
         listing_payload = (listing.payload or {}) if listing else {}
-        revision_id = _uuid(payload.get("catalog_revision_id") or listing_payload.get("catalog_revision_id"))
+        revision_id = _uuid(
+            payload.get("catalog_revision_id") or listing_payload.get("catalog_revision_id")
+        )
         revision = db.get(CatalogRevision, revision_id) if revision_id else None
         channel = (listing.channel if listing else None) or str(payload.get("channel") or "")
         if not isinstance(context, dict):
@@ -286,7 +288,10 @@ def _publication_qualification(
         adapter_version=str(context["adapter_version"]),
         environment_ref=str(context["environment_ref"]),
     )
-    if assessment is None or assessment.assessment_status is not PublicationQualificationStatus.QUALIFIED:
+    if (
+        assessment is None
+        or assessment.assessment_status is not PublicationQualificationStatus.QUALIFIED
+    ):
         return False, []
     return True, [f"publication_qualification:{assessment.id}"]
 
@@ -370,7 +375,9 @@ def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
             required_effect_refs.append(effect_ref)
             requirement = f"{effect_ref}:realization_verified"
             latest = latest_effect_realization_assessment(db, effect.id)
-            verified = bool(latest and latest.realization_status is EffectRealizationStatus.VERIFIED)
+            verified = bool(
+                latest and latest.realization_status is EffectRealizationStatus.VERIFIED
+            )
             if verified and latest is not None:
                 realization_refs.append(f"effect_realization:{latest.id}")
             _record_requirement(declared, covered, missing, requirement, verified)

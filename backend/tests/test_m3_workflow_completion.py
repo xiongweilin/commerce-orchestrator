@@ -167,7 +167,9 @@ def test_contract_inventory_is_finite_and_explicit() -> None:
         "return-to-refund",
         "reconciliation",
     }
-    assert all(contract.workflow_kind == kind for kind, contract in WORKFLOW_COMPLETION_CONTRACTS.items())
+    assert all(
+        contract.workflow_kind == kind for kind, contract in WORKFLOW_COMPLETION_CONTRACTS.items()
+    )
     assert WORKFLOW_COMPLETION_CONTRACTS["catalog-revision"].required_effect_classes_always == (
         "shopify.product_publish",
     )

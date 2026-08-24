@@ -11,7 +11,9 @@ Fixed routing:
   definition with ``SetWorkflowID(str(workflow_run_id))`` (deterministic id:
   replayed events return the original execution);
 - ``workflow.decision_recorded`` -> ``DBOS.send`` to the workflow id, topic =
-  work item id, idempotency key = decision id (durable approval message).
+  work item id, idempotency key = decision id (durable approval message);
+- ``workflow.completion_recheck_requested`` -> ``DBOS.send`` to the same
+  workflow id on the fixed ``completion-recheck`` topic.
 
 Webhook-driven domain events (``order.received`` / ``return.case_requested``)
 have no relay action: webhooks now create DBOS v2 runs and emit
@@ -27,6 +29,7 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.models.messaging import OutboxEvent
+from app.services.workflow_completion import COMPLETION_RECHECK_TOPIC
 
 logger = get_logger("commerce.worker.relay")
 
@@ -80,6 +83,19 @@ def plan_inbox_action(event: OutboxEvent) -> InboxAction:
             topic=str(payload["work_item_id"]),
             message={key: payload[key] for key in DECISION_MESSAGE_KEYS if key in payload},
             idempotency_key=str(payload["decision_id"]),
+        )
+
+    if event_type == "workflow.completion_recheck_requested":
+        return InboxAction(
+            kind="send",
+            destination_id=str(payload["workflow_id"]),
+            topic=COMPLETION_RECHECK_TOPIC,
+            message={
+                "workflow_id": str(payload["workflow_id"]),
+                "requested_by_user_id": str(payload["requested_by_user_id"]),
+                "recheck_event_id": str(event.event_id),
+            },
+            idempotency_key=str(event.event_id),
         )
 
     raise ValueError(f"no inbox action for event type {event_type!r}")
