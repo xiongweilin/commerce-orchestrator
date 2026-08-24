@@ -9,6 +9,10 @@ from app.models.catalog import (
     CatalogRevisionStatus,
 )
 from app.models.effect import EffectLedgerEntry, EffectStatus
+from app.models.effect_realization import (
+    EffectRealizationAssessment,
+    EffectRealizationStatus,
+)
 from app.models.feedback import (
     FeedbackCluster,
     FeedbackItem,
@@ -38,6 +42,11 @@ from app.models.reconciliation import (
     ReconciliationRun,
     ReconciliationRunStatus,
 )
+from app.models.reconciliation_resolution import (
+    ReconciliationResolution,
+    ReconciliationResolutionKind,
+    ReconciliationVerificationStatus,
+)
 from app.models.returns import ReturnCase, ReturnDisposition, ReturnStatus
 from app.models.runtime import RuntimeHeartbeat
 from app.models.sensitive_payload import SensitivePayload
@@ -60,6 +69,8 @@ __all__ = [
     "CatalogRevisionStatus",
     "EffectLedgerEntry",
     "EffectStatus",
+    "EffectRealizationAssessment",
+    "EffectRealizationStatus",
     "ExternalIdMapping",
     "FeedbackCluster",
     "FeedbackItem",
@@ -83,6 +94,9 @@ __all__ = [
     "ReconciliationDiffStatus",
     "ReconciliationRun",
     "ReconciliationRunStatus",
+    "ReconciliationResolution",
+    "ReconciliationResolutionKind",
+    "ReconciliationVerificationStatus",
     "ReturnCase",
     "ReturnDisposition",
     "ReturnStatus",
