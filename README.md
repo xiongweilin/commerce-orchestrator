@@ -1,9 +1,7 @@
 # Commerce Orchestrator — E-commerce Operations Control Tower
 
-[![CI](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
+[![CI](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
 A personal full-stack experimental project: verifies cross-system workflow orchestration, candidate/approval, idempotency, effect ledger, and reconciliation with simulated data + a Shopify development store + an Odoo 19 sandbox. No real users and no real orders; no production promotion path; kept running for learning and iteration.
-
-> Repository documentation is in English; code, paths, commands, and English identifiers stay as-is.
 
 ## Positioning and responsibility boundary
 
@@ -20,6 +18,31 @@ A personal full-stack experimental project: verifies cross-system workflow orche
 - Does not do financial accounting itself: invoice/bill posting still happens in Odoo and accounting; posted invoices can only be corrected through credit notes.
 - AI only generates suggestions; it does not approve or execute any external effect.
 - Does not do dynamic pricing, real-time recommendation, or other capabilities not on the v1 list (see "Explicitly not in v1" below).
+
+### Responsibility separation
+
+The current mainline keeps these axes independent:
+
+```text
+catalog lifecycle
+!= current publication qualification
+
+effect execution status
+!= effect realization assessment
+
+reconciliation diff lifecycle
+!= resolution kind
+!= resolution verification
+
+workflow terminal status
+!= bounded completion proof
+```
+
+Publication qualification is append-only and bound to the exact revision fingerprint, channel, purpose, policy version, adapter version, and environment. `OFFICIAL` does not imply current qualification.
+
+Effect realization and reconciliation resolution are append-only semantic records with explicit actor provenance. `SUCCEEDED` does not imply realized, and `RESOLVED` does not imply repaired or verified.
+
+Workflow completion is gated by the finite contract declared for each workflow kind: settled work items, declared domain terminal state, required current publication qualification where applicable, required effect classes, latest `VERIFIED` realization for run-owned effects, and no blocking reconciliation diff. Completion coverage is permanently reported as `declared-scope-only`; blocked completion remains non-terminal and waits for an explicit durable `completion-recheck` signal.
 
 ## Architecture overview
 
@@ -135,10 +158,13 @@ Every domain has a single fact owner; cross-system projections must carry `sourc
 ## Core state machine summary
 
 - **AI candidate**: `draft → candidate → frozen → scored → official | rejected → deprecated`; once frozen, the original candidate cannot be modified.
-- **Effect**: `planned → dispatched → succeeded | failed | outcome_unknown → reconciled | manual_reconciliation`.
-- **Workflow**: `accepted → running → awaiting_approval → running → completed | needs_reconciliation | failed | cancelled`; `needs_reconciliation` is not a failed terminal state (outcome_unknown/cross-system differences need human handling).
+- **Catalog revision**: `catalog.revision_drafted → normalized → validated → approved → official → superseded`; lifecycle is independent of current publication qualification.
+- **Publication qualification**: append-only `qualified | not_qualified | revalidation_required`, exact-context-bound; no retrospective upgrade from catalog lifecycle.
+- **Effect execution**: `planned → dispatched → succeeded | failed | outcome_unknown → reconciled | manual_reconciliation`.
+- **Effect realization**: append-only `unverified | verified | failed | unknown`; execution status is historical and is not rewritten by realization judgment.
+- **Reconciliation diff**: `open | manual_reconciliation | resolved`; lifecycle is independent of append-only resolution kind and verification status.
+- **Workflow**: `accepted → running → awaiting_approval → running → completed | needs_reconciliation | failed | cancelled`; `completed` has one bounded gate and proves only declared scope.
 - **inbox relay**: `pending → processing → processed | failed` (lease 30s / exponential backoff ≤10 attempts / startup reclaim of expired leases).
-- **Catalog revision**: `catalog.revision_drafted → normalized → validated → approved → official → superseded`.
 
 ## Explicitly not in v1
 
@@ -171,4 +197,3 @@ Every domain has a single fact owner; cross-system projections must carry `sourc
 | backend/README.md | Backend development notes |
 | console/README.md | Console development notes |
 | infra/README.md | Infrastructure and Compose service notes |
-
