@@ -41,6 +41,11 @@ from app.schemas.effects import EffectExecutionOutcome, EffectExecutionRequest
 from app.services.approvals import apply_domain_continuation
 from app.services.commands import COMMAND_HANDLERS
 from app.services.outbox_inbox import emit_event
+from app.services.workflow_completion import (
+    COMPLETION_RECHECK_TOPIC,
+    assess_workflow_completion,
+    completion_satisfied,
+)
 from app.workflows.effect_execution import (
     apply_effect_outcome,
     build_effect_execution_request,
@@ -162,9 +167,10 @@ def _snapshot_txn(workflow_id: str) -> dict[str, Any]:
         .scalars()
         .all()
     )
-    # Delay terminal normalisation until planned effects have been executed:
-    # v1 continuations reused by the v2 driver may mark the run completed
-    # (e.g. the closing gate) while effects are still recorded as planned.
+    # Delay terminal normalisation until planned effects have been executed.
+    # Domain continuations may record a completion result while effects remain
+    # planned, but ``commands._complete_run`` does not terminalize the run;
+    # terminal completion is owned only by the gated ``_complete_txn`` seam.
     if not effects:
         _normalize_terminal(db, run)
     return {
@@ -260,17 +266,57 @@ def _apply_effect_outcome_txn(
 
 
 @DBOS.transaction(name="wf2_complete")
-def _complete_txn(workflow_id: str) -> None:
+def _complete_txn(workflow_id: str) -> dict[str, Any]:
+    """Attempt terminal completion through the bounded M3 evidence gate.
+
+    Historical terminal runs are returned as-is and are never retrospectively
+    upgraded with an M3 completion assessment. New completion claims persist
+    the exact declared-scope assessment that authorized them.
+    """
     db = DBOS.sql_session
     run = db.get(WorkflowRun, uuid.UUID(workflow_id))
-    if run is None or run.status in FINAL_STATUSES:
-        return
+    if run is None:
+        return {"completed": False, "assessment": None}
+    if run.status in FINAL_STATUSES:
+        return {
+            "completed": run.status is WorkflowRunStatus.COMPLETED,
+            "assessment": (run.result_json or {}).get("completionAssessment"),
+        }
+
+    assessment = assess_workflow_completion(db, run)
+    assessment_json = assessment.model_dump(mode="json")
+    result = dict(run.result_json or {})
+    if not completion_satisfied(assessment):
+        # Insufficient/unknown proof is neither failure nor reconciliation.
+        # Keep the workflow non-terminal; the DBOS driver waits durably for
+        # an explicit completion-recheck signal before assessing again.
+        if run.status is not WorkflowRunStatus.RUNNING:
+            run.status = WorkflowRunStatus.RUNNING
+            run.version += 1
+        result.update(
+            {
+                "workflowId": workflow_id,
+                "status": run.status.value,
+                "statusUrl": f"/v1/workflows/{workflow_id}",
+                "completionBlocked": True,
+                "completionAssessment": assessment_json,
+            }
+        )
+        run.result_json = result
+        db.flush()
+        return {"completed": False, "assessment": assessment_json}
+
     run.status = WorkflowRunStatus.COMPLETED
-    run.result_json = {
-        "workflowId": workflow_id,
-        "status": "completed",
-        "statusUrl": f"/v1/workflows/{workflow_id}",
-    }
+    result.update(
+        {
+            "workflowId": workflow_id,
+            "status": "completed",
+            "statusUrl": f"/v1/workflows/{workflow_id}",
+            "completionBlocked": False,
+            "completionAssessment": assessment_json,
+        }
+    )
+    run.result_json = result
     run.finished_at = utc_now()
     run.version += 1
     emit_event(
@@ -284,6 +330,7 @@ def _complete_txn(workflow_id: str) -> None:
     )
     record_workflow_terminal(run.workflow_type, WorkflowRunStatus.COMPLETED.value)
     db.flush()
+    return {"completed": True, "assessment": assessment_json}
 
 
 @DBOS.transaction(name="wf2_cancel")
@@ -461,8 +508,23 @@ def _drive_v2(
                 return _final_result(workflow_id, "cancelled")
             _apply_decision_txn(workflow_id, dict(decision))
             continue
-        _complete_txn(workflow_id)
-        return _final_result(workflow_id, "completed")
+        completion = _complete_txn(workflow_id)
+        if completion.get("completed"):
+            return _final_result(workflow_id, "completed")
+
+        # A blocked completion is a durable wait, not a returned RUNNING result.
+        # Timeouts only renew the wait; they do not manufacture failure. Each
+        # explicit recheck signal causes the same bounded assessment to run again.
+        while True:
+            recheck = DBOS.recv(
+                topic=COMPLETION_RECHECK_TOPIC,
+                timeout_seconds=APPROVAL_TIMEOUT_SECONDS,
+            )
+            if recheck is None:
+                continue
+            completion = _complete_txn(workflow_id)
+            if completion.get("completed"):
+                return _final_result(workflow_id, "completed")
     _fail_txn(workflow_id, "workflow gate limit exceeded")
     return _final_result(workflow_id, "failed")
 
