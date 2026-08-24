@@ -1,0 +1,68 @@
+name: M2 realization-resolution staging
+
+on:
+  push:
+    branches:
+      - m2/realization-resolution
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: m2/realization-resolution
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.3"
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --frozen --extra dev
+      - name: Generate M2 product files
+        working-directory: backend
+        run: uv run python scripts/m2_wire.py
+      - name: Format and focused responsibility checks
+        working-directory: backend
+        run: |
+          uv run ruff format \
+            app/models/effect_realization.py \
+            app/models/reconciliation_resolution.py \
+            app/services/realization_resolution.py \
+            app/api/v1/semantic_records.py \
+            app/models/__init__.py \
+            app/api/v1/__init__.py \
+            app/main.py \
+            alembic/versions/0008_realization_resolution.py \
+            tests/test_m2_realization_resolution.py \
+            tests/test_m2_migration_no_backfill.py
+          uv run ruff check app
+          uv run ruff check tests/test_m2_realization_resolution.py tests/test_m2_migration_no_backfill.py
+          uv run ruff format --check app
+          uv run pytest \
+            tests/test_m2_realization_resolution.py \
+            tests/test_m2_migration_no_backfill.py \
+            tests/test_migrations_schema.py
+          ! grep -R "portable_runtime\|control_plane\|CompletionAuthority" \
+            app/models/effect_realization.py \
+            app/models/reconciliation_resolution.py \
+            app/services/realization_resolution.py \
+            app/api/v1/semantic_records.py \
+            tests/test_m2_realization_resolution.py
+      - name: Commit clean M2 product state
+        shell: bash
+        run: |
+          git rm .github/workflows/m2-stage.yml backend/scripts/m2_wire.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            backend/app \
+            backend/alembic/versions/0008_realization_resolution.py \
+            backend/tests/test_m2_realization_resolution.py \
+            backend/tests/test_m2_migration_no_backfill.py
+          git commit -m "M2: separate effect realization and reconciliation resolution"
+          git push origin HEAD:m2/realization-resolution
