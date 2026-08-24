@@ -1,8 +1,9 @@
-"""Commerce-native bounded workflow completion assessment.
+"""Commerce-native bounded workflow completion assessment and recheck handoff.
 
 The gate proves only the finite requirements declared for one workflow kind.
 It never claims universal completeness: ``coverage_claim`` is permanently
-``declared-scope-only``.
+``declared-scope-only``.  A blocked completion remains non-terminal and can
+be re-assessed only through an explicit durable completion-recheck signal.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from app.core.errors import ConflictError, NotFoundError
 from app.models.catalog import CatalogRevision, CatalogRevisionStatus
 from app.models.effect import EffectLedgerEntry
 from app.models.effect_realization import EffectRealizationStatus
@@ -27,18 +29,22 @@ from app.models.reconciliation import (
     ReconciliationRunStatus,
 )
 from app.models.returns import ReturnCase, ReturnStatus
-from app.models.workflow import WorkflowRun, WorkItem, WorkItemStatus
+from app.models.workflow import WorkflowRun, WorkflowRunStatus, WorkItem, WorkItemStatus
+from app.services.outbox_inbox import emit_event
 from app.services.publication_qualification import latest_applicable_assessment
 from app.services.realization_resolution import latest_effect_realization_assessment
 
 COVERAGE_CLAIM: Literal["declared-scope-only"] = "declared-scope-only"
+COMPLETION_RECHECK_EVENT = "workflow.completion_recheck_requested"
+COMPLETION_RECHECK_TOPIC = "completion-recheck"
 
 
 class WorkflowCompletionContract(BaseModel):
     workflow_kind: str
     domain_terminal: str
     publication_qualification_required: bool = False
-    required_effects: bool = True
+    required_effect_classes_always: tuple[str, ...] = ()
+    verify_all_run_owned_effects: bool = True
 
 
 WORKFLOW_COMPLETION_CONTRACTS: dict[str, WorkflowCompletionContract] = {
@@ -46,32 +52,59 @@ WORKFLOW_COMPLETION_CONTRACTS: dict[str, WorkflowCompletionContract] = {
         workflow_kind="catalog-revision",
         domain_terminal="catalog_revision:official",
         publication_qualification_required=True,
+        required_effect_classes_always=("shopify.product_publish",),
     ),
     "listing-publication": WorkflowCompletionContract(
         workflow_kind="listing-publication",
         domain_terminal="listing_publication:active",
         publication_qualification_required=True,
+        required_effect_classes_always=("shopify.product_publish",),
     ),
     "procurement": WorkflowCompletionContract(
         workflow_kind="procurement",
         domain_terminal="procurement_order:closed",
+        required_effect_classes_always=(
+            "odoo.po_create",
+            "odoo.po_confirm",
+            "odoo.receive_transfer",
+            "odoo.bill_create",
+        ),
     ),
     "return": WorkflowCompletionContract(
         workflow_kind="return",
         domain_terminal="return_case:closed",
+        required_effect_classes_always=(
+            "odoo.credit_note_create",
+            "odoo.credit_note_validate",
+            "shopify.refund_create",
+        ),
     ),
     "order-to-cash": WorkflowCompletionContract(
         workflow_kind="order-to-cash",
         domain_terminal="sales_order:closed",
+        required_effect_classes_always=(
+            "odoo.sale_order_create",
+            "odoo.sale_order_confirm",
+            "odoo.picking_create",
+            "odoo.picking_validate",
+            "shopify.fulfillment_create",
+            "odoo.invoice_create",
+            "odoo.invoice_validate",
+        ),
     ),
     "return-to-refund": WorkflowCompletionContract(
         workflow_kind="return-to-refund",
         domain_terminal="return_case:closed",
+        required_effect_classes_always=(
+            "odoo.credit_note_create",
+            "odoo.credit_note_validate",
+            "shopify.refund_create",
+        ),
     ),
     "reconciliation": WorkflowCompletionContract(
         workflow_kind="reconciliation",
         domain_terminal="reconciliation_run:finished",
-        required_effects=False,
+        required_effect_classes_always=(),
     ),
 }
 
@@ -91,6 +124,45 @@ class CompletionAssessment(BaseModel):
 
 def completion_satisfied(assessment: CompletionAssessment) -> bool:
     return not assessment.missing_requirements and not assessment.blocking_reconciliation_refs
+
+
+def request_completion_recheck(
+    db,
+    *,
+    workflow_id: uuid.UUID,
+    requested_by_user_id: uuid.UUID,
+) -> dict[str, str]:
+    """Emit one explicit durable recheck request for a currently blocked run.
+
+    This command does not create evidence, change workflow status, or claim
+    completion.  The worker relay converts the outbox event into a DBOS send
+    on ``COMPLETION_RECHECK_TOPIC``; the waiting workflow then re-assesses the
+    same run against current M1/M2 evidence.
+    """
+    run = db.get(WorkflowRun, workflow_id)
+    if run is None:
+        raise NotFoundError(f"workflow {workflow_id} not found")
+    result = run.result_json or {}
+    if run.status is not WorkflowRunStatus.RUNNING or result.get("completionBlocked") is not True:
+        raise ConflictError("workflow is not waiting on a blocked completion assessment")
+    event = emit_event(
+        db,
+        event_type=COMPLETION_RECHECK_EVENT,
+        aggregate_type="workflow",
+        aggregate_id=str(run.id),
+        correlation_id=run.correlation_id,
+        producer="workflow",
+        payload={
+            "workflow_id": str(run.id),
+            "requested_by_user_id": str(requested_by_user_id),
+        },
+        consumers=["worker"],
+    )
+    return {
+        "workflowId": str(run.id),
+        "recheckEventId": str(event.event_id),
+        "topic": COMPLETION_RECHECK_TOPIC,
+    }
 
 
 def _items(db, run: WorkflowRun) -> list[WorkItem]:
@@ -219,6 +291,10 @@ def _publication_qualification(
     return True, [f"publication_qualification:{assessment.id}"]
 
 
+def _effect_class(effect: EffectLedgerEntry) -> str:
+    return f"{effect.target_system}.{effect.operation}"
+
+
 def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
     """Assess only the declared finite completion scope for ``run``."""
     declared: list[str] = []
@@ -227,7 +303,6 @@ def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
     qualification_refs: list[str] = []
     realization_refs: list[str] = []
     required_effect_refs: list[str] = []
-    required_effect_classes: list[str] = []
     blocking_refs: list[str] = []
 
     contract = WORKFLOW_COMPLETION_CONTRACTS.get(run.workflow_type)
@@ -276,20 +351,29 @@ def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
         .scalars()
         .all()
     )
-    if contract.required_effects:
-        _record_requirement(declared, covered, missing, "effects:present", bool(effects))
-
+    effects_by_class: dict[str, list[EffectLedgerEntry]] = {}
     for effect in effects:
-        effect_ref = f"effect:{effect.intent_id}"
-        operation = f"{effect.target_system}.{effect.operation}"
-        required_effect_refs.append(effect_ref)
-        required_effect_classes.append(operation)
-        requirement = f"{effect_ref}:realization_verified"
-        latest = latest_effect_realization_assessment(db, effect.id)
-        verified = bool(latest and latest.realization_status is EffectRealizationStatus.VERIFIED)
-        if verified and latest is not None:
-            realization_refs.append(f"effect_realization:{latest.id}")
-        _record_requirement(declared, covered, missing, requirement, verified)
+        effects_by_class.setdefault(_effect_class(effect), []).append(effect)
+
+    for effect_class in contract.required_effect_classes_always:
+        _record_requirement(
+            declared,
+            covered,
+            missing,
+            f"effect_class:{effect_class}:present",
+            bool(effects_by_class.get(effect_class)),
+        )
+
+    if contract.verify_all_run_owned_effects:
+        for effect in effects:
+            effect_ref = f"effect:{effect.intent_id}"
+            required_effect_refs.append(effect_ref)
+            requirement = f"{effect_ref}:realization_verified"
+            latest = latest_effect_realization_assessment(db, effect.id)
+            verified = bool(latest and latest.realization_status is EffectRealizationStatus.VERIFIED)
+            if verified and latest is not None:
+                realization_refs.append(f"effect_realization:{latest.id}")
+            _record_requirement(declared, covered, missing, requirement, verified)
 
     blocker_requirement = "reconciliation:no_blocking_diff_for_required_effects"
     if effects:
@@ -328,15 +412,18 @@ def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
         qualification_refs=qualification_refs,
         realization_refs=realization_refs,
         required_effect_refs=required_effect_refs,
-        required_effect_classes=required_effect_classes,
+        required_effect_classes=list(contract.required_effect_classes_always),
     )
 
 
 __all__ = [
+    "COMPLETION_RECHECK_EVENT",
+    "COMPLETION_RECHECK_TOPIC",
     "COVERAGE_CLAIM",
     "CompletionAssessment",
     "WORKFLOW_COMPLETION_CONTRACTS",
     "WorkflowCompletionContract",
     "assess_workflow_completion",
     "completion_satisfied",
+    "request_completion_recheck",
 ]
