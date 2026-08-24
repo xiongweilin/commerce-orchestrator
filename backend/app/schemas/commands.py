@@ -16,6 +16,15 @@ from pydantic import BaseModel, Field
 from app.schemas.base import AcceptedResponse, Money
 
 
+class PublicationQualificationContext(BaseModel):
+    """Exact context a publication gate must match."""
+
+    purpose: str = Field(default="publish", min_length=1, max_length=64)
+    policy_version: str = Field(min_length=1, max_length=64)
+    adapter_version: str = Field(min_length=1, max_length=64)
+    environment_ref: str = Field(min_length=1, max_length=128)
+
+
 class CatalogRevisionCreate(BaseModel):
     """Create a draft catalog revision for a SKU."""
 
@@ -27,6 +36,7 @@ class CatalogRevisionCreate(BaseModel):
     source_refs: list[dict[str, Any]] = Field(default_factory=list)
     source_revision: str | None = Field(default=None, max_length=64)
     evidence: dict[str, Any] = Field(default_factory=dict)
+    qualification_context: PublicationQualificationContext | None = None
 
 
 class ListingPublicationCreate(BaseModel):
@@ -34,6 +44,8 @@ class ListingPublicationCreate(BaseModel):
 
     sku: str = Field(min_length=1, max_length=64)
     channel: str = Field(default="shopify", max_length=32)
+    catalog_revision_id: UUID | None = None
+    qualification_context: PublicationQualificationContext | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -117,6 +129,7 @@ __all__ = [
     "DecisionResult",
     "ListingPublicationCreate",
     "ProcurementCreate",
+    "PublicationQualificationContext",
     "ReconciliationCreate",
     "ReturnCreate",
     "StatusUrlResponse",
