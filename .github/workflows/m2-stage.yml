@@ -29,6 +29,25 @@ jobs:
       - name: Generate M2 product files
         working-directory: backend
         run: uv run python scripts/m2_wire.py
+      - name: Align API provenance fixtures with request-session visibility
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("tests/test_m2_realization_resolution.py")
+          text = p.read_text(encoding="utf-8")
+          text = text.replace(
+              '    effect = _effect(db, EffectStatus.SUCCEEDED)\n    response = client.post(\n        "/v1/effect-realizations",',
+              '    effect = _effect(db, EffectStatus.SUCCEEDED)\n    db.commit()\n    response = client.post(\n        "/v1/effect-realizations",',
+              1,
+          )
+          text = text.replace(
+              '    diff = _diff(db, ReconciliationDiffStatus.RESOLVED)\n    response = client.post(\n        "/v1/reconciliation-resolutions",',
+              '    diff = _diff(db, ReconciliationDiffStatus.RESOLVED)\n    db.commit()\n    response = client.post(\n        "/v1/reconciliation-resolutions",',
+              1,
+          )
+          p.write_text(text, encoding="utf-8")
+          PY
       - name: Format and focused responsibility checks
         working-directory: backend
         run: |
