@@ -86,6 +86,7 @@ RETURN_EVENTS = (
 WORKFLOW_EVENTS = (
     "workflow.accepted",
     "workflow.decision_recorded",
+    "workflow.completion_recheck_requested",
     "workflow.completed",
     "workflow.failed",
     "workflow.cancelled",

@@ -10,9 +10,27 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_session, require_roles
 from app.schemas.events import ROLES
+from app.services.workflow_completion import request_completion_recheck
 from app.services.workflows import get_workflow, list_workflows
 
 router = APIRouter(prefix="/v1", tags=["workflows"])
+
+
+@router.post("/workflows/{workflow_id}/completion-recheck")
+def recheck_workflow_completion(
+    workflow_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_session)],
+    user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+    _authorized: Annotated[
+        bool, Depends(require_roles("catalog_owner", "accountant", "system_admin"))
+    ],
+) -> dict[str, str]:
+    """Request re-assessment of a currently blocked completion claim."""
+    return request_completion_recheck(
+        db,
+        workflow_id=workflow_id,
+        requested_by_user_id=user_id,
+    )
 
 
 @router.get("/workflows/{workflow_id}")
