@@ -43,6 +43,7 @@ jobs:
             alembic/versions/0008_realization_resolution.py \
             tests/test_m2_realization_resolution.py \
             tests/test_m2_migration_no_backfill.py
+          uv run ruff check --fix tests/test_m2_realization_resolution.py tests/test_m2_migration_no_backfill.py
           uv run ruff check app
           uv run ruff check tests/test_m2_realization_resolution.py tests/test_m2_migration_no_backfill.py
           uv run ruff format --check app
