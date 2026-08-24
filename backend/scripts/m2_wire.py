@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from textwrap import dedent
+
+
+def write(path: str, content: str) -> None:
+    Path(path).write_text(dedent(content).lstrip(), encoding="utf-8")
 
 
 def replace(path: str, old: str, new: str, count: int = 1) -> None:
@@ -12,50 +17,859 @@ def replace(path: str, old: str, new: str, count: int = 1) -> None:
 
 
 def main() -> None:
-    Path("app/models/effect_realization.py").write_text('''"""Append-only assessments of whether an external effect was realized."""\n\nfrom __future__ import annotations\n\nimport datetime as dt\nimport enum\nimport uuid\n\nfrom sqlalchemy import JSON, DateTime, Enum, ForeignKey\nfrom sqlalchemy.orm import Mapped, mapped_column\n\nfrom app.core.time import utc_now\nfrom app.models.base import Base, UUIDPkMixin, enum_values\n\n\nclass EffectRealizationStatus(enum.StrEnum):\n    UNVERIFIED = "unverified"\n    VERIFIED = "verified"\n    FAILED = "failed"\n    UNKNOWN = "unknown"\n\n\nclass EffectRealizationAssessment(UUIDPkMixin, Base):\n    """One immutable reality judgment about an existing effect-ledger entry."""\n\n    __tablename__ = "effect_realization_assessment"\n\n    effect_id: Mapped[uuid.UUID] = mapped_column(\n        ForeignKey("effect_ledger_entry.id"), nullable=False, index=True\n    )\n    realization_status: Mapped[EffectRealizationStatus] = mapped_column(\n        Enum(\n            EffectRealizationStatus,\n            native_enum=False,\n            length=16,\n            values_callable=enum_values,\n        ),\n        nullable=False,\n    )\n    evidence_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)\n    assessed_at: Mapped[dt.datetime] = mapped_column(\n        DateTime(timezone=True), nullable=False, default=utc_now\n    )\n\n\n__all__ = ["EffectRealizationAssessment", "EffectRealizationStatus"]\n''', encoding="utf-8")
+    write(
+        "app/models/effect_realization.py",
+        """
+        \"\"\"Append-only assessments of whether an external effect was realized.\"\"\"
 
-    Path("app/models/reconciliation_resolution.py").write_text('''"""Append-only reconciliation disposition and independent verification facts."""\n\nfrom __future__ import annotations\n\nimport datetime as dt\nimport enum\nimport uuid\n\nfrom sqlalchemy import JSON, DateTime, Enum, ForeignKey\nfrom sqlalchemy.orm import Mapped, mapped_column\n\nfrom app.core.time import utc_now\nfrom app.models.base import Base, UUIDPkMixin, enum_values\n\n\nclass ReconciliationResolutionKind(enum.StrEnum):\n    REPAIRED = "repaired"\n    ACCEPTED_DIFFERENCE = "accepted_difference"\n    AUTHORITATIVE_EXTERNAL = "authoritative_external"\n    AUTHORITATIVE_INTERNAL = "authoritative_internal"\n    SUPERSEDED = "superseded"\n    FALSE_POSITIVE = "false_positive"\n\n\nclass ReconciliationVerificationStatus(enum.StrEnum):\n    UNVERIFIED = "unverified"\n    VERIFIED = "verified"\n    FAILED = "failed"\n    UNKNOWN = "unknown"\n\n\nclass ReconciliationResolution(UUIDPkMixin, Base):\n    """Immutable resolution record; it never mutates ReconciliationDiff.status."""\n\n    __tablename__ = "reconciliation_resolution"\n\n    reconciliation_diff_id: Mapped[uuid.UUID] = mapped_column(\n        ForeignKey("reconciliation_diff.id"), nullable=False, index=True\n    )\n    resolution_kind: Mapped[ReconciliationResolutionKind] = mapped_column(\n        Enum(\n            ReconciliationResolutionKind,\n            native_enum=False,\n            length=32,\n            values_callable=enum_values,\n        ),\n        nullable=False,\n    )\n    verification_status: Mapped[ReconciliationVerificationStatus] = mapped_column(\n        Enum(\n            ReconciliationVerificationStatus,\n            native_enum=False,\n            length=16,\n            values_callable=enum_values,\n        ),\n        nullable=False,\n    )\n    basis_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)\n    evidence_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)\n    recorded_at: Mapped[dt.datetime] = mapped_column(\n        DateTime(timezone=True), nullable=False, default=utc_now\n    )\n\n\n__all__ = [\n    "ReconciliationResolution",\n    "ReconciliationResolutionKind",\n    "ReconciliationVerificationStatus",\n]\n''', encoding="utf-8")
+        from __future__ import annotations
 
-    Path("app/services/realization_resolution.py").write_text('''"""Commerce-native append-only realization and reconciliation semantic records."""\n\nfrom __future__ import annotations\n\nimport uuid\nfrom collections.abc import Iterable\n\nfrom sqlalchemy import select\n\nfrom app.core.errors import NotFoundError, ValidationError\nfrom app.models.effect import EffectLedgerEntry\nfrom app.models.effect_realization import (\n    EffectRealizationAssessment,\n    EffectRealizationStatus,\n)\nfrom app.models.reconciliation import ReconciliationDiff\nfrom app.models.reconciliation_resolution import (\n    ReconciliationResolution,\n    ReconciliationResolutionKind,\n    ReconciliationVerificationStatus,\n)\n\n\ndef _refs(values: Iterable[str]) -> list[str]:\n    refs: list[str] = []\n    seen: set[str] = set()\n    for value in values:\n        ref = str(value).strip()\n        if ref and ref not in seen:\n            seen.add(ref)\n            refs.append(ref)\n    return refs\n\n\ndef append_effect_realization_assessment(\n    db,\n    *,\n    effect_id: uuid.UUID,\n    realization_status: EffectRealizationStatus | str,\n    evidence_refs: Iterable[str] = (),\n) -> EffectRealizationAssessment:\n    """Append a reality judgment without changing the effect execution ledger."""\n    effect = db.get(EffectLedgerEntry, effect_id)\n    if effect is None:\n        raise NotFoundError("effect ledger entry not found")\n    status = EffectRealizationStatus(realization_status)\n    evidence = _refs(evidence_refs)\n    if status is not EffectRealizationStatus.UNVERIFIED and not evidence:\n        raise ValidationError(\n            f"{status.value} effect realization assessment requires evidence_refs"\n        )\n    assessment = EffectRealizationAssessment(\n        effect_id=effect.id, realization_status=status, evidence_refs=evidence\n    )\n    db.add(assessment)\n    db.flush()\n    return assessment\n\n\ndef latest_effect_realization_assessment(\n    db, effect_id: uuid.UUID\n) -> EffectRealizationAssessment | None:\n    return (\n        db.execute(\n            select(EffectRealizationAssessment)\n            .where(EffectRealizationAssessment.effect_id == effect_id)\n            .order_by(\n                EffectRealizationAssessment.assessed_at.desc(),\n                EffectRealizationAssessment.id.desc(),\n            )\n            .limit(1)\n        )\n        .scalars()\n        .first()\n    )\n\n\ndef append_reconciliation_resolution(\n    db,\n    *,\n    reconciliation_diff_id: uuid.UUID,\n    resolution_kind: ReconciliationResolutionKind | str,\n    verification_status: ReconciliationVerificationStatus | str,\n    basis_refs: Iterable[str],\n    evidence_refs: Iterable[str] = (),\n) -> ReconciliationResolution:\n    """Append disposition/verification facts without projecting them into diff lifecycle."""\n    diff = db.get(ReconciliationDiff, reconciliation_diff_id)\n    if diff is None:\n        raise NotFoundError("reconciliation diff not found")\n    kind = ReconciliationResolutionKind(resolution_kind)\n    verification = ReconciliationVerificationStatus(verification_status)\n    bases = _refs(basis_refs)\n    evidence = _refs(evidence_refs)\n    if not bases:\n        raise ValidationError("reconciliation resolution requires basis_refs")\n    if verification is not ReconciliationVerificationStatus.UNVERIFIED and not evidence:\n        raise ValidationError(\n            f"{verification.value} reconciliation verification requires evidence_refs"\n        )\n    resolution = ReconciliationResolution(\n        reconciliation_diff_id=diff.id,\n        resolution_kind=kind,\n        verification_status=verification,\n        basis_refs=bases,\n        evidence_refs=evidence,\n    )\n    db.add(resolution)\n    db.flush()\n    return resolution\n\n\ndef latest_reconciliation_resolution(\n    db, reconciliation_diff_id: uuid.UUID\n) -> ReconciliationResolution | None:\n    return (\n        db.execute(\n            select(ReconciliationResolution)\n            .where(ReconciliationResolution.reconciliation_diff_id == reconciliation_diff_id)\n            .order_by(\n                ReconciliationResolution.recorded_at.desc(),\n                ReconciliationResolution.id.desc(),\n            )\n            .limit(1)\n        )\n        .scalars()\n        .first()\n    )\n\n\n__all__ = [\n    "append_effect_realization_assessment",\n    "append_reconciliation_resolution",\n    "latest_effect_realization_assessment",\n    "latest_reconciliation_resolution",\n]\n''', encoding="utf-8")
+        import datetime as dt
+        import enum
+        import uuid
 
-    Path("app/api/v1/semantic_records.py").write_text('''"""Append-only M2 semantic records; no execution/lifecycle projection occurs here."""\n\nfrom __future__ import annotations\n\nimport uuid\nfrom typing import Annotated\n\nfrom fastapi import APIRouter, Depends\nfrom pydantic import BaseModel, Field\nfrom sqlalchemy.orm import Session\n\nfrom app.api.deps import get_current_user, get_session, require_roles\nfrom app.models.effect_realization import EffectRealizationStatus\nfrom app.models.reconciliation_resolution import (\n    ReconciliationResolutionKind,\n    ReconciliationVerificationStatus,\n)\nfrom app.services.realization_resolution import (\n    append_effect_realization_assessment,\n    append_reconciliation_resolution,\n)\n\nrouter = APIRouter(prefix="/v1", tags=["semantic-records"])\n\n\nclass EffectRealizationCreate(BaseModel):\n    effect_id: uuid.UUID\n    realization_status: EffectRealizationStatus\n    evidence_refs: list[str] = Field(default_factory=list)\n\n\nclass ReconciliationResolutionCreate(BaseModel):\n    reconciliation_diff_id: uuid.UUID\n    resolution_kind: ReconciliationResolutionKind\n    verification_status: ReconciliationVerificationStatus\n    basis_refs: list[str] = Field(min_length=1)\n    evidence_refs: list[str] = Field(default_factory=list)\n\n\n@router.post("/effect-realizations")\ndef create_effect_realization(\n    body: EffectRealizationCreate,\n    db: Annotated[Session, Depends(get_session)],\n    _user_id: Annotated[uuid.UUID, Depends(get_current_user)],\n    _authorized: Annotated[bool, Depends(require_roles("system_admin"))],\n) -> dict[str, object]:\n    assessment = append_effect_realization_assessment(\n        db,\n        effect_id=body.effect_id,\n        realization_status=body.realization_status,\n        evidence_refs=body.evidence_refs,\n    )\n    return {\n        "assessmentId": str(assessment.id),\n        "effectId": str(assessment.effect_id),\n        "realizationStatus": assessment.realization_status.value,\n        "assessedAt": assessment.assessed_at.isoformat(),\n    }\n\n\n@router.post("/reconciliation-resolutions")\ndef create_reconciliation_resolution(\n    body: ReconciliationResolutionCreate,\n    db: Annotated[Session, Depends(get_session)],\n    _user_id: Annotated[uuid.UUID, Depends(get_current_user)],\n    _authorized: Annotated[bool, Depends(require_roles("accountant", "system_admin"))],\n) -> dict[str, object]:\n    resolution = append_reconciliation_resolution(\n        db,\n        reconciliation_diff_id=body.reconciliation_diff_id,\n        resolution_kind=body.resolution_kind,\n        verification_status=body.verification_status,\n        basis_refs=body.basis_refs,\n        evidence_refs=body.evidence_refs,\n    )\n    return {\n        "resolutionId": str(resolution.id),\n        "reconciliationDiffId": str(resolution.reconciliation_diff_id),\n        "resolutionKind": resolution.resolution_kind.value,\n        "verificationStatus": resolution.verification_status.value,\n        "recordedAt": resolution.recorded_at.isoformat(),\n    }\n''', encoding="utf-8")
+        from sqlalchemy import JSON, DateTime, Enum, ForeignKey
+        from sqlalchemy.orm import Mapped, mapped_column
 
-    Path("alembic/versions/0008_realization_resolution.py").write_text('''"""append-only effect realization and reconciliation resolution records\n\nRevision ID: 0008_realization_resolution\nRevises: 0007_publication_qualification\nCreate Date: 2026-08-24\n\nNo historical EffectStatus or ReconciliationDiff.status value is converted\ninto a realization or resolution record.\n"""\n\nfrom __future__ import annotations\n\nimport sqlalchemy as sa\n\nfrom alembic import op\n\nrevision = "0008_realization_resolution"\ndown_revision = "0007_publication_qualification"\nbranch_labels = None\ndepends_on = None\n\n\ndef upgrade() -> None:\n    op.create_table(\n        "effect_realization_assessment",\n        sa.Column("effect_id", sa.Uuid(), nullable=False),\n        sa.Column("realization_status", sa.String(length=16), nullable=False),\n        sa.Column("evidence_refs", sa.JSON(), nullable=False),\n        sa.Column("assessed_at", sa.DateTime(timezone=True), nullable=False),\n        sa.Column("id", sa.Uuid(), nullable=False),\n        sa.ForeignKeyConstraint(\n            ["effect_id"], ["effect_ledger_entry.id"],\n            name="fk_effect_realization_assessment_effect_id_effect_ledger_entry",\n        ),\n        sa.PrimaryKeyConstraint("id", name="pk_effect_realization_assessment"),\n    )\n    op.create_index(\n        "ix_effect_realization_assessment_effect_id",\n        "effect_realization_assessment", ["effect_id"], unique=False\n    )\n    op.create_table(\n        "reconciliation_resolution",\n        sa.Column("reconciliation_diff_id", sa.Uuid(), nullable=False),\n        sa.Column("resolution_kind", sa.String(length=32), nullable=False),\n        sa.Column("verification_status", sa.String(length=16), nullable=False),\n        sa.Column("basis_refs", sa.JSON(), nullable=False),\n        sa.Column("evidence_refs", sa.JSON(), nullable=False),\n        sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False),\n        sa.Column("id", sa.Uuid(), nullable=False),\n        sa.ForeignKeyConstraint(\n            ["reconciliation_diff_id"], ["reconciliation_diff.id"],\n            name="fk_reconciliation_resolution_reconciliation_diff_id_reconciliation_diff",\n        ),\n        sa.PrimaryKeyConstraint("id", name="pk_reconciliation_resolution"),\n    )\n    op.create_index(\n        "ix_reconciliation_resolution_reconciliation_diff_id",\n        "reconciliation_resolution", ["reconciliation_diff_id"], unique=False\n    )\n\n\ndef downgrade() -> None:\n    op.drop_index(\n        "ix_reconciliation_resolution_reconciliation_diff_id",\n        table_name="reconciliation_resolution",\n    )\n    op.drop_table("reconciliation_resolution")\n    op.drop_index(\n        "ix_effect_realization_assessment_effect_id",\n        table_name="effect_realization_assessment",\n    )\n    op.drop_table("effect_realization_assessment")\n''', encoding="utf-8")
+        from app.core.time import utc_now
+        from app.models.base import Base, UUIDPkMixin, enum_values
+
+
+        class EffectRealizationStatus(enum.StrEnum):
+            UNVERIFIED = "unverified"
+            VERIFIED = "verified"
+            FAILED = "failed"
+            UNKNOWN = "unknown"
+
+
+        class EffectRealizationAssessment(UUIDPkMixin, Base):
+            \"\"\"Immutable reality judgment about one effect-ledger entry.\"\"\"
+
+            __tablename__ = "effect_realization_assessment"
+
+            effect_id: Mapped[uuid.UUID] = mapped_column(
+                ForeignKey("effect_ledger_entry.id"), nullable=False, index=True
+            )
+            realization_status: Mapped[EffectRealizationStatus] = mapped_column(
+                Enum(
+                    EffectRealizationStatus,
+                    native_enum=False,
+                    length=16,
+                    values_callable=enum_values,
+                ),
+                nullable=False,
+            )
+            evidence_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+            assessed_by_user_id: Mapped[uuid.UUID] = mapped_column(
+                ForeignKey("user.id"), nullable=False
+            )
+            assessed_at: Mapped[dt.datetime] = mapped_column(
+                DateTime(timezone=True), nullable=False, default=utc_now
+            )
+
+
+        __all__ = ["EffectRealizationAssessment", "EffectRealizationStatus"]
+        """,
+    )
+
+    write(
+        "app/models/reconciliation_resolution.py",
+        """
+        \"\"\"Append-only reconciliation disposition and verification records.\"\"\"
+
+        from __future__ import annotations
+
+        import datetime as dt
+        import enum
+        import uuid
+
+        from sqlalchemy import JSON, DateTime, Enum, ForeignKey
+        from sqlalchemy.orm import Mapped, mapped_column
+
+        from app.core.time import utc_now
+        from app.models.base import Base, UUIDPkMixin, enum_values
+
+
+        class ReconciliationResolutionKind(enum.StrEnum):
+            REPAIRED = "repaired"
+            ACCEPTED_DIFFERENCE = "accepted_difference"
+            AUTHORITATIVE_EXTERNAL = "authoritative_external"
+            AUTHORITATIVE_INTERNAL = "authoritative_internal"
+            SUPERSEDED = "superseded"
+            FALSE_POSITIVE = "false_positive"
+
+
+        class ReconciliationVerificationStatus(enum.StrEnum):
+            UNVERIFIED = "unverified"
+            VERIFIED = "verified"
+            FAILED = "failed"
+            UNKNOWN = "unknown"
+
+
+        class ReconciliationResolution(UUIDPkMixin, Base):
+            \"\"\"Immutable disposition plus an independent verification judgment.\"\"\"
+
+            __tablename__ = "reconciliation_resolution"
+
+            reconciliation_diff_id: Mapped[uuid.UUID] = mapped_column(
+                ForeignKey("reconciliation_diff.id"), nullable=False, index=True
+            )
+            resolution_kind: Mapped[ReconciliationResolutionKind] = mapped_column(
+                Enum(
+                    ReconciliationResolutionKind,
+                    native_enum=False,
+                    length=32,
+                    values_callable=enum_values,
+                ),
+                nullable=False,
+            )
+            verification_status: Mapped[ReconciliationVerificationStatus] = mapped_column(
+                Enum(
+                    ReconciliationVerificationStatus,
+                    native_enum=False,
+                    length=16,
+                    values_callable=enum_values,
+                ),
+                nullable=False,
+            )
+            basis_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+            evidence_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+            recorded_by_user_id: Mapped[uuid.UUID] = mapped_column(
+                ForeignKey("user.id"), nullable=False
+            )
+            recorded_at: Mapped[dt.datetime] = mapped_column(
+                DateTime(timezone=True), nullable=False, default=utc_now
+            )
+
+
+        __all__ = [
+            "ReconciliationResolution",
+            "ReconciliationResolutionKind",
+            "ReconciliationVerificationStatus",
+        ]
+        """,
+    )
+
+    write(
+        "app/services/realization_resolution.py",
+        """
+        \"\"\"Append-only realization and reconciliation semantic records.\"\"\"
+
+        from __future__ import annotations
+
+        import uuid
+        from collections.abc import Iterable
+
+        from sqlalchemy import select
+
+        from app.core.errors import NotFoundError, ValidationError
+        from app.models.effect import EffectLedgerEntry
+        from app.models.effect_realization import (
+            EffectRealizationAssessment,
+            EffectRealizationStatus,
+        )
+        from app.models.identity import User
+        from app.models.reconciliation import ReconciliationDiff
+        from app.models.reconciliation_resolution import (
+            ReconciliationResolution,
+            ReconciliationResolutionKind,
+            ReconciliationVerificationStatus,
+        )
+
+
+        def _refs(values: Iterable[str]) -> list[str]:
+            refs: list[str] = []
+            seen: set[str] = set()
+            for value in values:
+                ref = str(value).strip()
+                if ref and ref not in seen:
+                    seen.add(ref)
+                    refs.append(ref)
+            return refs
+
+
+        def _require_actor(db, actor_user_id: uuid.UUID) -> uuid.UUID:
+            if db.get(User, actor_user_id) is None:
+                raise NotFoundError("semantic judgment actor not found")
+            return actor_user_id
+
+
+        def append_effect_realization_assessment(
+            db,
+            *,
+            effect_id: uuid.UUID,
+            realization_status: EffectRealizationStatus | str,
+            assessed_by_user_id: uuid.UUID,
+            evidence_refs: Iterable[str] = (),
+        ) -> EffectRealizationAssessment:
+            \"\"\"Append reality judgment without rewriting execution history.\"\"\"
+            effect = db.get(EffectLedgerEntry, effect_id)
+            if effect is None:
+                raise NotFoundError("effect ledger entry not found")
+            status = EffectRealizationStatus(realization_status)
+            evidence = _refs(evidence_refs)
+            if status is not EffectRealizationStatus.UNVERIFIED and not evidence:
+                raise ValidationError(
+                    f"{status.value} effect realization assessment requires evidence_refs"
+                )
+            assessment = EffectRealizationAssessment(
+                effect_id=effect.id,
+                realization_status=status,
+                evidence_refs=evidence,
+                assessed_by_user_id=_require_actor(db, assessed_by_user_id),
+            )
+            db.add(assessment)
+            db.flush()
+            return assessment
+
+
+        def latest_effect_realization_assessment(
+            db, effect_id: uuid.UUID
+        ) -> EffectRealizationAssessment | None:
+            return (
+                db.execute(
+                    select(EffectRealizationAssessment)
+                    .where(EffectRealizationAssessment.effect_id == effect_id)
+                    .order_by(
+                        EffectRealizationAssessment.assessed_at.desc(),
+                        EffectRealizationAssessment.id.desc(),
+                    )
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+
+
+        def append_reconciliation_resolution(
+            db,
+            *,
+            reconciliation_diff_id: uuid.UUID,
+            resolution_kind: ReconciliationResolutionKind | str,
+            verification_status: ReconciliationVerificationStatus | str,
+            recorded_by_user_id: uuid.UUID,
+            basis_refs: Iterable[str],
+            evidence_refs: Iterable[str] = (),
+        ) -> ReconciliationResolution:
+            \"\"\"Append disposition/verification without rewriting diff lifecycle.\"\"\"
+            diff = db.get(ReconciliationDiff, reconciliation_diff_id)
+            if diff is None:
+                raise NotFoundError("reconciliation diff not found")
+            kind = ReconciliationResolutionKind(resolution_kind)
+            verification = ReconciliationVerificationStatus(verification_status)
+            bases = _refs(basis_refs)
+            evidence = _refs(evidence_refs)
+            if not bases:
+                raise ValidationError("reconciliation resolution requires basis_refs")
+            if verification is not ReconciliationVerificationStatus.UNVERIFIED and not evidence:
+                raise ValidationError(
+                    f"{verification.value} reconciliation verification requires evidence_refs"
+                )
+            resolution = ReconciliationResolution(
+                reconciliation_diff_id=diff.id,
+                resolution_kind=kind,
+                verification_status=verification,
+                basis_refs=bases,
+                evidence_refs=evidence,
+                recorded_by_user_id=_require_actor(db, recorded_by_user_id),
+            )
+            db.add(resolution)
+            db.flush()
+            return resolution
+
+
+        def latest_reconciliation_resolution(
+            db, reconciliation_diff_id: uuid.UUID
+        ) -> ReconciliationResolution | None:
+            return (
+                db.execute(
+                    select(ReconciliationResolution)
+                    .where(
+                        ReconciliationResolution.reconciliation_diff_id
+                        == reconciliation_diff_id
+                    )
+                    .order_by(
+                        ReconciliationResolution.recorded_at.desc(),
+                        ReconciliationResolution.id.desc(),
+                    )
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+
+
+        __all__ = [
+            "append_effect_realization_assessment",
+            "append_reconciliation_resolution",
+            "latest_effect_realization_assessment",
+            "latest_reconciliation_resolution",
+        ]
+        """,
+    )
+
+    write(
+        "app/api/v1/semantic_records.py",
+        """
+        \"\"\"Append-only M2 semantic judgment endpoints.\"\"\"
+
+        from __future__ import annotations
+
+        import uuid
+        from typing import Annotated
+
+        from fastapi import APIRouter, Depends
+        from pydantic import BaseModel, Field
+        from sqlalchemy.orm import Session
+
+        from app.api.deps import get_current_user, get_session, require_roles
+        from app.models.effect_realization import EffectRealizationStatus
+        from app.models.reconciliation_resolution import (
+            ReconciliationResolutionKind,
+            ReconciliationVerificationStatus,
+        )
+        from app.services.realization_resolution import (
+            append_effect_realization_assessment,
+            append_reconciliation_resolution,
+        )
+
+        router = APIRouter(prefix="/v1", tags=["semantic-records"])
+
+
+        class EffectRealizationCreate(BaseModel):
+            effect_id: uuid.UUID
+            realization_status: EffectRealizationStatus
+            evidence_refs: list[str] = Field(default_factory=list)
+
+
+        class ReconciliationResolutionCreate(BaseModel):
+            reconciliation_diff_id: uuid.UUID
+            resolution_kind: ReconciliationResolutionKind
+            verification_status: ReconciliationVerificationStatus
+            basis_refs: list[str] = Field(min_length=1)
+            evidence_refs: list[str] = Field(default_factory=list)
+
+
+        @router.post("/effect-realizations")
+        def create_effect_realization(
+            body: EffectRealizationCreate,
+            db: Annotated[Session, Depends(get_session)],
+            user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+            _authorized: Annotated[bool, Depends(require_roles("system_admin"))],
+        ) -> dict[str, object]:
+            assessment = append_effect_realization_assessment(
+                db,
+                effect_id=body.effect_id,
+                realization_status=body.realization_status,
+                assessed_by_user_id=user_id,
+                evidence_refs=body.evidence_refs,
+            )
+            return {
+                "assessmentId": str(assessment.id),
+                "effectId": str(assessment.effect_id),
+                "realizationStatus": assessment.realization_status.value,
+                "assessedByUserId": str(assessment.assessed_by_user_id),
+                "assessedAt": assessment.assessed_at.isoformat(),
+            }
+
+
+        @router.post("/reconciliation-resolutions")
+        def create_reconciliation_resolution(
+            body: ReconciliationResolutionCreate,
+            db: Annotated[Session, Depends(get_session)],
+            user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+            _authorized: Annotated[
+                bool, Depends(require_roles("accountant", "system_admin"))
+            ],
+        ) -> dict[str, object]:
+            resolution = append_reconciliation_resolution(
+                db,
+                reconciliation_diff_id=body.reconciliation_diff_id,
+                resolution_kind=body.resolution_kind,
+                verification_status=body.verification_status,
+                recorded_by_user_id=user_id,
+                basis_refs=body.basis_refs,
+                evidence_refs=body.evidence_refs,
+            )
+            return {
+                "resolutionId": str(resolution.id),
+                "reconciliationDiffId": str(resolution.reconciliation_diff_id),
+                "resolutionKind": resolution.resolution_kind.value,
+                "verificationStatus": resolution.verification_status.value,
+                "recordedByUserId": str(resolution.recorded_by_user_id),
+                "recordedAt": resolution.recorded_at.isoformat(),
+            }
+        """,
+    )
+
+    write(
+        "alembic/versions/0008_realization_resolution.py",
+        """
+        \"\"\"append-only effect realization and reconciliation resolution records
+
+        Revision ID: 0008_realization_resolution
+        Revises: 0007_publication_qualification
+        Create Date: 2026-08-24
+
+        Historical lifecycle/execution states are never converted into M2 records.
+        \"\"\"
+
+        from __future__ import annotations
+
+        import sqlalchemy as sa
+
+        from alembic import op
+
+        revision = "0008_realization_resolution"
+        down_revision = "0007_publication_qualification"
+        branch_labels = None
+        depends_on = None
+
+
+        def upgrade() -> None:
+            op.create_table(
+                "effect_realization_assessment",
+                sa.Column("effect_id", sa.Uuid(), nullable=False),
+                sa.Column("realization_status", sa.String(length=16), nullable=False),
+                sa.Column("evidence_refs", sa.JSON(), nullable=False),
+                sa.Column("assessed_by_user_id", sa.Uuid(), nullable=False),
+                sa.Column("assessed_at", sa.DateTime(timezone=True), nullable=False),
+                sa.Column("id", sa.Uuid(), nullable=False),
+                sa.ForeignKeyConstraint(
+                    ["assessed_by_user_id"],
+                    ["user.id"],
+                    name="fk_effect_realization_assessment_assessed_by_user_id_user",
+                ),
+                sa.ForeignKeyConstraint(
+                    ["effect_id"],
+                    ["effect_ledger_entry.id"],
+                    name="fk_effect_realization_assessment_effect_id_effect_ledger_entry",
+                ),
+                sa.PrimaryKeyConstraint("id", name="pk_effect_realization_assessment"),
+            )
+            op.create_index(
+                "ix_effect_realization_assessment_effect_id",
+                "effect_realization_assessment",
+                ["effect_id"],
+                unique=False,
+            )
+            op.create_table(
+                "reconciliation_resolution",
+                sa.Column("reconciliation_diff_id", sa.Uuid(), nullable=False),
+                sa.Column("resolution_kind", sa.String(length=32), nullable=False),
+                sa.Column("verification_status", sa.String(length=16), nullable=False),
+                sa.Column("basis_refs", sa.JSON(), nullable=False),
+                sa.Column("evidence_refs", sa.JSON(), nullable=False),
+                sa.Column("recorded_by_user_id", sa.Uuid(), nullable=False),
+                sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False),
+                sa.Column("id", sa.Uuid(), nullable=False),
+                sa.ForeignKeyConstraint(
+                    ["recorded_by_user_id"],
+                    ["user.id"],
+                    name="fk_reconciliation_resolution_recorded_by_user_id_user",
+                ),
+                sa.ForeignKeyConstraint(
+                    ["reconciliation_diff_id"],
+                    ["reconciliation_diff.id"],
+                    name="fk_reconciliation_resolution_reconciliation_diff_id_reconciliation_diff",
+                ),
+                sa.PrimaryKeyConstraint("id", name="pk_reconciliation_resolution"),
+            )
+            op.create_index(
+                "ix_reconciliation_resolution_reconciliation_diff_id",
+                "reconciliation_resolution",
+                ["reconciliation_diff_id"],
+                unique=False,
+            )
+
+
+        def downgrade() -> None:
+            op.drop_index(
+                "ix_reconciliation_resolution_reconciliation_diff_id",
+                table_name="reconciliation_resolution",
+            )
+            op.drop_table("reconciliation_resolution")
+            op.drop_index(
+                "ix_effect_realization_assessment_effect_id",
+                table_name="effect_realization_assessment",
+            )
+            op.drop_table("effect_realization_assessment")
+        """,
+    )
+
+    write(
+        "tests/test_m2_realization_resolution.py",
+        """
+        from __future__ import annotations
+
+        import uuid
+
+        import pytest
+
+        from app.core.errors import ValidationError
+        from app.models.effect import EffectLedgerEntry, EffectStatus
+        from app.models.effect_realization import (
+            EffectRealizationAssessment,
+            EffectRealizationStatus,
+        )
+        from app.models.reconciliation import (
+            ReconciliationDiff,
+            ReconciliationDiffStatus,
+            ReconciliationRun,
+            ReconciliationRunStatus,
+        )
+        from app.models.reconciliation_resolution import (
+            ReconciliationResolution,
+            ReconciliationResolutionKind,
+            ReconciliationVerificationStatus,
+        )
+        from app.services.realization_resolution import (
+            append_effect_realization_assessment,
+            append_reconciliation_resolution,
+            latest_effect_realization_assessment,
+            latest_reconciliation_resolution,
+        )
+
+
+        def _effect(db, status: EffectStatus) -> EffectLedgerEntry:
+            effect = EffectLedgerEntry(
+                intent_id=uuid.uuid4(),
+                target_system="shopify",
+                operation="product_publish",
+                status=status,
+            )
+            db.add(effect)
+            db.flush()
+            return effect
+
+
+        def _diff(db, status: ReconciliationDiffStatus) -> ReconciliationDiff:
+            run = ReconciliationRun(
+                run_type="m2-test", status=ReconciliationRunStatus.COMPLETED_WITH_DIFFS
+            )
+            db.add(run)
+            db.flush()
+            diff = ReconciliationDiff(
+                run_id=run.id,
+                domain="effect",
+                entity_type="effect",
+                entity_id=str(uuid.uuid4()),
+                status=status,
+            )
+            db.add(diff)
+            db.flush()
+            return diff
+
+
+        def test_succeeded_effect_can_remain_unknown_or_unverified(db, make_user) -> None:
+            actor = make_user(["system_admin"])
+            effect = _effect(db, EffectStatus.SUCCEEDED)
+            unknown = append_effect_realization_assessment(
+                db,
+                effect_id=effect.id,
+                realization_status=EffectRealizationStatus.UNKNOWN,
+                assessed_by_user_id=actor,
+                evidence_refs=["check:remote-timeout"],
+            )
+            unverified = append_effect_realization_assessment(
+                db,
+                effect_id=effect.id,
+                realization_status=EffectRealizationStatus.UNVERIFIED,
+                assessed_by_user_id=actor,
+            )
+            assert unknown.realization_status is EffectRealizationStatus.UNKNOWN
+            assert unverified.realization_status is EffectRealizationStatus.UNVERIFIED
+            assert effect.status is EffectStatus.SUCCEEDED
+
+
+        def test_outcome_unknown_can_later_be_verified_append_only(db, make_user) -> None:
+            actor = make_user(["system_admin"])
+            effect = _effect(db, EffectStatus.OUTCOME_UNKNOWN)
+            first = append_effect_realization_assessment(
+                db,
+                effect_id=effect.id,
+                realization_status=EffectRealizationStatus.UNKNOWN,
+                assessed_by_user_id=actor,
+                evidence_refs=["observation:first"],
+            )
+            second = append_effect_realization_assessment(
+                db,
+                effect_id=effect.id,
+                realization_status=EffectRealizationStatus.VERIFIED,
+                assessed_by_user_id=actor,
+                evidence_refs=["observation:readback"],
+            )
+            assert first.id != second.id
+            assert first.realization_status is EffectRealizationStatus.UNKNOWN
+            assert latest_effect_realization_assessment(db, effect.id).id == second.id
+            assert effect.status is EffectStatus.OUTCOME_UNKNOWN
+
+
+        def test_strong_realization_judgment_requires_evidence(db, make_user) -> None:
+            actor = make_user(["system_admin"])
+            effect = _effect(db, EffectStatus.SUCCEEDED)
+            with pytest.raises(ValidationError, match="requires evidence_refs"):
+                append_effect_realization_assessment(
+                    db,
+                    effect_id=effect.id,
+                    realization_status=EffectRealizationStatus.VERIFIED,
+                    assessed_by_user_id=actor,
+                )
+
+
+        def test_historical_resolved_diff_has_no_synthetic_resolution(db) -> None:
+            diff = _diff(db, ReconciliationDiffStatus.RESOLVED)
+            assert latest_reconciliation_resolution(db, diff.id) is None
+
+
+        def test_resolution_write_does_not_mutate_diff_lifecycle(db, make_user) -> None:
+            actor = make_user(["accountant"])
+            diff = _diff(db, ReconciliationDiffStatus.MANUAL_RECONCILIATION)
+            resolution = append_reconciliation_resolution(
+                db,
+                reconciliation_diff_id=diff.id,
+                resolution_kind=ReconciliationResolutionKind.REPAIRED,
+                verification_status=ReconciliationVerificationStatus.UNVERIFIED,
+                recorded_by_user_id=actor,
+                basis_refs=["basis:operator-action"],
+            )
+            assert resolution.verification_status is ReconciliationVerificationStatus.UNVERIFIED
+            assert diff.status is ReconciliationDiffStatus.MANUAL_RECONCILIATION
+
+
+        def test_disposition_and_verification_evolve_by_append_not_update(db, make_user) -> None:
+            actor = make_user(["accountant"])
+            diff = _diff(db, ReconciliationDiffStatus.RESOLVED)
+            first = append_reconciliation_resolution(
+                db,
+                reconciliation_diff_id=diff.id,
+                resolution_kind=ReconciliationResolutionKind.ACCEPTED_DIFFERENCE,
+                verification_status=ReconciliationVerificationStatus.UNVERIFIED,
+                recorded_by_user_id=actor,
+                basis_refs=["basis:policy-exception"],
+            )
+            second = append_reconciliation_resolution(
+                db,
+                reconciliation_diff_id=diff.id,
+                resolution_kind=ReconciliationResolutionKind.ACCEPTED_DIFFERENCE,
+                verification_status=ReconciliationVerificationStatus.VERIFIED,
+                recorded_by_user_id=actor,
+                basis_refs=["basis:policy-exception"],
+                evidence_refs=["verification:independent-check"],
+            )
+            assert first.id != second.id
+            assert first.verification_status is ReconciliationVerificationStatus.UNVERIFIED
+            assert latest_reconciliation_resolution(db, diff.id).id == second.id
+            assert diff.status is ReconciliationDiffStatus.RESOLVED
+
+
+        def test_api_verified_realization_retains_assessor_identity(
+            client, db, make_user, auth_headers
+        ) -> None:
+            actor = make_user(["system_admin"])
+            effect = _effect(db, EffectStatus.SUCCEEDED)
+            response = client.post(
+                "/v1/effect-realizations",
+                json={
+                    "effect_id": str(effect.id),
+                    "realization_status": "verified",
+                    "evidence_refs": ["readback:product"],
+                },
+                headers=auth_headers(actor, ["system_admin"]),
+            )
+            assert response.status_code == 200, response.text
+            row = db.get(
+                EffectRealizationAssessment, uuid.UUID(response.json()["assessmentId"])
+            )
+            assert row.assessed_by_user_id == actor
+            assert response.json()["assessedByUserId"] == str(actor)
+
+
+        def test_api_reconciliation_resolution_retains_recorder_identity(
+            client, db, make_user, auth_headers
+        ) -> None:
+            actor = make_user(["accountant"])
+            diff = _diff(db, ReconciliationDiffStatus.RESOLVED)
+            response = client.post(
+                "/v1/reconciliation-resolutions",
+                json={
+                    "reconciliation_diff_id": str(diff.id),
+                    "resolution_kind": "accepted_difference",
+                    "verification_status": "verified",
+                    "basis_refs": ["basis:policy-exception"],
+                    "evidence_refs": ["verification:review"],
+                },
+                headers=auth_headers(actor, ["accountant"]),
+            )
+            assert response.status_code == 200, response.text
+            row = db.get(
+                ReconciliationResolution, uuid.UUID(response.json()["resolutionId"])
+            )
+            assert row.recorded_by_user_id == actor
+            assert response.json()["recordedByUserId"] == str(actor)
+        """,
+    )
+
+    write(
+        "tests/test_m2_migration_no_backfill.py",
+        """
+        from __future__ import annotations
+
+        import types
+        import uuid
+        from pathlib import Path
+
+        import sqlalchemy as sa
+        from alembic import command
+        from alembic.config import Config
+        from sqlalchemy.dialects import postgresql
+        from sqlalchemy.ext.compiler import compiles
+        from sqlalchemy.orm import Session
+
+        BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+        @compiles(postgresql.UUID, "sqlite")
+        def _compile_uuid_sqlite(type_, compiler, **kw):  # noqa: ARG001
+            return "CHAR(36)"
+
+
+        @compiles(postgresql.JSONB, "sqlite")
+        def _compile_jsonb_sqlite(type_, compiler, **kw):  # noqa: ARG001
+            return "JSON"
+
+
+        @compiles(postgresql.BYTEA, "sqlite")
+        def _compile_bytea_sqlite(type_, compiler, **kw):  # noqa: ARG001
+            return "BLOB"
+
+
+        def _config(url: str, monkeypatch) -> Config:
+            import app.config
+
+            monkeypatch.setattr(
+                app.config,
+                "get_settings",
+                lambda: types.SimpleNamespace(database_url=url),
+            )
+            cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
+            cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+            return cfg
+
+
+        def test_0008_does_not_backfill_historical_lifecycle_states(
+            tmp_path, monkeypatch
+        ) -> None:
+            url = f"sqlite:///{(tmp_path / 'm2-pre0008.db').as_posix()}"
+            cfg = _config(url, monkeypatch)
+            command.upgrade(cfg, "0007_publication_qualification")
+
+            from app.models.effect import EffectLedgerEntry, EffectStatus
+            from app.models.reconciliation import (
+                ReconciliationDiff,
+                ReconciliationDiffStatus,
+                ReconciliationRun,
+                ReconciliationRunStatus,
+            )
+
+            engine = sa.create_engine(url)
+            with Session(engine) as db:
+                effect = EffectLedgerEntry(
+                    intent_id=uuid.uuid4(),
+                    target_system="shopify",
+                    operation="product_publish",
+                    status=EffectStatus.SUCCEEDED,
+                )
+                run = ReconciliationRun(
+                    run_type="m2-migration",
+                    status=ReconciliationRunStatus.COMPLETED_WITH_DIFFS,
+                )
+                db.add_all([effect, run])
+                db.flush()
+                db.add(
+                    ReconciliationDiff(
+                        run_id=run.id,
+                        domain="effect",
+                        entity_type="effect",
+                        entity_id=str(effect.intent_id),
+                        status=ReconciliationDiffStatus.RESOLVED,
+                    )
+                )
+                db.commit()
+
+            command.upgrade(cfg, "0008_realization_resolution")
+            with engine.connect() as conn:
+                assert (
+                    conn.execute(
+                        sa.text("SELECT count(*) FROM effect_realization_assessment")
+                    ).scalar_one()
+                    == 0
+                )
+                assert (
+                    conn.execute(
+                        sa.text("SELECT count(*) FROM reconciliation_resolution")
+                    ).scalar_one()
+                    == 0
+                )
+            engine.dispose()
+        """,
+    )
 
     models = "app/models/__init__.py"
     replace(
         models,
         "from app.models.effect import EffectLedgerEntry, EffectStatus\n",
-        "from app.models.effect import EffectLedgerEntry, EffectStatus\nfrom app.models.effect_realization import (\n    EffectRealizationAssessment,\n    EffectRealizationStatus,\n)\n",
+        "from app.models.effect import EffectLedgerEntry, EffectStatus\n"
+        "from app.models.effect_realization import (\n"
+        "    EffectRealizationAssessment,\n"
+        "    EffectRealizationStatus,\n"
+        ")\n",
     )
     replace(
         models,
-        "from app.models.reconciliation import (\n",
-        "from app.models.reconciliation_resolution import (\n    ReconciliationResolution,\n    ReconciliationResolutionKind,\n    ReconciliationVerificationStatus,\n)\nfrom app.models.reconciliation import (\n",
+        "from app.models.returns import ReturnCase, ReturnDisposition, ReturnStatus\n",
+        "from app.models.reconciliation_resolution import (\n"
+        "    ReconciliationResolution,\n"
+        "    ReconciliationResolutionKind,\n"
+        "    ReconciliationVerificationStatus,\n"
+        ")\n"
+        "from app.models.returns import ReturnCase, ReturnDisposition, ReturnStatus\n",
     )
     replace(
         models,
         '    "EffectStatus",\n',
-        '    "EffectStatus",\n    "EffectRealizationAssessment",\n    "EffectRealizationStatus",\n',
+        '    "EffectStatus",\n'
+        '    "EffectRealizationAssessment",\n'
+        '    "EffectRealizationStatus",\n',
     )
     replace(
         models,
-        '    "ReconciliationDiff",\n',
-        '    "ReconciliationDiff",\n    "ReconciliationResolution",\n    "ReconciliationResolutionKind",\n    "ReconciliationVerificationStatus",\n',
+        '    "ReconciliationRunStatus",\n',
+        '    "ReconciliationRunStatus",\n'
+        '    "ReconciliationResolution",\n'
+        '    "ReconciliationResolutionKind",\n'
+        '    "ReconciliationVerificationStatus",\n',
     )
 
     api_init = "app/api/v1/__init__.py"
-    replace(api_init, "    returns,\n", "    returns,\n    semantic_records,\n")
-    replace(api_init, '    "returns",\n', '    "returns",\n    "semantic_records",\n')
-
-    main_py = "app/main.py"
     replace(
-        main_py,
-        "    app.include_router(v1.returns.router)\n",
-        "    app.include_router(v1.returns.router)\n    app.include_router(v1.semantic_records.router)\n",
+        api_init,
+        "    sales_orders,\n",
+        "    sales_orders,\n    semantic_records,\n",
+    )
+    replace(
+        api_init,
+        '    "sales_orders",\n',
+        '    "sales_orders",\n    "semantic_records",\n',
     )
 
-    Path("tests/test_realization_resolution_m2.py").write_text('''from __future__ import annotations\n\nimport uuid\nfrom pathlib import Path\n\nimport pytest\n\nfrom app.core.errors import ValidationError\nfrom app.models.effect import EffectLedgerEntry, EffectStatus\nfrom app.models.effect_realization import EffectRealizationStatus\nfrom app.models.reconciliation import (\n    ReconciliationDiff,\n    ReconciliationDiffStatus,\n    ReconciliationRun,\n    ReconciliationRunStatus,\n)\nfrom app.models.reconciliation_resolution import (\n    ReconciliationResolutionKind,\n    ReconciliationVerificationStatus,\n)\nfrom app.services.realization_resolution import (\n    append_effect_realization_assessment,\n    append_reconciliation_resolution,\n    latest_effect_realization_assessment,\n    latest_reconciliation_resolution,\n)\n\n\ndef _effect(db, status: EffectStatus) -> EffectLedgerEntry:\n    effect = EffectLedgerEntry(\n        intent_id=uuid.uuid4(),\n        target_system="shopify",\n        operation="product_publish",\n        status=status,\n    )\n    db.add(effect)\n    db.flush()\n    return effect\n\n\ndef _diff(db, status: ReconciliationDiffStatus) -> ReconciliationDiff:\n    run = ReconciliationRun(run_type="manual", status=ReconciliationRunStatus.COMPLETED_WITH_DIFFS)\n    db.add(run)\n    db.flush()\n    diff = ReconciliationDiff(\n        run_id=run.id,\n        domain="effect",\n        entity_type="effect",\n        entity_id="effect-1",\n        status=status,\n        difference={"remote_present": False},\n    )\n    db.add(diff)\n    db.flush()\n    return diff\n\n\ndef test_succeeded_execution_can_have_unknown_realization(db) -> None:\n    effect = _effect(db, EffectStatus.SUCCEEDED)\n    assessment = append_effect_realization_assessment(\n        db,\n        effect_id=effect.id,\n        realization_status=EffectRealizationStatus.UNKNOWN,\n        evidence_refs=["observation:remote-readback-inconclusive"],\n    )\n    assert effect.status is EffectStatus.SUCCEEDED\n    assert assessment.realization_status is EffectRealizationStatus.UNKNOWN\n\n\ndef test_outcome_unknown_can_later_be_verified_without_rewriting_execution(db) -> None:\n    effect = _effect(db, EffectStatus.OUTCOME_UNKNOWN)\n    first = append_effect_realization_assessment(\n        db, effect_id=effect.id, realization_status="unknown", evidence_refs=["obs:1"]\n    )\n    second = append_effect_realization_assessment(\n        db, effect_id=effect.id, realization_status="verified", evidence_refs=["obs:2"]\n    )\n    assert first.id != second.id\n    assert first.realization_status is EffectRealizationStatus.UNKNOWN\n    assert latest_effect_realization_assessment(db, effect.id).id == second.id\n    assert effect.status is EffectStatus.OUTCOME_UNKNOWN\n\n\ndef test_realization_strong_or_observed_judgment_requires_evidence(db) -> None:\n    effect = _effect(db, EffectStatus.SUCCEEDED)\n    for status in ("verified", "failed", "unknown"):\n        with pytest.raises(ValidationError, match="requires evidence_refs"):\n            append_effect_realization_assessment(\n                db, effect_id=effect.id, realization_status=status, evidence_refs=[]\n            )\n    unverified = append_effect_realization_assessment(\n        db, effect_id=effect.id, realization_status="unverified", evidence_refs=[]\n    )\n    assert unverified.realization_status is EffectRealizationStatus.UNVERIFIED\n\n\ndef test_historical_resolved_diff_does_not_imply_resolution_record(db) -> None:\n    diff = _diff(db, ReconciliationDiffStatus.RESOLVED)\n    assert latest_reconciliation_resolution(db, diff.id) is None\n\n\ndef test_resolution_record_does_not_mutate_diff_lifecycle_or_imply_verification(db) -> None:\n    diff = _diff(db, ReconciliationDiffStatus.RESOLVED)\n    resolution = append_reconciliation_resolution(\n        db,\n        reconciliation_diff_id=diff.id,\n        resolution_kind=ReconciliationResolutionKind.REPAIRED,\n        verification_status=ReconciliationVerificationStatus.UNVERIFIED,\n        basis_refs=["decision:repair-selected"],\n    )\n    assert diff.status is ReconciliationDiffStatus.RESOLVED\n    assert resolution.resolution_kind is ReconciliationResolutionKind.REPAIRED\n    assert resolution.verification_status is ReconciliationVerificationStatus.UNVERIFIED\n    assert resolution.evidence_refs == []\n\n\ndef test_reconciliation_resolution_is_append_only_with_independent_verification(db) -> None:\n    diff = _diff(db, ReconciliationDiffStatus.MANUAL_RECONCILIATION)\n    first = append_reconciliation_resolution(\n        db,\n        reconciliation_diff_id=diff.id,\n        resolution_kind="accepted_difference",\n        verification_status="unverified",\n        basis_refs=["decision:accept"],\n    )\n    second = append_reconciliation_resolution(\n        db,\n        reconciliation_diff_id=diff.id,\n        resolution_kind="authoritative_external",\n        verification_status="verified",\n        basis_refs=["decision:external-source-authoritative"],\n        evidence_refs=["observation:external-state"],\n    )\n    assert first.id != second.id\n    assert first.resolution_kind is ReconciliationResolutionKind.ACCEPTED_DIFFERENCE\n    assert latest_reconciliation_resolution(db, diff.id).id == second.id\n    assert diff.status is ReconciliationDiffStatus.MANUAL_RECONCILIATION\n\n\ndef test_resolution_requires_basis_and_observed_verification_requires_evidence(db) -> None:\n    diff = _diff(db, ReconciliationDiffStatus.RESOLVED)\n    with pytest.raises(ValidationError, match="requires basis_refs"):\n        append_reconciliation_resolution(\n            db,\n            reconciliation_diff_id=diff.id,\n            resolution_kind="false_positive",\n            verification_status="unverified",\n            basis_refs=[],\n        )\n    with pytest.raises(ValidationError, match="requires evidence_refs"):\n        append_reconciliation_resolution(\n            db,\n            reconciliation_diff_id=diff.id,\n            resolution_kind="false_positive",\n            verification_status="verified",\n            basis_refs=["decision:false-positive"],\n            evidence_refs=[],\n        )\n\n\ndef test_m2_does_not_redefine_existing_execution_or_diff_enums() -> None:\n    assert {status.value for status in EffectStatus} == {\n        "planned", "dispatched", "succeeded", "failed", "outcome_unknown",\n        "reconciled", "manual_reconciliation",\n    }\n    assert {status.value for status in ReconciliationDiffStatus} == {\n        "OPEN", "MANUAL_RECONCILIATION", "RESOLVED"\n    }\n\n\ndef test_m2_is_commerce_native_and_has_no_cross_system_dependency() -> None:\n    paths = [\n        "app/models/effect_realization.py",\n        "app/models/reconciliation_resolution.py",\n        "app/services/realization_resolution.py",\n    ]\n    source = "\\n".join(Path(path).read_text(encoding="utf-8") for path in paths)\n    assert "portable_runtime" not in source\n    assert "control_plane" not in source\n    assert "CompletionAuthority" not in source\n''', encoding="utf-8")
+    main = "app/main.py"
+    replace(
+        main,
+        "    app.include_router(v1.sales_orders.router)\n",
+        "    app.include_router(v1.sales_orders.router)\n"
+        "    app.include_router(v1.semantic_records.router)\n",
+    )
 
 
 if __name__ == "__main__":
