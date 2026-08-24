@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - m2/realization-resolution
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
