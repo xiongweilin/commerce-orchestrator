@@ -265,6 +265,7 @@ def create_app() -> FastAPI:
     app.include_router(v1.reconciliations.router)
     app.include_router(v1.return_cases.router)
     app.include_router(v1.sales_orders.router)
+    app.include_router(v1.semantic_records.router)
     app.include_router(v1.workflows.router)
     app.include_router(v1.webhooks.router)
 
