@@ -10,6 +10,7 @@ from app.api.v1 import (
     reconciliations,
     return_cases,
     sales_orders,
+    semantic_records,
     webhooks,
     workflows,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "reconciliations",
     "return_cases",
     "sales_orders",
+    "semantic_records",
     "webhooks",
     "workflows",
 ]
