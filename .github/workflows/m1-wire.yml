@@ -32,6 +32,7 @@ jobs:
       - name: Format and focused M1 checks
         working-directory: backend
         run: |
+          uv run ruff check --fix app/models/__init__.py app/models/publication_qualification.py
           uv run ruff format app/models/publication_qualification.py app/services/publication_qualification.py app/api/v1/publication_qualifications.py app/models/__init__.py app/schemas/commands.py app/api/v1/__init__.py app/main.py app/services/commands.py tests/test_publication_qualification_m1.py alembic/versions/0007_publication_qualification.py
           uv run ruff check app
           uv run ruff format --check app
