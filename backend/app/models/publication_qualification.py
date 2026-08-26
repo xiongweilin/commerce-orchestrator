@@ -6,7 +6,7 @@ import datetime as dt
 import enum
 import uuid
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import utc_now
@@ -44,6 +44,9 @@ class PublicationQualificationAssessment(UUIDPkMixin, Base):
         nullable=False,
     )
     evidence_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    assessed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id"), nullable=True, index=True
+    )
     assessed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
