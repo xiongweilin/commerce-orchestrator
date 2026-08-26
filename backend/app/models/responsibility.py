@@ -65,6 +65,9 @@ class ResponsibilityBinding(UUIDPkMixin, Base):
 
     __tablename__ = "responsibility_binding"
 
+    workflow_ref: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_run.id"), nullable=True, index=True
+    )
     subject_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     subject_ref: Mapped[str] = mapped_column(String(192), nullable=False, index=True)
     subject_version: Mapped[str] = mapped_column(String(192), nullable=False)
@@ -137,6 +140,9 @@ class ResponsibilityObligation(UUIDPkMixin, Base):
 
     __tablename__ = "responsibility_obligation"
 
+    workflow_ref: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_run.id"), nullable=True, index=True
+    )
     subject_ref: Mapped[str] = mapped_column(String(192), nullable=False, index=True)
     source_kind: Mapped[str] = mapped_column(String(64), nullable=False)
     source_ref: Mapped[str] = mapped_column(String(192), nullable=False, index=True)
