@@ -82,6 +82,7 @@ class ExecutionAuthorization(UUIDPkMixin, Base):
 
     __tablename__ = "execution_authorization"
 
+    authorization_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     decision_ref: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("work_item_decision.id"), nullable=False, index=True
     )
