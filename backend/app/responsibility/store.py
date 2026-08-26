@@ -43,6 +43,7 @@ from portable_runtime.records.models import (
     PolicyRecord,
     RevisionRecord,
 )
+from portable_runtime.records.validation import validate_canonical_write, validate_record
 
 _RECORD_TYPES: dict[str, type[BaseRecord]] = {
     "EvidenceArtifact": EvidenceArtifact,
@@ -67,6 +68,14 @@ def _semantic_payload(value: Any) -> dict[str, Any]:
     return payload
 
 
+def parse_portable_record(payload: dict[str, Any]) -> BaseRecord:
+    base = BaseRecord.model_validate(payload)
+    model_type = _RECORD_TYPES.get(base.record_type)
+    if model_type is None:
+        raise ValidationError(f"unsupported portable responsibility record type: {base.record_type}")
+    return model_type.model_validate(payload)
+
+
 class CommerceResponsibilityStore:
     """Session-bound persistence adapter for portable Experience semantics."""
 
@@ -77,21 +86,13 @@ class CommerceResponsibilityStore:
         row = self.db.get(ResponsibilityRecord, record_id)
         if row is None:
             return None
-        record_type = str(row.record_type)
-        model_type = _RECORD_TYPES.get(record_type)
-        if model_type is None:
-            raise ValidationError(f"unsupported portable responsibility record type: {record_type}")
-        return model_type.model_validate(row.payload)
+        return parse_portable_record(row.payload)
 
     def list_records(self, record_type: str | None = None) -> list[BaseRecord]:
         stmt = select(ResponsibilityRecord).order_by(ResponsibilityRecord.created_at)
         if record_type is not None:
             stmt = stmt.where(ResponsibilityRecord.record_type == record_type)
-        return [
-            _RECORD_TYPES[row.record_type].model_validate(row.payload)
-            for row in self.db.execute(stmt).scalars()
-            if row.record_type in _RECORD_TYPES
-        ]
+        return [parse_portable_record(row.payload) for row in self.db.execute(stmt).scalars()]
 
     def save_record(self, value: BaseRecord) -> None:
         existing = self.get_record(value.id)
@@ -101,6 +102,9 @@ class CommerceResponsibilityStore:
                     f"responsibility record {value.id!r} is append-only; semantic rebound refused"
                 )
             return
+        errors = [*validate_record(value), *validate_canonical_write(value)]
+        if errors:
+            raise ValidationError("invalid portable responsibility record: " + "; ".join(errors))
         if value.record_type not in _RECORD_TYPES:
             raise ValidationError(f"unsupported portable responsibility record type: {value.record_type}")
         self.db.add(
@@ -201,3 +205,6 @@ class CommerceResponsibilityStore:
         self.save_record(prepared.judgment)
         self.append_event(prepared.event)
         return prepared.binding
+
+
+__all__ = ["CommerceResponsibilityStore", "parse_portable_record"]
