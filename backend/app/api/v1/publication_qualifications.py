@@ -32,7 +32,7 @@ class PublicationQualificationAssessmentCreate(BaseModel):
 def create_assessment(
     body: PublicationQualificationAssessmentCreate,
     db: Annotated[Session, Depends(get_session)],
-    _user_id: Annotated[uuid.UUID, Depends(get_current_user)],
+    user_id: Annotated[uuid.UUID, Depends(get_current_user)],
     _authorized: Annotated[bool, Depends(require_roles("catalog_owner"))],
 ) -> dict[str, object]:
     assessment = append_publication_qualification_assessment(
@@ -44,6 +44,7 @@ def create_assessment(
         adapter_version=body.adapter_version,
         environment_ref=body.environment_ref,
         assessment_status=body.assessment_status,
+        assessed_by_user_id=user_id,
         evidence_refs=body.evidence_refs,
         source_revision_refs=body.source_revision_refs,
     )
@@ -52,5 +53,8 @@ def create_assessment(
         "catalogRevisionId": str(assessment.catalog_revision_id),
         "assessmentStatus": assessment.assessment_status.value,
         "sourceFingerprint": assessment.source_fingerprint,
+        "assessedByUserId": (
+            None if assessment.assessed_by_user_id is None else str(assessment.assessed_by_user_id)
+        ),
         "assessedAt": assessment.assessed_at.isoformat(),
     }
