@@ -226,6 +226,7 @@ def confirm_effect_outcome(
 def open_responsibility_obligation(
     db,
     *,
+    workflow_ref: uuid.UUID | None = None,
     subject_ref: str,
     source_kind: str,
     source_ref: str,
@@ -236,7 +237,10 @@ def open_responsibility_obligation(
 ) -> ResponsibilityObligation:
     """Open an explicit scoped responsibility; source facts never auto-globalize it."""
 
+    if workflow_ref is not None and db.get(WorkflowRun, workflow_ref) is None:
+        raise NotFoundError("responsibility obligation workflow not found")
     obligation = ResponsibilityObligation(
+        workflow_ref=workflow_ref,
         subject_ref=_required_text(subject_ref, "subject_ref"),
         source_kind=_required_text(source_kind, "source_kind"),
         source_ref=_required_text(source_ref, "source_ref"),
@@ -257,14 +261,16 @@ def discharge_responsibility_obligation(
     obligation_id: uuid.UUID,
     actor_user_id: uuid.UUID,
 ) -> ResponsibilityObligation:
+    """Discharge one explicit obligation without rewriting its original recorder."""
+
     obligation = db.get(ResponsibilityObligation, obligation_id)
     if obligation is None:
         raise NotFoundError("responsibility obligation not found")
     if obligation.status == ResponsibilityObligationStatus.DISCHARGED:
         return obligation
+    _ = actor_user_id  # actor is authenticated/auditable at the API boundary
     obligation.status = ResponsibilityObligationStatus.DISCHARGED
     obligation.discharged_at = utc_now()
-    obligation.recorded_by_user_id = actor_user_id
     db.flush()
     return obligation
 
@@ -335,11 +341,16 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
             db.execute(select(ConfirmedOutcome).where(ConfirmedOutcome.effect_id.in_(effect_ids))).scalars()
         )
     )
-    bindings = list(db.execute(select(ResponsibilityBinding)).scalars())
+    bindings = list(
+        db.execute(
+            select(ResponsibilityBinding).where(ResponsibilityBinding.workflow_ref == workflow.id)
+        ).scalars()
+    )
     obligations = list(
         db.execute(
             select(ResponsibilityObligation).where(
-                ResponsibilityObligation.status == ResponsibilityObligationStatus.OPEN
+                ResponsibilityObligation.workflow_ref == workflow.id,
+                ResponsibilityObligation.status == ResponsibilityObligationStatus.OPEN,
             )
         ).scalars()
     )
