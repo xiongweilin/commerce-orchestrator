@@ -23,7 +23,10 @@ from portable_runtime.experience.historical_use import (
     HistoricalExperienceUseCommitRequest,
     prepare_historical_experience_use_commit,
 )
-from portable_runtime.records.knowledge import KnowledgeProjection
+from portable_runtime.records.knowledge import (
+    KnowledgeProjection,
+    validate_projection_for_official,
+)
 from portable_runtime.records.models import (
     ActionRecord,
     Assertion,
@@ -130,6 +133,10 @@ class CommerceResponsibilityStore:
                     f"knowledge projection {value.id!r} is immutable in Commerce; create a new id"
                 )
             return
+        if value.lifecycle_status == "official":
+            errors = validate_projection_for_official(value)
+            if errors:
+                raise ValidationError("cannot persist official KnowledgeProjection: " + "; ".join(errors))
         self.db.add(
             ResponsibilityKnowledgeProjection(
                 id=value.id,
@@ -191,8 +198,6 @@ class CommerceResponsibilityStore:
         prepared = prepare_historical_experience_use_commit(self, request)
         if prepared.replayed:
             return prepared.binding
-        # The prepare step has already refused backfill/rebound and re-evaluated
-        # the current Experience admission against this same session state.
         self.save_record(prepared.judgment)
         self.append_event(prepared.event)
         return prepared.binding
