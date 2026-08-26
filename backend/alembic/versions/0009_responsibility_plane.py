@@ -63,7 +63,10 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_responsibility_binding"),
-        sa.UniqueConstraint("historical_use_ref", name="uq_responsibility_binding_historical_use_ref"),
+        sa.UniqueConstraint(
+            "historical_use_ref",
+            name="uq_responsibility_binding_historical_use_ref",
+        ),
     )
     op.create_index("ix_responsibility_binding_subject_type", "responsibility_binding", ["subject_type"])
     op.create_index("ix_responsibility_binding_subject_ref", "responsibility_binding", ["subject_ref"])
@@ -71,6 +74,7 @@ def upgrade() -> None:
 
     op.create_table(
         "execution_authorization",
+        sa.Column("authorization_key", sa.String(length=64), nullable=False),
         sa.Column("decision_ref", sa.Uuid(), nullable=False),
         sa.Column("workflow_ref", sa.Uuid(), nullable=False),
         sa.Column("subject_type", sa.String(length=64), nullable=False),
@@ -87,15 +91,32 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.ForeignKeyConstraint(["decision_ref"], ["work_item_decision.id"], name="fk_execution_authorization_decision_ref_work_item_decision"),
-        sa.ForeignKeyConstraint(["workflow_ref"], ["workflow_run.id"], name="fk_execution_authorization_workflow_ref_workflow_run"),
-        sa.ForeignKeyConstraint(["issued_by_user_id"], ["user.id"], name="fk_execution_authorization_issued_by_user_id_user"),
+        sa.ForeignKeyConstraint(
+            ["decision_ref"],
+            ["work_item_decision.id"],
+            name="fk_execution_authorization_decision_ref_work_item_decision",
+        ),
+        sa.ForeignKeyConstraint(
+            ["workflow_ref"],
+            ["workflow_run.id"],
+            name="fk_execution_authorization_workflow_ref_workflow_run",
+        ),
+        sa.ForeignKeyConstraint(
+            ["issued_by_user_id"],
+            ["user.id"],
+            name="fk_execution_authorization_issued_by_user_id_user",
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_execution_authorization"),
+        sa.UniqueConstraint("authorization_key", name="uq_execution_authorization_authorization_key"),
     )
     op.create_index("ix_execution_authorization_decision_ref", "execution_authorization", ["decision_ref"])
     op.create_index("ix_execution_authorization_workflow_ref", "execution_authorization", ["workflow_ref"])
     op.create_index("ix_execution_authorization_subject_ref", "execution_authorization", ["subject_ref"])
-    op.create_index("ix_execution_authorization_issued_by_user_id", "execution_authorization", ["issued_by_user_id"])
+    op.create_index(
+        "ix_execution_authorization_issued_by_user_id",
+        "execution_authorization",
+        ["issued_by_user_id"],
+    )
 
     op.create_table(
         "confirmed_outcome",
@@ -106,15 +127,42 @@ def upgrade() -> None:
         sa.Column("confirmed_by_user_id", sa.Uuid(), nullable=False),
         sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.ForeignKeyConstraint(["effect_id"], ["effect_ledger_entry.id"], name="fk_confirmed_outcome_effect_id_effect_ledger_entry"),
-        sa.ForeignKeyConstraint(["realization_assessment_id"], ["effect_realization_assessment.id"], name="fk_confirmed_outcome_realization_assessment_id_effect_realization_assessment"),
-        sa.ForeignKeyConstraint(["confirmed_by_user_id"], ["user.id"], name="fk_confirmed_outcome_confirmed_by_user_id_user"),
+        sa.ForeignKeyConstraint(
+            ["effect_id"],
+            ["effect_ledger_entry.id"],
+            name="fk_confirmed_outcome_effect_id_effect_ledger_entry",
+        ),
+        sa.ForeignKeyConstraint(
+            ["realization_assessment_id"],
+            ["effect_realization_assessment.id"],
+            name=(
+                "fk_confirmed_outcome_realization_assessment_id_"
+                "effect_realization_assessment"
+            ),
+        ),
+        sa.ForeignKeyConstraint(
+            ["confirmed_by_user_id"],
+            ["user.id"],
+            name="fk_confirmed_outcome_confirmed_by_user_id_user",
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_confirmed_outcome"),
         sa.UniqueConstraint("effect_id", name="uq_confirmed_outcome_effect_id"),
-        sa.UniqueConstraint("realization_assessment_id", name="uq_confirmed_outcome_realization_assessment_id"),
+        sa.UniqueConstraint(
+            "realization_assessment_id",
+            name="uq_confirmed_outcome_realization_assessment_id",
+        ),
     )
-    op.create_index("ix_confirmed_outcome_effect_id", "confirmed_outcome", ["effect_id"], unique=True)
-    op.create_index("ix_confirmed_outcome_confirmed_by_user_id", "confirmed_outcome", ["confirmed_by_user_id"])
+    op.create_index(
+        "ix_confirmed_outcome_effect_id",
+        "confirmed_outcome",
+        ["effect_id"],
+        unique=True,
+    )
+    op.create_index(
+        "ix_confirmed_outcome_confirmed_by_user_id",
+        "confirmed_outcome",
+        ["confirmed_by_user_id"],
+    )
 
     op.create_table(
         "responsibility_obligation",
@@ -129,12 +177,28 @@ def upgrade() -> None:
         sa.Column("discharged_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("recorded_by_user_id", sa.Uuid(), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.ForeignKeyConstraint(["recorded_by_user_id"], ["user.id"], name="fk_responsibility_obligation_recorded_by_user_id_user"),
+        sa.ForeignKeyConstraint(
+            ["recorded_by_user_id"],
+            ["user.id"],
+            name="fk_responsibility_obligation_recorded_by_user_id_user",
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_responsibility_obligation"),
     )
-    op.create_index("ix_responsibility_obligation_subject_ref", "responsibility_obligation", ["subject_ref"])
-    op.create_index("ix_responsibility_obligation_source_ref", "responsibility_obligation", ["source_ref"])
-    op.create_index("ix_responsibility_obligation_recorded_by_user_id", "responsibility_obligation", ["recorded_by_user_id"])
+    op.create_index(
+        "ix_responsibility_obligation_subject_ref",
+        "responsibility_obligation",
+        ["subject_ref"],
+    )
+    op.create_index(
+        "ix_responsibility_obligation_source_ref",
+        "responsibility_obligation",
+        ["source_ref"],
+    )
+    op.create_index(
+        "ix_responsibility_obligation_recorded_by_user_id",
+        "responsibility_obligation",
+        ["recorded_by_user_id"],
+    )
 
     op.add_column("effect_ledger_entry", sa.Column("workflow_ref", sa.Uuid(), nullable=True))
     op.add_column("effect_ledger_entry", sa.Column("authorization_ref", sa.Uuid(), nullable=True))
@@ -153,9 +217,16 @@ def upgrade() -> None:
         ["id"],
     )
     op.create_index("ix_effect_ledger_entry_workflow_ref", "effect_ledger_entry", ["workflow_ref"])
-    op.create_index("ix_effect_ledger_entry_authorization_ref", "effect_ledger_entry", ["authorization_ref"])
+    op.create_index(
+        "ix_effect_ledger_entry_authorization_ref",
+        "effect_ledger_entry",
+        ["authorization_ref"],
+    )
 
-    op.add_column("publication_qualification_assessment", sa.Column("assessed_by_user_id", sa.Uuid(), nullable=True))
+    op.add_column(
+        "publication_qualification_assessment",
+        sa.Column("assessed_by_user_id", sa.Uuid(), nullable=True),
+    )
     op.create_foreign_key(
         "fk_publication_qualification_assessment_assessed_by_user_id_user",
         "publication_qualification_assessment",
@@ -171,25 +242,46 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_publication_qualification_assessment_assessed_by_user_id", table_name="publication_qualification_assessment")
-    op.drop_constraint("fk_publication_qualification_assessment_assessed_by_user_id_user", "publication_qualification_assessment", type_="foreignkey")
+    op.drop_index(
+        "ix_publication_qualification_assessment_assessed_by_user_id",
+        table_name="publication_qualification_assessment",
+    )
+    op.drop_constraint(
+        "fk_publication_qualification_assessment_assessed_by_user_id_user",
+        "publication_qualification_assessment",
+        type_="foreignkey",
+    )
     op.drop_column("publication_qualification_assessment", "assessed_by_user_id")
 
     op.drop_index("ix_effect_ledger_entry_authorization_ref", table_name="effect_ledger_entry")
     op.drop_index("ix_effect_ledger_entry_workflow_ref", table_name="effect_ledger_entry")
-    op.drop_constraint("fk_effect_ledger_entry_authorization_ref_execution_authorization", "effect_ledger_entry", type_="foreignkey")
-    op.drop_constraint("fk_effect_ledger_entry_workflow_ref_workflow_run", "effect_ledger_entry", type_="foreignkey")
+    op.drop_constraint(
+        "fk_effect_ledger_entry_authorization_ref_execution_authorization",
+        "effect_ledger_entry",
+        type_="foreignkey",
+    )
+    op.drop_constraint(
+        "fk_effect_ledger_entry_workflow_ref_workflow_run",
+        "effect_ledger_entry",
+        type_="foreignkey",
+    )
     op.drop_column("effect_ledger_entry", "authorization_ref")
     op.drop_column("effect_ledger_entry", "workflow_ref")
 
-    op.drop_index("ix_responsibility_obligation_recorded_by_user_id", table_name="responsibility_obligation")
+    op.drop_index(
+        "ix_responsibility_obligation_recorded_by_user_id",
+        table_name="responsibility_obligation",
+    )
     op.drop_index("ix_responsibility_obligation_source_ref", table_name="responsibility_obligation")
     op.drop_index("ix_responsibility_obligation_subject_ref", table_name="responsibility_obligation")
     op.drop_table("responsibility_obligation")
     op.drop_index("ix_confirmed_outcome_confirmed_by_user_id", table_name="confirmed_outcome")
     op.drop_index("ix_confirmed_outcome_effect_id", table_name="confirmed_outcome")
     op.drop_table("confirmed_outcome")
-    op.drop_index("ix_execution_authorization_issued_by_user_id", table_name="execution_authorization")
+    op.drop_index(
+        "ix_execution_authorization_issued_by_user_id",
+        table_name="execution_authorization",
+    )
     op.drop_index("ix_execution_authorization_subject_ref", table_name="execution_authorization")
     op.drop_index("ix_execution_authorization_workflow_ref", table_name="execution_authorization")
     op.drop_index("ix_execution_authorization_decision_ref", table_name="execution_authorization")
