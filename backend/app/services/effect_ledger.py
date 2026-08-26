@@ -56,6 +56,7 @@ from app.schemas.effects import (
 )
 from app.schemas.events import EFFECT_OPS
 from app.services.outbox_inbox import emit_event
+from app.services.responsibility_execution import resolve_effect_authorization
 from app.services.state_machines import can_transition
 
 logger = get_logger("commerce.effect_ledger")
@@ -115,6 +116,27 @@ def validate_effect_dispatch_coverage() -> None:
         raise RuntimeError(f"missing adapter dispatch for effect operations: {sorted(missing)}")
 
 
+def _validate_bound_authority(db, entry: EffectLedgerEntry) -> None:
+    """Revalidate the pilot authorization at the physical dispatch boundary.
+
+    Historical effects without ``workflow_ref`` remain governed by their
+    original semantics; the migration never retroactively invents authority.
+    """
+
+    if entry.workflow_ref is None:
+        return
+    operation = f"{entry.target_system}.{entry.operation}"
+    authorization = resolve_effect_authorization(
+        db,
+        workflow_ref=entry.workflow_ref,
+        operation=operation,
+    )
+    if authorization is None:
+        return
+    if entry.authorization_ref != authorization.id:
+        raise ValidationError("effect is not bound to the current explicit ExecutionAuthorization")
+
+
 def record_effect(
     db,
     *,
@@ -123,9 +145,16 @@ def record_effect(
     operation: str,
     idempotency_key: str | None = None,
     approval_ref: uuid.UUID | None = None,
+    workflow_ref: uuid.UUID | None = None,
+    authorization_ref: uuid.UUID | None = None,
     request_hash: str | None = None,
 ) -> EffectLedgerEntry:
     """Record an intended external side effect as ``planned``.
+
+    ``approval_ref`` is retained only as a legacy orchestration reference.
+    New writes also persist ``workflow_ref``.  For the listing-publication
+    pilot, an explicit authorization must already be attached to the durable
+    work item; this function consumes and binds it but never mints it.
 
     ``operation`` is the operation name without the system prefix
     (``target_system`` + ``.`` + ``operation`` must be in ``EFFECT_OPS``).
@@ -135,6 +164,17 @@ def record_effect(
     full_operation = f"{target_system}.{operation}"
     if full_operation not in EFFECT_OPS:
         raise ValidationError(f"unknown effect operation: {full_operation}")
+
+    workflow_ref = workflow_ref or approval_ref
+    resolved_authorization = resolve_effect_authorization(
+        db,
+        workflow_ref=workflow_ref,
+        operation=full_operation,
+    )
+    if resolved_authorization is not None:
+        if authorization_ref is not None and authorization_ref != resolved_authorization.id:
+            raise ValidationError("supplied authorization_ref conflicts with current authorization")
+        authorization_ref = resolved_authorization.id
 
     intent_id = intent_id or uuid7()
     existing = db.execute(
@@ -154,6 +194,8 @@ def record_effect(
         idempotency_key=idempotency_key,
         attempt=0,
         approval_ref=approval_ref,
+        workflow_ref=workflow_ref,
+        authorization_ref=authorization_ref,
         status=EffectStatus.PLANNED,
         request_hash=request_hash,
     )
@@ -168,6 +210,8 @@ def record_effect(
             "intent_id": str(intent_id),
             "operation": full_operation,
             "idempotency_key": idempotency_key,
+            "workflow_ref": None if workflow_ref is None else str(workflow_ref),
+            "authorization_ref": None if authorization_ref is None else str(authorization_ref),
         },
     )
     db.flush()
@@ -188,6 +232,12 @@ def mark_dispatched(
     bounded by :data:`MAX_EFFECT_RETRY_ATTEMPTS`). ``outcome_unknown``
     effects can never be re-dispatched.
     """
+    entry = db.execute(
+        select(EffectLedgerEntry).where(EffectLedgerEntry.intent_id == intent_id)
+    ).scalar_one_or_none()
+    if entry is None:
+        raise NotFoundError(f"effect ledger entry {intent_id} not found")
+    _validate_bound_authority(db, entry)
     return mark_effect(db, intent_id, status="dispatched", context=context)
 
 
