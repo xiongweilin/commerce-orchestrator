@@ -47,6 +47,16 @@ from app.models.reconciliation_resolution import (
     ReconciliationResolutionKind,
     ReconciliationVerificationStatus,
 )
+from app.models.responsibility import (
+    ConfirmedOutcome,
+    ExecutionAuthorization,
+    ResponsibilityBinding,
+    ResponsibilityEvent,
+    ResponsibilityKnowledgeProjection,
+    ResponsibilityObligation,
+    ResponsibilityObligationStatus,
+    ResponsibilityRecord,
+)
 from app.models.returns import ReturnCase, ReturnDisposition, ReturnStatus
 from app.models.runtime import RuntimeHeartbeat
 from app.models.sensitive_payload import SensitivePayload
@@ -67,10 +77,12 @@ __all__ = [
     "CatalogChangeCandidate",
     "CatalogRevision",
     "CatalogRevisionStatus",
+    "ConfirmedOutcome",
     "EffectLedgerEntry",
     "EffectStatus",
     "EffectRealizationAssessment",
     "EffectRealizationStatus",
+    "ExecutionAuthorization",
     "ExternalIdMapping",
     "FeedbackCluster",
     "FeedbackItem",
@@ -97,6 +109,12 @@ __all__ = [
     "ReconciliationResolution",
     "ReconciliationResolutionKind",
     "ReconciliationVerificationStatus",
+    "ResponsibilityBinding",
+    "ResponsibilityEvent",
+    "ResponsibilityKnowledgeProjection",
+    "ResponsibilityObligation",
+    "ResponsibilityObligationStatus",
+    "ResponsibilityRecord",
     "ReturnCase",
     "ReturnDisposition",
     "ReturnStatus",
