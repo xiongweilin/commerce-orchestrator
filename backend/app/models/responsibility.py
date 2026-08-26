@@ -1,7 +1,7 @@
 """Commerce responsibility-plane persistence projections.
 
 These tables persist Commerce specializations and portable-runtime semantic
-records in the Commerce PostgreSQL database.  They do not replace DBOS, Odoo,
+records in the Commerce PostgreSQL database. They do not replace DBOS, Odoo,
 Shopify or existing domain aggregate ownership.
 """
 
@@ -16,7 +16,7 @@ from sqlalchemy import DateTime, ForeignKey, JSON, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import utc_now
-from app.models.base import Base, UUIDPkMixin, enum_values
+from app.models.base import Base, UUIDPkMixin
 
 
 class ResponsibilityObligationStatus(enum.StrEnum):
@@ -140,9 +140,7 @@ class ResponsibilityObligation(UUIDPkMixin, Base):
     source_kind: Mapped[str] = mapped_column(String(64), nullable=False)
     source_ref: Mapped[str] = mapped_column(String(192), nullable=False, index=True)
     status: Mapped[ResponsibilityObligationStatus] = mapped_column(
-        String(16),
-        nullable=False,
-        default=ResponsibilityObligationStatus.OPEN,
+        String(16), nullable=False, default=ResponsibilityObligationStatus.OPEN
     )
     reason: Mapped[str] = mapped_column(String(1024), nullable=False)
     scope: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
