@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from portable_runtime.core.models import Run
+from portable_runtime.records.models import EvidenceArtifact
 from portable_runtime.responsibility import (
     EffectClass,
     ResourceVector,
@@ -8,6 +10,8 @@ from portable_runtime.responsibility import (
     ResponsibilityStatus,
 )
 from portable_runtime.stores.memory import InMemoryStateStore
+from portable_runtime.stores.sqlite import SQLiteStateStore
+from portable_runtime.workflows.completion import CompletionAuthority
 
 from app.core.errors import ValidationError
 from app.experiments.listing_integrity_steward import (
@@ -85,6 +89,32 @@ def _readback(now: datetime, *, title: str = "C20 title") -> ShopifyReadback:
         observed_at=now,
         evidence_ref=f"shopify-readback:{now.isoformat()}",
         source_version_ref="shopify-product:C20:v7",
+    )
+
+
+def _verification_proof(work, run: Run, *, proof_id: str) -> EvidenceArtifact:
+    return EvidenceArtifact(
+        id=proof_id,
+        kind="closed-verification",
+        lifecycle_status="current",
+        metadata={
+            "verification_result": {"result": "pass"},
+            "work_id": work.id,
+            "run_id": run.id,
+            "verification_scope": {},
+            "work_version": 1,
+            "acceptance_criteria": list(work.acceptance_criteria),
+            "obligation_refs": CompletionAuthority.required_obligation_refs(work),
+        },
+    )
+
+
+def _large_envelope() -> ResourceVector:
+    return ResourceVector(
+        api_calls=10,
+        compute_units=10,
+        human_attention_units=1,
+        concurrency_slots=2,
     )
 
 
@@ -281,12 +311,7 @@ def test_commitment_is_resource_bounded_and_does_not_mint_execution_authorizatio
         kernel,
         proposal,
         commitment_id="commitment:c20:bounded",
-        envelope=ResourceVector(
-            api_calls=10,
-            compute_units=10,
-            human_attention_units=1,
-            concurrency_slots=2,
-        ),
+        envelope=_large_envelope(),
         committed_at=now,
     )
     assert commitment.object_type == "Commitment"
@@ -318,15 +343,21 @@ def test_completing_steward_work_does_not_discharge_listing_integrity_mission(db
         kernel,
         proposal,
         commitment_id="commitment:c20:complete",
-        envelope=ResourceVector(
-            api_calls=10,
-            compute_units=10,
-            human_attention_units=1,
-            concurrency_slots=2,
-        ),
+        envelope=_large_envelope(),
         committed_at=now,
     )
-    completed_ref, mission_status = complete_steward_work(kernel, commitment)
+    work = kernel.materialize_work(commitment.id)
+    run = Run(id="run:c20:complete", work_id=work.id, status="running")
+    kernel.store.save_run(run)
+    proof = _verification_proof(work, run, proof_id="proof:c20:complete")
+    kernel.store.save_record(proof)
+
+    completed_ref, mission_status = complete_steward_work(
+        kernel,
+        commitment,
+        run=run,
+        verification_refs=[proof.id],
+    )
 
     completed_work = kernel.store.get_work(completed_ref)
     assert completed_work is not None
@@ -334,6 +365,80 @@ def test_completing_steward_work_does_not_discharge_listing_integrity_mission(db
     assert mission_status is ResponsibilityStatus.ACTIVE
     assert kernel.current_status(LISTING_INTEGRITY_MISSION.id) is ResponsibilityStatus.ACTIVE
     assert kernel.store.list_authorizations() == []
+
+
+def test_sqlite_restart_preserves_responsibility_history_without_minting_authority(db, tmp_path):
+    _revision, listing = _listing(db)
+    now = datetime(2026, 8, 27, 3, 0, tzinfo=timezone.utc)
+    snapshot = build_listing_integrity_snapshot(
+        db,
+        listing_id=listing.id,
+        observed_at=now,
+        readback=_readback(now, title="drifted title"),
+    )
+    state_path = tmp_path / "commerce-responsibility.db"
+
+    store_a = SQLiteStateStore(state_path)
+    kernel_a = ResponsibilityKernel(store_a)
+    assessment = assess_listing_integrity(
+        kernel_a,
+        snapshot,
+        assessment_id="assessment:c20:restart",
+    )
+    assert kernel_a.current_status(LISTING_INTEGRITY_MISSION.id) is ResponsibilityStatus.ACTIVE
+    store_a.close()
+
+    store_b = SQLiteStateStore(state_path)
+    kernel_b = ResponsibilityKernel(store_b)
+    try:
+        identity = kernel_b.get_responsibility(LISTING_INTEGRITY_MISSION.id)
+        assert identity.id == LISTING_INTEGRITY_MISSION.id
+        assert kernel_b.current_definition(identity.id)[0] == 1
+        assert kernel_b.current_status(identity.id) is ResponsibilityStatus.ACTIVE
+        recovered_assessment = kernel_b.journal.get(assessment.id)
+        assert recovered_assessment is not None
+
+        proposal = propose_listing_integrity_work(
+            kernel_b,
+            recovered_assessment,
+            proposal_id="proposal:c20:restart",
+        )
+        assert proposal is not None
+        commitment = commit_steward_work(
+            kernel_b,
+            proposal,
+            commitment_id="commitment:c20:restart",
+            envelope=_large_envelope(),
+            committed_at=now,
+        )
+        work = kernel_b.materialize_work(commitment.id)
+        run = Run(id="run:c20:restart", work_id=work.id, status="running")
+        kernel_b.store.save_run(run)
+        proof = _verification_proof(work, run, proof_id="proof:c20:restart")
+        kernel_b.store.save_record(proof)
+        complete_steward_work(
+            kernel_b,
+            commitment,
+            run=run,
+            verification_refs=[proof.id],
+        )
+        assert kernel_b.store.list_authorizations() == []
+    finally:
+        store_b.close()
+
+    store_c = SQLiteStateStore(state_path)
+    kernel_c = ResponsibilityKernel(store_c)
+    try:
+        assert kernel_c.current_status(LISTING_INTEGRITY_MISSION.id) is ResponsibilityStatus.ACTIVE
+        assert kernel_c.current_definition(LISTING_INTEGRITY_MISSION.id)[0] == 1
+        assert kernel_c.journal.get("proposal:c20:restart") is not None
+        assert kernel_c.journal.get("commitment:c20:restart") is not None
+        works = kernel_c.store.list_work()
+        assert len(works) == 1
+        assert works[0].status == "completed"
+        assert kernel_c.store.list_authorizations() == []
+    finally:
+        store_c.close()
 
 
 def test_portable_mission_identity_is_not_a_model_session_or_authority() -> None:
