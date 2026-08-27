@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from app.core.errors import ValidationError
 from app.models.workflow import WorkItem, WorkItemStatus
 from app.services.approvals import create_work_item, get_work_item, submit_decision
+from app.services.responsibility_execution import authorization_profile_for_work_item
 
 __all__ = ["create_work_item", "get_work_item", "list_work_items", "submit_decision"]
 
@@ -43,8 +44,10 @@ def list_work_items(
         .scalars()
         .all()
     )
-    return {
-        "items": [
+    projected = []
+    for item in items:
+        profile = authorization_profile_for_work_item(db, item)
+        projected.append(
             {
                 "workItemId": str(item.id),
                 "workflowId": str(item.workflow_id),
@@ -52,12 +55,14 @@ def list_work_items(
                 "title": item.title,
                 "status": item.status.value,
                 "payload": item.payload_json or {},
+                "authorizationProfile": None if profile is None else profile.name,
                 "expectedWorkflowVersion": item.expected_version,
                 "expiresAt": item.expires_at.isoformat() if item.expires_at else None,
                 "createdAt": item.created_at.isoformat(),
             }
-            for item in items
-        ],
+        )
+    return {
+        "items": projected,
         "total": total,
         "limit": limit,
         "offset": offset,
