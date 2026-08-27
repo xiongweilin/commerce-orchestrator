@@ -2,7 +2,7 @@
 
 The gate proves only the finite requirements declared for one workflow kind.
 It never claims universal completeness: ``coverage_claim`` is permanently
-``declared-scope-only``.  A blocked completion remains non-terminal and can
+``declared-scope-only``. A blocked completion remains non-terminal and can
 be re-assessed only through an explicit durable completion-recheck signal.
 """
 
@@ -28,11 +28,13 @@ from app.models.reconciliation import (
     ReconciliationRun,
     ReconciliationRunStatus,
 )
+from app.models.responsibility import ConfirmedOutcome
 from app.models.returns import ReturnCase, ReturnStatus
 from app.models.workflow import WorkflowRun, WorkflowRunStatus, WorkItem, WorkItemStatus
 from app.services.outbox_inbox import emit_event
 from app.services.publication_qualification import latest_applicable_assessment
 from app.services.realization_resolution import latest_effect_realization_assessment
+from app.services.responsibility_profiles import LISTING_PUBLICATION_PROFILE
 
 COVERAGE_CLAIM: Literal["declared-scope-only"] = "declared-scope-only"
 COMPLETION_RECHECK_EVENT = "workflow.completion_recheck_requested"
@@ -117,6 +119,7 @@ class CompletionAssessment(BaseModel):
     blocking_reconciliation_refs: list[str] = Field(default_factory=list)
     qualification_refs: list[str] = Field(default_factory=list)
     realization_refs: list[str] = Field(default_factory=list)
+    confirmed_outcome_refs: list[str] = Field(default_factory=list)
     required_effect_refs: list[str] = Field(default_factory=list)
     required_effect_classes: list[str] = Field(default_factory=list)
     coverage_claim: Literal["declared-scope-only"] = COVERAGE_CLAIM
@@ -135,9 +138,9 @@ def request_completion_recheck(
     """Emit one explicit durable recheck request for a currently blocked run.
 
     This command does not create evidence, change workflow status, or claim
-    completion.  The worker relay converts the outbox event into a DBOS send
+    completion. The worker relay converts the outbox event into a DBOS send
     on ``COMPLETION_RECHECK_TOPIC``; the waiting workflow then re-assesses the
-    same run against current M1/M2 evidence.
+    same run against current bounded evidence.
     """
     run = db.get(WorkflowRun, workflow_id)
     if run is None:
@@ -300,6 +303,13 @@ def _effect_class(effect: EffectLedgerEntry) -> str:
     return f"{effect.target_system}.{effect.operation}"
 
 
+def _confirmed_outcome_required(run: WorkflowRun) -> bool:
+    return bool(
+        run.workflow_type == "listing-publication"
+        and LISTING_PUBLICATION_PROFILE.confirmed_outcome_required
+    )
+
+
 def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
     """Assess only the declared finite completion scope for ``run``."""
     declared: list[str] = []
@@ -307,6 +317,7 @@ def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
     missing: list[str] = []
     qualification_refs: list[str] = []
     realization_refs: list[str] = []
+    confirmed_outcome_refs: list[str] = []
     required_effect_refs: list[str] = []
     blocking_refs: list[str] = []
 
@@ -373,14 +384,34 @@ def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
         for effect in effects:
             effect_ref = f"effect:{effect.intent_id}"
             required_effect_refs.append(effect_ref)
-            requirement = f"{effect_ref}:realization_verified"
+            realization_requirement = f"{effect_ref}:realization_verified"
             latest = latest_effect_realization_assessment(db, effect.id)
             verified = bool(
                 latest and latest.realization_status is EffectRealizationStatus.VERIFIED
             )
             if verified and latest is not None:
                 realization_refs.append(f"effect_realization:{latest.id}")
-            _record_requirement(declared, covered, missing, requirement, verified)
+            _record_requirement(
+                declared,
+                covered,
+                missing,
+                realization_requirement,
+                verified,
+            )
+
+            if _confirmed_outcome_required(run):
+                confirmed = db.execute(
+                    select(ConfirmedOutcome).where(ConfirmedOutcome.effect_id == effect.id)
+                ).scalar_one_or_none()
+                if confirmed is not None:
+                    confirmed_outcome_refs.append(f"confirmed_outcome:{confirmed.id}")
+                _record_requirement(
+                    declared,
+                    covered,
+                    missing,
+                    f"{effect_ref}:confirmed_outcome",
+                    confirmed is not None,
+                )
 
     blocker_requirement = "reconciliation:no_blocking_diff_for_required_effects"
     if effects:
@@ -418,6 +449,7 @@ def assess_workflow_completion(db, run: WorkflowRun) -> CompletionAssessment:
         blocking_reconciliation_refs=blocking_refs,
         qualification_refs=qualification_refs,
         realization_refs=realization_refs,
+        confirmed_outcome_refs=confirmed_outcome_refs,
         required_effect_refs=required_effect_refs,
         required_effect_classes=list(contract.required_effect_classes_always),
     )
