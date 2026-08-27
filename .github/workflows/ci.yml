@@ -28,6 +28,14 @@ jobs:
       - name: Install locked dependencies (incl. dev extras)
         run: uv sync --frozen --extra dev
 
+      - name: Install pinned portable-runtime reference oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          REV="$(.venv/bin/python -c 'import tomllib; print(tomllib.load(open("../docs/contracts/responsibility-compatibility.toml", "rb"))["reference_revision"])')"
+          uv pip install --python .venv/bin/python --no-deps \
+            "portable-runtime @ https://github.com/xiongweilin/portable-runtime/archive/${REV}.tar.gz"
+
       - name: Ruff lint
         run: uv run ruff check app
 
