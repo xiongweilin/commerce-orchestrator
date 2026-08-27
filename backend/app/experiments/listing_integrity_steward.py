@@ -1,17 +1,37 @@
-"""Experimental persistent Listing Integrity Steward.
+"""Persistent Listing Integrity Steward over portable responsibility objects.
 
-The steward is a reference-domain specialization for Stage-4 persistent agency.
-It can observe, assess, propose, and commit bounded diagnostic work. It cannot
-approve publication changes, mint ExecutionAuthorization, or treat its own
-assessment as Shopify/Odoo reality.
+Commerce still owns catalog, publication-qualification, Shopify readback,
+authorization, DBOS and effect/outcome facts. This module specializes the
+portable persistent-responsibility contract for the listing-integrity mission;
+it does not maintain a parallel Mission/Assessment/Proposal/Commitment model.
 """
 
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+
+from portable_runtime.responsibility import (
+    Commitment,
+    EffectClass,
+    ListingIntegrityState,
+    PortfolioAdmissionDecision,
+    PriorityDimensions,
+    PriorityJudgment,
+    ResourcePool,
+    ResourceReservation,
+    ResourceVector,
+    ResponsibilityAdmission,
+    ResponsibilityAssessment,
+    ResponsibilityKernel,
+    ResponsibilityStatus,
+    StandingResponsibility,
+    WorkProposal,
+    listing_integrity_proposal,
+    record_domain_assessment,
+)
 
 from app.core.errors import ValidationError
 from app.models.catalog import CatalogRevision
@@ -22,25 +42,13 @@ from app.services.publication_qualification import (
     latest_applicable_assessment,
 )
 
-
-class MissionStatus(StrEnum):
-    ACTIVE = "active"
-    SUSPENDED = "suspended"
-    DISCHARGED = "discharged"
-
-
-class IntegrityAssessmentKind(StrEnum):
-    HEALTH_VERIFIED = "health-verified"
-    DRIFT_DETECTED = "drift-detected"
-    QUALIFICATION_NOT_CURRENT = "qualification-not-current"
-    EXPECTED_READBACK_MISSING = "expected-readback-missing"
-    INSUFFICIENT_EVIDENCE = "insufficient-evidence"
+MissionStatus = ResponsibilityStatus
+IntegrityAssessmentKind = ListingIntegrityState
 
 
 class StewardWorkKind(StrEnum):
-    READ_ONLY_DIAGNOSIS = "read-only-diagnosis"
-    REQUALIFICATION_PREPARATION = "requalification-preparation"
-    READBACK_INVESTIGATION = "readback-investigation"
+    READ_ONLY_DIAGNOSIS = "listing-integrity-diagnosis"
+    REQUALIFICATION_PREPARATION = "listing-requalification-preparation"
 
 
 class EscalationRoute(StrEnum):
@@ -48,20 +56,15 @@ class EscalationRoute(StrEnum):
     HUMAN_DECISION_REQUIRED = "human-decision-required"
 
 
-@dataclass(frozen=True, slots=True)
-class ListingIntegrityMission:
-    id: str
-    statement: str
-    channel: str
-    status: MissionStatus = MissionStatus.ACTIVE
-    authority_bearing: bool = False
-
-
-LISTING_INTEGRITY_MISSION = ListingIntegrityMission(
+LISTING_INTEGRITY_MISSION = StandingResponsibility(
     id="mission:listing-integrity:shopify",
+    responsibility_kind="commerce-listing-integrity",
     statement="Maintain Shopify listing integrity against the currently qualified catalog state.",
-    channel="shopify",
+    scope={"channel": "shopify"},
 )
+
+_PORTFOLIO_POLICY = "commerce-listing-steward-policy-v1"
+_RESOURCE_POOL_ID = "resource_pool:commerce-listing-integrity"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,66 +93,25 @@ class ListingIntegritySnapshot:
     readback_expected_by: datetime | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ListingIntegrityAssessment:
-    id: str
-    mission_ref: str
-    listing_ref: str
-    kind: IntegrityAssessmentKind
-    basis_refs: tuple[str, ...]
-    assessed_at: datetime
-    differences: dict[str, tuple[object, object]] = field(default_factory=dict)
-    rationale: str = ""
-    authority_bearing: bool = False
+def ensure_listing_integrity_responsibility(kernel: ResponsibilityKernel) -> StandingResponsibility:
+    """Admit the durable mission once; admission itself grants no effect authority."""
 
-
-@dataclass(frozen=True, slots=True)
-class StewardResourceRequest:
-    api_calls: int
-    compute_units: int
-    human_attention_units: int = 0
-
-    def __post_init__(self) -> None:
-        if min(self.api_calls, self.compute_units, self.human_attention_units) < 0:
-            raise ValueError("resource request cannot be negative")
-
-
-@dataclass(frozen=True, slots=True)
-class StewardResourceEnvelope:
-    api_calls: int
-    compute_units: int
-    human_attention_units: int
-
-    def admits(self, request: StewardResourceRequest) -> bool:
-        return (
-            request.api_calls <= self.api_calls
-            and request.compute_units <= self.compute_units
-            and request.human_attention_units <= self.human_attention_units
+    existing = kernel.journal.get(LISTING_INTEGRITY_MISSION.id)
+    if existing is None:
+        kernel.register(
+            LISTING_INTEGRITY_MISSION,
+            ResponsibilityAdmission(
+                id="admission:listing-integrity:shopify",
+                responsibility_ref=LISTING_INTEGRITY_MISSION.id,
+                responsibility_version=1,
+                principal_ref="commerce:operator",
+                basis_refs=["experiment:c20-listing-integrity"],
+            ),
         )
-
-
-@dataclass(frozen=True, slots=True)
-class ListingIntegrityWorkProposal:
-    id: str
-    mission_ref: str
-    assessment_ref: str
-    listing_ref: str
-    work_kind: StewardWorkKind
-    resource_request: StewardResourceRequest
-    stop_conditions: tuple[str, ...]
-    escalation_conditions: tuple[str, ...]
-    authority_bearing: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class ListingIntegrityCommitment:
-    id: str
-    mission_ref: str
-    proposal_ref: str
-    allocation: StewardResourceRequest
-    committed_at: datetime
-    authority_bearing: bool = False
-    execution_authorization_ref: str | None = None
+        return LISTING_INTEGRITY_MISSION
+    if not isinstance(existing, StandingResponsibility):
+        raise ValidationError("listing integrity mission id is bound to another object type")
+    return existing
 
 
 def _required_text(value: object, field_name: str) -> str:
@@ -167,16 +129,12 @@ def build_listing_integrity_snapshot(
     readback: ShopifyReadback | None,
     readback_expected_by: datetime | None = None,
 ) -> ListingIntegritySnapshot:
-    """Compose a projection from Commerce-owned and Shopify-owned facts.
-
-    The caller supplies Shopify readback evidence. This function never treats
-    Commerce memory as Shopify reality and never mutates either fact owner.
-    """
+    """Compose a projection from Commerce-owned and Shopify-owned facts."""
 
     listing = db.get(ListingPublication, listing_id)
     if listing is None:
         raise ValidationError("listing integrity requires a known listing")
-    if listing.channel != LISTING_INTEGRITY_MISSION.channel:
+    if listing.channel != str(LISTING_INTEGRITY_MISSION.scope["channel"]):
         raise ValidationError("Listing Integrity Steward only specializes Shopify listings")
 
     payload = listing.payload or {}
@@ -196,12 +154,8 @@ def build_listing_integrity_snapshot(
     context = payload.get("qualification_context") or {}
     purpose = _required_text(context.get("purpose"), "qualification purpose")
     policy_version = _required_text(context.get("policy_version"), "qualification policy_version")
-    adapter_version = _required_text(
-        context.get("adapter_version"), "qualification adapter_version"
-    )
-    environment_ref = _required_text(
-        context.get("environment_ref"), "qualification environment_ref"
-    )
+    adapter_version = _required_text(context.get("adapter_version"), "qualification adapter_version")
+    environment_ref = _required_text(context.get("environment_ref"), "qualification environment_ref")
     qualification = latest_applicable_assessment(
         db,
         revision=revision,
@@ -256,145 +210,210 @@ def build_listing_integrity_snapshot(
     )
 
 
-def assess_listing_integrity(
-    snapshot: ListingIntegritySnapshot,
-    *,
-    assessment_id: str,
-) -> ListingIntegrityAssessment:
-    """Assess current integrity without granting any action authority."""
-
+def _classify(snapshot: ListingIntegritySnapshot) -> ListingIntegrityState:
     if not snapshot.qualification_current:
-        return ListingIntegrityAssessment(
-            id=assessment_id,
-            mission_ref=LISTING_INTEGRITY_MISSION.id,
-            listing_ref=snapshot.listing_ref,
-            kind=IntegrityAssessmentKind.QUALIFICATION_NOT_CURRENT,
-            basis_refs=snapshot.evidence_refs,
-            assessed_at=snapshot.observed_at,
-            rationale="current-use publication qualification is absent or stale",
-        )
-
+        return ListingIntegrityState.QUALIFICATION_NOT_CURRENT
     if snapshot.observed_fields is None:
         missing_is_due = (
             snapshot.readback_expected_by is not None
             and snapshot.observed_at >= snapshot.readback_expected_by
         )
-        kind = (
-            IntegrityAssessmentKind.EXPECTED_READBACK_MISSING
-            if missing_is_due
-            else IntegrityAssessmentKind.INSUFFICIENT_EVIDENCE
-        )
-        return ListingIntegrityAssessment(
-            id=assessment_id,
-            mission_ref=LISTING_INTEGRITY_MISSION.id,
-            listing_ref=snapshot.listing_ref,
-            kind=kind,
-            basis_refs=snapshot.evidence_refs,
-            assessed_at=snapshot.observed_at,
-            rationale=(
-                "expected Shopify readback evidence is missing"
-                if missing_is_due
-                else "no current Shopify readback exists, so health is not verified"
-            ),
-        )
-
+        if missing_is_due:
+            return ListingIntegrityState.EXPECTED_READBACK_MISSING
+        return ListingIntegrityState.INSUFFICIENT_EVIDENCE
     differences = {
         key: (expected, snapshot.observed_fields.get(key))
         for key, expected in snapshot.expected_fields.items()
         if snapshot.observed_fields.get(key) != expected
     }
     if differences:
-        return ListingIntegrityAssessment(
-            id=assessment_id,
-            mission_ref=LISTING_INTEGRITY_MISSION.id,
-            listing_ref=snapshot.listing_ref,
-            kind=IntegrityAssessmentKind.DRIFT_DETECTED,
-            basis_refs=snapshot.evidence_refs,
-            assessed_at=snapshot.observed_at,
-            differences=differences,
-            rationale="Shopify readback differs from currently qualified catalog fields",
-        )
+        return ListingIntegrityState.DRIFT_DETECTED
+    return ListingIntegrityState.HEALTH_VERIFIED
 
-    return ListingIntegrityAssessment(
+
+def _rationale(state: ListingIntegrityState) -> str:
+    return {
+        ListingIntegrityState.HEALTH_VERIFIED: (
+            "current Shopify readback matches currently qualified catalog fields"
+        ),
+        ListingIntegrityState.DRIFT_DETECTED: (
+            "Shopify readback differs from currently qualified catalog fields"
+        ),
+        ListingIntegrityState.QUALIFICATION_NOT_CURRENT: (
+            "current-use publication qualification is absent or stale"
+        ),
+        ListingIntegrityState.EXPECTED_READBACK_MISSING: (
+            "expected Shopify readback evidence is missing"
+        ),
+        ListingIntegrityState.INSUFFICIENT_EVIDENCE: (
+            "no current Shopify readback exists, so health is not verified"
+        ),
+    }[state]
+
+
+def assess_listing_integrity(
+    kernel: ResponsibilityKernel,
+    snapshot: ListingIntegritySnapshot,
+    *,
+    assessment_id: str,
+) -> ResponsibilityAssessment:
+    """Record a portable assessment from Commerce-owned current facts."""
+
+    ensure_listing_integrity_responsibility(kernel)
+    version, _statement, _scope = kernel.current_definition(LISTING_INTEGRITY_MISSION.id)
+    state = _classify(snapshot)
+    assessment = ResponsibilityAssessment(
         id=assessment_id,
-        mission_ref=LISTING_INTEGRITY_MISSION.id,
-        listing_ref=snapshot.listing_ref,
-        kind=IntegrityAssessmentKind.HEALTH_VERIFIED,
-        basis_refs=snapshot.evidence_refs,
+        responsibility_ref=LISTING_INTEGRITY_MISSION.id,
+        responsibility_version=version,
+        subject_ref=snapshot.listing_ref,
+        assessment_kind=f"listing-integrity:{state.value}",
+        basis_refs=list(snapshot.evidence_refs),
         assessed_at=snapshot.observed_at,
-        rationale="current Shopify readback matches currently qualified catalog fields",
+        rationale=_rationale(state),
     )
+    return record_domain_assessment(kernel, assessment, now=snapshot.observed_at)
+
+
+def _assessment_state(assessment: ResponsibilityAssessment) -> ListingIntegrityState:
+    prefix = "listing-integrity:"
+    if not assessment.assessment_kind.startswith(prefix):
+        raise ValidationError("assessment is not a listing-integrity specialization")
+    try:
+        return ListingIntegrityState(assessment.assessment_kind.removeprefix(prefix))
+    except ValueError as exc:
+        raise ValidationError("unknown listing-integrity assessment kind") from exc
 
 
 def propose_listing_integrity_work(
-    assessment: ListingIntegrityAssessment,
+    kernel: ResponsibilityKernel,
+    assessment: ResponsibilityAssessment,
     *,
     proposal_id: str,
-) -> ListingIntegrityWorkProposal | None:
-    """Generate non-authority-bearing work proposals from current assessments."""
+) -> WorkProposal | None:
+    """Persist a bounded portable WorkProposal; proposal creation is not Work admission."""
 
-    if assessment.kind is IntegrityAssessmentKind.HEALTH_VERIFIED:
+    state = _assessment_state(assessment)
+    proposal = listing_integrity_proposal(assessment, state=state, now=assessment.assessed_at)
+    if proposal is None:
         return None
-    if assessment.kind is IntegrityAssessmentKind.INSUFFICIENT_EVIDENCE:
-        return None
-
-    if assessment.kind is IntegrityAssessmentKind.DRIFT_DETECTED:
-        work_kind = StewardWorkKind.READ_ONLY_DIAGNOSIS
-        request = StewardResourceRequest(api_calls=4, compute_units=2)
-        stop = ("drift-cause-explained", "repair-proposal-prepared")
-        escalation = ("external-listing-change-required",)
-    elif assessment.kind is IntegrityAssessmentKind.QUALIFICATION_NOT_CURRENT:
-        work_kind = StewardWorkKind.REQUALIFICATION_PREPARATION
-        request = StewardResourceRequest(api_calls=1, compute_units=2, human_attention_units=1)
-        stop = ("qualification-evidence-prepared",)
-        escalation = ("publication-qualification-decision-required",)
-    else:
-        work_kind = StewardWorkKind.READBACK_INVESTIGATION
-        request = StewardResourceRequest(api_calls=3, compute_units=1)
-        stop = ("readback-obtained", "missing-signal-cause-explained")
-        escalation = ("source-owner-investigation-required",)
-
-    return ListingIntegrityWorkProposal(
-        id=proposal_id,
-        mission_ref=assessment.mission_ref,
-        assessment_ref=assessment.id,
-        listing_ref=assessment.listing_ref,
-        work_kind=work_kind,
-        resource_request=request,
-        stop_conditions=stop,
-        escalation_conditions=escalation,
-    )
+    proposal = proposal.model_copy(update={"id": proposal_id})
+    return kernel.propose(proposal, now=assessment.assessed_at)
 
 
 def commit_steward_work(
-    proposal: ListingIntegrityWorkProposal,
+    kernel: ResponsibilityKernel,
+    proposal: WorkProposal,
     *,
     commitment_id: str,
-    envelope: StewardResourceEnvelope,
+    envelope: ResourceVector,
     committed_at: datetime,
-) -> ListingIntegrityCommitment:
-    """Commit bounded steward resources without minting effect authority."""
+) -> Commitment:
+    """Run the explicit priority/portfolio/reservation chain without minting authority."""
 
-    if not envelope.admits(proposal.resource_request):
+    if not proposal.requested_resources.fits_within(envelope):
         raise ValidationError("listing integrity proposal exceeds steward resource envelope")
-    return ListingIntegrityCommitment(
-        id=commitment_id,
-        mission_ref=proposal.mission_ref,
+
+    priority = PriorityJudgment(
+        id=f"priority:{proposal.id}",
         proposal_ref=proposal.id,
-        allocation=proposal.resource_request,
-        committed_at=committed_at,
+        dimensions=PriorityDimensions(
+            urgency=3,
+            impact=3,
+            risk=1,
+            reversibility=5,
+            confidence=4,
+            resource_cost=1,
+            human_attention_cost=0,
+        ),
+        policy_ref=_PORTFOLIO_POLICY,
+        admitted=True,
+        rationale="bounded Commerce steward work is admissible under the experiment policy",
     )
+    if kernel.journal.get(priority.id) is None:
+        kernel.record_priority_judgment(priority)
+
+    pool = ResourcePool(
+        id=_RESOURCE_POOL_ID,
+        pool_key="commerce-listing-integrity",
+        capacity=envelope,
+        policy_ref=_PORTFOLIO_POLICY,
+    )
+    existing_pool = kernel.journal.get(pool.id)
+    if existing_pool is None:
+        kernel.create_resource_pool(pool)
+    elif not isinstance(existing_pool, ResourcePool) or existing_pool.capacity != envelope:
+        raise ValidationError("steward resource pool already exists with a different envelope")
+
+    portfolio = PortfolioAdmissionDecision(
+        id=f"portfolio:{proposal.id}",
+        proposal_ref=proposal.id,
+        resource_pool_ref=pool.id,
+        policy_ref=_PORTFOLIO_POLICY,
+        admitted=True,
+        rationale="explicit resource envelope admits the proposal",
+    )
+    if kernel.journal.get(portfolio.id) is None:
+        kernel.record_portfolio_admission(portfolio)
+
+    reservation = ResourceReservation(
+        id=f"reservation:{proposal.id}",
+        responsibility_ref=proposal.responsibility_ref,
+        proposal_ref=proposal.id,
+        resource_pool_ref=pool.id,
+        resources=proposal.requested_resources,
+        reserved_at=committed_at,
+    )
+    if kernel.journal.get(reservation.id) is None:
+        kernel.reserve(reservation, now=committed_at)
+
+    commitment = Commitment(
+        id=commitment_id,
+        responsibility_ref=proposal.responsibility_ref,
+        responsibility_version=proposal.responsibility_version,
+        proposal_ref=proposal.id,
+        priority_judgment_ref=priority.id,
+        portfolio_admission_ref=portfolio.id,
+        reservation_ref=reservation.id,
+        resources=proposal.requested_resources,
+        committed_at=committed_at,
+        stop_conditions=list(proposal.stop_conditions),
+        escalation_conditions=list(proposal.escalation_conditions),
+    )
+    return kernel.commit(commitment, now=committed_at)
 
 
 def route_external_repair() -> EscalationRoute:
-    """External listing mutation stays on the existing human Decision/Authorization path."""
+    """External listing mutation remains on Commerce Decision/Authorization."""
 
     return EscalationRoute.HUMAN_DECISION_REQUIRED
 
 
 def complete_steward_work(
-    commitment: ListingIntegrityCommitment,
-) -> tuple[str, MissionStatus]:
-    """Return bounded task completion while keeping the standing mission active."""
+    kernel: ResponsibilityKernel,
+    commitment: Commitment,
+) -> tuple[str, ResponsibilityStatus]:
+    """Complete bounded Work without discharging the StandingResponsibility."""
 
-    return commitment.id, LISTING_INTEGRITY_MISSION.status
+    work = kernel.materialize_work(commitment.id)
+    if work.status != "completed":
+        kernel.store.save_work(work.model_copy(update={"status": "completed"}))
+    return work.id, kernel.current_status(commitment.responsibility_ref)
+
+
+__all__ = [
+    "EscalationRoute",
+    "IntegrityAssessmentKind",
+    "LISTING_INTEGRITY_MISSION",
+    "ListingIntegritySnapshot",
+    "MissionStatus",
+    "ShopifyReadback",
+    "StewardWorkKind",
+    "assess_listing_integrity",
+    "build_listing_integrity_snapshot",
+    "commit_steward_work",
+    "complete_steward_work",
+    "ensure_listing_integrity_responsibility",
+    "propose_listing_integrity_work",
+    "route_external_repair",
+]
