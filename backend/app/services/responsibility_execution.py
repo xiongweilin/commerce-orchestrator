@@ -27,6 +27,7 @@ from app.models.listing import ListingPublication
 from app.models.responsibility import ExecutionAuthorization, ResponsibilityBinding
 from app.models.workflow import WorkflowRun, WorkItem, WorkItemDecision
 from app.responsibility.store import CommerceResponsibilityStore
+from app.services.current_use_eligibility import compose_current_use_eligibility
 from app.services.publication_qualification import require_current_publication_qualification
 from app.services.responsibility import (
     authorization_allows_effect,
@@ -256,10 +257,15 @@ def _current_experience_use(
     admission = evaluate_experience_use_contract(store, requirement)
     if admission.requirement_digest != binding.requirement_digest:
         return False, "unavailable", historical.id, ("current-experience-requirement-drift",)
-    if admission.status != "allowed":
-        reasons = tuple(admission.reasons) or (f"current-experience-{admission.status}",)
-        return False, admission.status, historical.id, reasons
-    return True, admission.status, historical.id, ()
+    current_use = compose_current_use_eligibility(
+        db,
+        admission=admission,
+        requirement=requirement,
+    )
+    if not current_use.eligible:
+        reasons = current_use.reasons or (f"current-experience-{current_use.status}",)
+        return False, current_use.status, historical.id, reasons
+    return True, current_use.status, historical.id, ()
 
 
 def publication_dispatch_eligibility(
