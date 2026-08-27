@@ -1,6 +1,6 @@
 # Commerce Orchestrator — E-commerce Operations Control Tower
 
-[![CI](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ratiolin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
+[![CI](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
 
 A personal full-stack sandbox for durable, governed cross-system commerce workflows. It uses simulated data, a Shopify development store and an Odoo 19 sandbox. There are no real users, no real orders and no production-promotion path; the stack is kept running for engineering experiments and iteration.
 
@@ -39,6 +39,25 @@ Declared-scope bounded completion
 ```
 
 AI is still deliberately bounded: it may generate candidate suggestions, but it does not approve, mint execution authority, execute external effects or rewrite authoritative business facts.
+
+## Repository ownership boundary
+
+The repository consumes generic portable responsibility contracts but owns only its Commerce specialization and business/runtime boundary:
+
+```text
+portable-runtime/contracts
+= generic downstream portable product contracts consumed here
+
+commerce-orchestrator
+= Commerce specialization + business fact ownership mappings
+  + DBOS workflow/effect transaction boundary
+  + Shopify/Odoo adapters and reality verification
+
+DBOS
+= durable execution substrate used by this repository
+```
+
+`portable-runtime` does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The exact portable compatibility baseline remains the versioned pin in `docs/contracts/responsibility-compatibility.toml`; it is advanced only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
 
 ## Current design invariants
 
