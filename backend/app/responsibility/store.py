@@ -9,14 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
-
-from app.core.errors import ConflictError, ValidationError
-from app.models.responsibility import (
-    ResponsibilityEvent,
-    ResponsibilityKnowledgeProjection,
-    ResponsibilityRecord,
-)
 from portable_runtime.core.models import Event
 from portable_runtime.experience.historical_use import (
     HistoricalExperienceUse,
@@ -44,6 +36,14 @@ from portable_runtime.records.models import (
     RevisionRecord,
 )
 from portable_runtime.records.validation import validate_canonical_write, validate_record
+from sqlalchemy import select
+
+from app.core.errors import ConflictError, ValidationError
+from app.models.responsibility import (
+    ResponsibilityEvent,
+    ResponsibilityKnowledgeProjection,
+    ResponsibilityRecord,
+)
 
 _RECORD_TYPES: dict[str, type[BaseRecord]] = {
     "EvidenceArtifact": EvidenceArtifact,
@@ -72,7 +72,9 @@ def parse_portable_record(payload: dict[str, Any]) -> BaseRecord:
     base = BaseRecord.model_validate(payload)
     model_type = _RECORD_TYPES.get(base.record_type)
     if model_type is None:
-        raise ValidationError(f"unsupported portable responsibility record type: {base.record_type}")
+        raise ValidationError(
+            f"unsupported portable responsibility record type: {base.record_type}"
+        )
     return model_type.model_validate(payload)
 
 
@@ -106,7 +108,9 @@ class CommerceResponsibilityStore:
         if errors:
             raise ValidationError("invalid portable responsibility record: " + "; ".join(errors))
         if value.record_type not in _RECORD_TYPES:
-            raise ValidationError(f"unsupported portable responsibility record type: {value.record_type}")
+            raise ValidationError(
+                f"unsupported portable responsibility record type: {value.record_type}"
+            )
         self.db.add(
             ResponsibilityRecord(
                 id=value.id,
@@ -140,7 +144,9 @@ class CommerceResponsibilityStore:
         if value.lifecycle_status == "official":
             errors = validate_projection_for_official(value)
             if errors:
-                raise ValidationError("cannot persist official KnowledgeProjection: " + "; ".join(errors))
+                raise ValidationError(
+                    "cannot persist official KnowledgeProjection: " + "; ".join(errors)
+                )
         self.db.add(
             ResponsibilityKnowledgeProjection(
                 id=value.id,
