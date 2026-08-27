@@ -2,7 +2,7 @@ alignment_version = "commerce-responsibility-alignment-v1"
 portable_contract_catalog = "portable-runtime-contracts-v1"
 portable_contract_owner = "portable-runtime/contracts"
 reference_package = "portable-runtime"
-reference_revision = "6c5511d5babc5f6189fd359d45eeac5fdf5d8791"
+reference_revision = "53e7d3eabe5cfc01fff734825cb837e6a3cd8ed3"
 
 required_contracts = [
   "responsibility-separation-v1",
