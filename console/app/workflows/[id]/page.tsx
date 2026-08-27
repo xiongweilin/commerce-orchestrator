@@ -8,6 +8,7 @@ import StatusBadge from "@/components/StatusBadge";
 import ErrorBox from "@/components/ErrorBox";
 import RefreshButton from "@/components/RefreshButton";
 import DecisionForm from "@/components/DecisionForm";
+import ResponsibilityInspectorPanel from "@/components/ResponsibilityInspector";
 import { formatTime, jsonText } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -44,66 +45,6 @@ function EffectRow({ effect }: { effect: WorkflowEffect }) {
       <td>{effect.attempt ?? "—"}</td>
       <td title={effect.errorDetail ?? undefined}>{effect.errorDetail ?? "—"}</td>
     </tr>
-  );
-}
-
-function ResponsibilityCard({
-  responsibility,
-  error,
-}: {
-  responsibility: ResponsibilityInspector | null;
-  error: string | null;
-}) {
-  return (
-    <div className="card">
-      <h2>责任检查器（Responsibility Inspector）</h2>
-      <p className="muted">
-        只读投影，不承担 authority。Decision、Authorization、execution、reality 与 ConfirmedOutcome 分层展示。
-      </p>
-      {error ? <ErrorBox error={error} title="责任投影不可用" /> : null}
-      {responsibility ? (
-        <div className="kv-grid">
-          <details open>
-            <summary>
-              Decisions {responsibility.decisions.length} / Authorizations {responsibility.authorizations.length}
-            </summary>
-            <pre>
-              {jsonText({
-                decisions: responsibility.decisions,
-                authorizations: responsibility.authorizations,
-              })}
-            </pre>
-          </details>
-          <details open>
-            <summary>
-              Execution {responsibility.execution.length} / Reality {responsibility.reality.length} / Confirmed {responsibility.confirmedOutcomes.length}
-            </summary>
-            <pre>
-              {jsonText({
-                execution: responsibility.execution,
-                reality: responsibility.reality,
-                confirmedOutcomes: responsibility.confirmedOutcomes,
-              })}
-            </pre>
-          </details>
-          <details>
-            <summary>
-              Historical Experience {responsibility.historical.length} / Open responsibility {responsibility.openResponsibility.length}
-            </summary>
-            <pre>
-              {jsonText({
-                historical: responsibility.historical,
-                openResponsibility: responsibility.openResponsibility,
-              })}
-            </pre>
-          </details>
-          <details>
-            <summary>语义分离约束</summary>
-            <pre>{responsibility.shortcuts.join("\n")}</pre>
-          </details>
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -217,7 +158,12 @@ export default async function WorkflowDetailPage({
         </div>
       )}
 
-      <ResponsibilityCard responsibility={responsibility} error={responsibilityError} />
+      {responsibilityError ? (
+        <div className="card">
+          <ErrorBox error={responsibilityError} title="责任投影不可用" />
+        </div>
+      ) : null}
+      {responsibility ? <ResponsibilityInspectorPanel responsibility={responsibility} /> : null}
 
       <div className="card">
         <h2>事件时间线（{workflow.events.length}）</h2>

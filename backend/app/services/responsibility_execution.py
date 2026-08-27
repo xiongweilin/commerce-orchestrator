@@ -99,6 +99,24 @@ class ReturnAuthorizationSubject:
 
 
 @dataclass(frozen=True)
+class CommerceListingCurrentResponsibility:
+    """Read-only explanation of the same current gates used at dispatch."""
+
+    eligible: bool
+    status: str
+    authorization_current: bool
+    publication_qualification_current: bool
+    experience_required: bool
+    experience_status: str
+    portable_status: str
+    historical_use_ref: str | None
+    requirement_digest: str | None
+    applicable_obligation_refs: tuple[str, ...]
+    reasons: tuple[str, ...]
+    authority_bearing: bool = False
+
+
+@dataclass(frozen=True)
 class CommercePublicationDispatchEligibility:
     """Non-authority-bearing composition of independent publication gates."""
 
@@ -363,85 +381,22 @@ def _current_publication_qualification(
     return True, None
 
 
-def _current_experience_use(
-    db,
-    *,
-    run: WorkflowRun,
-    listing: ListingPublication,
-    subject: ListingAuthorizationSubject,
-) -> tuple[bool, str, str | None, tuple[str, ...]]:
-    required = listing_experience_required(db, listing)
-    if not required:
-        return True, "not-required", None, ()
-    bindings = list(
-        db.execute(
-            select(ResponsibilityBinding)
-            .where(
-                ResponsibilityBinding.workflow_ref == run.id,
-                ResponsibilityBinding.subject_type == subject.subject_type,
-                ResponsibilityBinding.subject_ref == subject.subject_ref,
-                ResponsibilityBinding.subject_version == subject.subject_version,
-            )
-            .order_by(ResponsibilityBinding.created_at.desc())
-        ).scalars()
-    )
-    if not bindings:
-        return False, "unavailable", None, ("historical-experience-binding-required",)
-    if len(bindings) != 1:
-        return False, "unavailable", None, ("ambiguous-historical-experience-binding",)
-    binding = bindings[0]
-    store = CommerceResponsibilityStore(db)
-    historical = get_historical_experience_use_contract(store, binding.judgment_ref)
-    if historical is None:
-        return (
-            False,
-            "unavailable",
-            binding.historical_use_ref,
-            ("historical-experience-use-missing",),
-        )
-    if (
-        historical.id != binding.historical_use_ref
-        or historical.requirement_digest != binding.requirement_digest
-        or historical.snapshot_digest != binding.snapshot_digest
-    ):
-        return (
-            False,
-            "unavailable",
-            binding.historical_use_ref,
-            ("historical-experience-binding-mismatch",),
-        )
-    try:
-        snapshot = json.loads(historical.snapshot_semantic_json)
-        requirement = ExperienceUseRequirementV1.model_validate(snapshot["requirement"])
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return False, "unavailable", historical.id, ("historical-experience-requirement-invalid",)
-    admission = evaluate_experience_use_contract(store, requirement)
-    if admission.requirement_digest != binding.requirement_digest:
-        return False, "unavailable", historical.id, ("current-experience-requirement-drift",)
-    current_use = compose_current_use_eligibility(
-        db,
-        admission=admission,
-        requirement=requirement,
-    )
-    if not current_use.eligible:
-        reasons = current_use.reasons or (f"current-experience-{current_use.status}",)
-        return False, current_use.status, historical.id, reasons
-    return True, current_use.status, historical.id, ()
-
-
-def publication_dispatch_eligibility(
+def explain_listing_current_responsibility(
     db,
     *,
     run: WorkflowRun,
     item: WorkItem,
-    authorization: ExecutionAuthorization,
-    operation: str,
-) -> CommercePublicationDispatchEligibility:
+    authorization: ExecutionAuthorization | None,
+    operation: str = LISTING_PUBLICATION_EFFECT,
+) -> CommerceListingCurrentResponsibility:
+    """Explain current publication eligibility without minting or inferring authority."""
+
     subject = listing_authorization_subject(db, item)
     listing = _listing_for_item(db, item)
     reasons: list[str] = []
-    authorization_current = (
-        authorization.workflow_ref == run.id
+    authorization_current = bool(
+        authorization is not None
+        and authorization.workflow_ref == run.id
         and authorization.policy_version == subject.policy_version
         and authorization_allows_effect(
             authorization,
@@ -455,30 +410,141 @@ def publication_dispatch_eligibility(
     )
     if not authorization_current:
         reasons.append("execution-authorization-not-current")
+
     qualification_current, qualification_reason = _current_publication_qualification(db, listing)
     if not qualification_current:
         reasons.append(f"publication-qualification:{qualification_reason}")
+
     experience_required = listing_experience_required(db, listing)
-    (
-        experience_current,
-        experience_status,
-        historical_ref,
-        experience_reasons,
-    ) = _current_experience_use(
-        db,
-        run=run,
-        listing=listing,
-        subject=subject,
-    )
+    experience_eligible = True
+    experience_status = "not-required"
+    portable_status = "not-required"
+    historical_ref: str | None = None
+    requirement_digest: str | None = None
+    applicable_obligation_refs: tuple[str, ...] = ()
+    experience_reasons: tuple[str, ...] = ()
+
+    if experience_required:
+        bindings = list(
+            db.execute(
+                select(ResponsibilityBinding)
+                .where(
+                    ResponsibilityBinding.workflow_ref == run.id,
+                    ResponsibilityBinding.subject_type == subject.subject_type,
+                    ResponsibilityBinding.subject_ref == subject.subject_ref,
+                    ResponsibilityBinding.subject_version == subject.subject_version,
+                )
+                .order_by(ResponsibilityBinding.created_at.desc())
+            ).scalars()
+        )
+        if not bindings:
+            experience_eligible = False
+            experience_status = "unavailable"
+            portable_status = "unavailable"
+            experience_reasons = ("historical-experience-binding-required",)
+        elif len(bindings) != 1:
+            experience_eligible = False
+            experience_status = "unavailable"
+            portable_status = "unavailable"
+            experience_reasons = ("ambiguous-historical-experience-binding",)
+        else:
+            binding = bindings[0]
+            historical_ref = binding.historical_use_ref
+            requirement_digest = binding.requirement_digest
+            store = CommerceResponsibilityStore(db)
+            historical = get_historical_experience_use_contract(store, binding.judgment_ref)
+            if historical is None:
+                experience_eligible = False
+                experience_status = "unavailable"
+                portable_status = "unavailable"
+                experience_reasons = ("historical-experience-use-missing",)
+            elif (
+                historical.id != binding.historical_use_ref
+                or historical.requirement_digest != binding.requirement_digest
+                or historical.snapshot_digest != binding.snapshot_digest
+            ):
+                experience_eligible = False
+                experience_status = "unavailable"
+                portable_status = "unavailable"
+                experience_reasons = ("historical-experience-binding-mismatch",)
+            else:
+                try:
+                    snapshot = json.loads(historical.snapshot_semantic_json)
+                    requirement = ExperienceUseRequirementV1.model_validate(snapshot["requirement"])
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    experience_eligible = False
+                    experience_status = "unavailable"
+                    portable_status = "unavailable"
+                    experience_reasons = ("historical-experience-requirement-invalid",)
+                else:
+                    admission = evaluate_experience_use_contract(store, requirement)
+                    if admission.requirement_digest != binding.requirement_digest:
+                        experience_eligible = False
+                        experience_status = "unavailable"
+                        portable_status = admission.status
+                        experience_reasons = ("current-experience-requirement-drift",)
+                    else:
+                        current_use = compose_current_use_eligibility(
+                            db,
+                            admission=admission,
+                            requirement=requirement,
+                        )
+                        experience_eligible = current_use.eligible
+                        experience_status = current_use.status
+                        portable_status = current_use.portable_status
+                        applicable_obligation_refs = current_use.applicable_obligation_refs
+                        if not current_use.eligible:
+                            experience_reasons = current_use.reasons or (
+                                f"current-experience-{current_use.status}",
+                            )
+
     reasons.extend(f"experience:{reason}" for reason in experience_reasons)
-    return CommercePublicationDispatchEligibility(
-        eligible=authorization_current and qualification_current and experience_current,
+    eligible = authorization_current and qualification_current and experience_eligible
+    if eligible:
+        status = "allowed"
+    elif experience_required and experience_status not in {"allowed", "not-required"}:
+        status = experience_status
+    else:
+        status = "blocked"
+
+    return CommerceListingCurrentResponsibility(
+        eligible=eligible,
+        status=status,
         authorization_current=authorization_current,
         publication_qualification_current=qualification_current,
         experience_required=experience_required,
         experience_status=experience_status,
+        portable_status=portable_status,
         historical_use_ref=historical_ref,
+        requirement_digest=requirement_digest,
+        applicable_obligation_refs=applicable_obligation_refs,
         reasons=tuple(reasons),
+    )
+
+
+def publication_dispatch_eligibility(
+    db,
+    *,
+    run: WorkflowRun,
+    item: WorkItem,
+    authorization: ExecutionAuthorization,
+    operation: str,
+) -> CommercePublicationDispatchEligibility:
+    explanation = explain_listing_current_responsibility(
+        db,
+        run=run,
+        item=item,
+        authorization=authorization,
+        operation=operation,
+    )
+    return CommercePublicationDispatchEligibility(
+        eligible=explanation.eligible,
+        authorization_current=explanation.authorization_current,
+        publication_qualification_current=explanation.publication_qualification_current,
+        experience_required=explanation.experience_required,
+        experience_status=explanation.experience_status,
+        historical_use_ref=explanation.historical_use_ref,
+        reasons=explanation.reasons,
     )
 
 
@@ -647,6 +713,7 @@ def resolve_effect_authorization(
 
 __all__ = [
     "AuthorizationProfileName",
+    "CommerceListingCurrentResponsibility",
     "CommercePublicationDispatchEligibility",
     "LISTING_PUBLICATION_EFFECT",
     "LISTING_PUBLICATION_WORKFLOW",
@@ -656,6 +723,7 @@ __all__ = [
     "ReturnAuthorizationSubject",
     "WorkItemAuthorizationProfile",
     "authorization_profile_for_work_item",
+    "explain_listing_current_responsibility",
     "issue_listing_execution_authorization",
     "issue_work_item_execution_authorization",
     "listing_authorization_subject",
