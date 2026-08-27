@@ -12,7 +12,7 @@ import enum
 import uuid
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import utc_now
@@ -155,7 +155,9 @@ class ResponsibilityObligation(UUIDPkMixin, Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
-    discharged_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    discharged_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     recorded_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("user.id"), nullable=False, index=True
     )
