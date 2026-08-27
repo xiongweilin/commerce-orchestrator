@@ -19,7 +19,7 @@ import uuid
 import pytest
 
 from app.models.catalog import CatalogRevision, CatalogRevisionStatus
-from app.models.effect import EffectLedgerEntry
+from app.models.effect import EffectLedgerEntry, EffectStatus
 from app.models.listing import ListingPublication, ListingStatus
 from app.models.order import SalesOrder, SalesOrderStatus
 from app.models.procurement import ProcurementOrder, ProcurementStatus
@@ -75,14 +75,30 @@ def _make_order(db, run: WorkflowRun, *, shopify_id: str = "SO-1") -> SalesOrder
 
 
 def _effect(db, run: WorkflowRun, operation: str) -> EffectLedgerEntry:
-    entry = record_effect(
-        db,
-        intent_id=uuid.uuid4(),
-        target_system="odoo",
-        operation=operation,
-        idempotency_key=f"{run.id}:{operation}",
-        approval_ref=run.id,
-    )
+    # This module tests adapter parameter/remote-id chains, not C18 authority.
+    # Its pre-C18 return-to-refund fixtures are represented as already-existing
+    # unbound ledger rows so the new planning gate is not bypassed for new writes.
+    if run.workflow_type == "return-to-refund" and operation.startswith("credit_note_"):
+        entry = EffectLedgerEntry(
+            intent_id=uuid.uuid4(),
+            target_system="odoo",
+            operation=operation,
+            idempotency_key=f"{run.id}:{operation}",
+            approval_ref=run.id,
+            workflow_ref=run.id,
+            authorization_ref=None,
+            status=EffectStatus.PLANNED,
+        )
+        db.add(entry)
+    else:
+        entry = record_effect(
+            db,
+            intent_id=uuid.uuid4(),
+            target_system="odoo",
+            operation=operation,
+            idempotency_key=f"{run.id}:{operation}",
+            approval_ref=run.id,
+        )
     db.flush()
     return entry
 
