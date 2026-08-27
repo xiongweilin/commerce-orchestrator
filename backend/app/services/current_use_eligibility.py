@@ -39,7 +39,10 @@ def _scope_applies(obligation_scope: Mapping[str, Any], use_scope: Mapping[str, 
 
     if not obligation_scope:
         return True
-    return all(key in use_scope and use_scope[key] == value for key, value in obligation_scope.items())
+    return all(
+        key in use_scope and use_scope[key] == value
+        for key, value in obligation_scope.items()
+    )
 
 
 def current_open_obligations_for_use(
