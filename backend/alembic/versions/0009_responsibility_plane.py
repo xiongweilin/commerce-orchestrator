@@ -200,22 +200,24 @@ def upgrade() -> None:
         ["recorded_by_user_id"],
     )
 
-    op.add_column("effect_ledger_entry", sa.Column("workflow_ref", sa.Uuid(), nullable=True))
-    op.add_column("effect_ledger_entry", sa.Column("authorization_ref", sa.Uuid(), nullable=True))
-    op.create_foreign_key(
-        "fk_effect_ledger_entry_workflow_ref_workflow_run",
-        "effect_ledger_entry",
-        "workflow_run",
-        ["workflow_ref"],
-        ["id"],
-    )
-    op.create_foreign_key(
-        "fk_effect_ledger_entry_authorization_ref_execution_authorization",
-        "effect_ledger_entry",
-        "execution_authorization",
-        ["authorization_ref"],
-        ["id"],
-    )
+    # Batch operations preserve PostgreSQL behavior while making the migration
+    # executable in SQLite-backed migration tests, where ALTER CONSTRAINT is not
+    # supported directly.
+    with op.batch_alter_table("effect_ledger_entry") as batch_op:
+        batch_op.add_column(sa.Column("workflow_ref", sa.Uuid(), nullable=True))
+        batch_op.add_column(sa.Column("authorization_ref", sa.Uuid(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_effect_ledger_entry_workflow_ref_workflow_run",
+            "workflow_run",
+            ["workflow_ref"],
+            ["id"],
+        )
+        batch_op.create_foreign_key(
+            "fk_effect_ledger_entry_authorization_ref_execution_authorization",
+            "execution_authorization",
+            ["authorization_ref"],
+            ["id"],
+        )
     op.create_index("ix_effect_ledger_entry_workflow_ref", "effect_ledger_entry", ["workflow_ref"])
     op.create_index(
         "ix_effect_ledger_entry_authorization_ref",
@@ -223,17 +225,14 @@ def upgrade() -> None:
         ["authorization_ref"],
     )
 
-    op.add_column(
-        "publication_qualification_assessment",
-        sa.Column("assessed_by_user_id", sa.Uuid(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_publication_qualification_assessment_assessed_by_user_id_user",
-        "publication_qualification_assessment",
-        "user",
-        ["assessed_by_user_id"],
-        ["id"],
-    )
+    with op.batch_alter_table("publication_qualification_assessment") as batch_op:
+        batch_op.add_column(sa.Column("assessed_by_user_id", sa.Uuid(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_publication_qualification_assessment_assessed_by_user_id_user",
+            "user",
+            ["assessed_by_user_id"],
+            ["id"],
+        )
     op.create_index(
         "ix_publication_qualification_assessment_assessed_by_user_id",
         "publication_qualification_assessment",
@@ -246,27 +245,26 @@ def downgrade() -> None:
         "ix_publication_qualification_assessment_assessed_by_user_id",
         table_name="publication_qualification_assessment",
     )
-    op.drop_constraint(
-        "fk_publication_qualification_assessment_assessed_by_user_id_user",
-        "publication_qualification_assessment",
-        type_="foreignkey",
-    )
-    op.drop_column("publication_qualification_assessment", "assessed_by_user_id")
+    with op.batch_alter_table("publication_qualification_assessment") as batch_op:
+        batch_op.drop_constraint(
+            "fk_publication_qualification_assessment_assessed_by_user_id_user",
+            type_="foreignkey",
+        )
+        batch_op.drop_column("assessed_by_user_id")
 
     op.drop_index("ix_effect_ledger_entry_authorization_ref", table_name="effect_ledger_entry")
     op.drop_index("ix_effect_ledger_entry_workflow_ref", table_name="effect_ledger_entry")
-    op.drop_constraint(
-        "fk_effect_ledger_entry_authorization_ref_execution_authorization",
-        "effect_ledger_entry",
-        type_="foreignkey",
-    )
-    op.drop_constraint(
-        "fk_effect_ledger_entry_workflow_ref_workflow_run",
-        "effect_ledger_entry",
-        type_="foreignkey",
-    )
-    op.drop_column("effect_ledger_entry", "authorization_ref")
-    op.drop_column("effect_ledger_entry", "workflow_ref")
+    with op.batch_alter_table("effect_ledger_entry") as batch_op:
+        batch_op.drop_constraint(
+            "fk_effect_ledger_entry_authorization_ref_execution_authorization",
+            type_="foreignkey",
+        )
+        batch_op.drop_constraint(
+            "fk_effect_ledger_entry_workflow_ref_workflow_run",
+            type_="foreignkey",
+        )
+        batch_op.drop_column("authorization_ref")
+        batch_op.drop_column("workflow_ref")
 
     op.drop_index(
         "ix_responsibility_obligation_recorded_by_user_id",
