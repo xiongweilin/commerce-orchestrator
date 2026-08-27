@@ -431,9 +431,7 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
             explain_item = listing_items[0]
         else:
             bound_items = [
-                item
-                for item in listing_items
-                if (item.payload_json or {}).get("authorization_ref")
+                item for item in listing_items if (item.payload_json or {}).get("authorization_ref")
             ]
             if len(bound_items) == 1:
                 explain_item = bound_items[0]
@@ -498,9 +496,7 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
                     "portableStatus": explanation.portable_status,
                     "historicalUseRef": explanation.historical_use_ref,
                     "requirementDigest": explanation.requirement_digest,
-                    "applicableObligationRefs": list(
-                        explanation.applicable_obligation_refs
-                    ),
+                    "applicableObligationRefs": list(explanation.applicable_obligation_refs),
                     "reasons": list(explanation.reasons),
                     "authorityBearing": False,
                 }
