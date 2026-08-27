@@ -212,7 +212,6 @@ def _bind_listing_experience(db, run, listing):
         lifecycle_status="current",
         metadata={"semantic_role": "task-domain-judgment"},
     )
-    store.save_record(judgment)
     historical = commit_historical_experience_use_contract(
         store,
         HistoricalExperienceUseCommitV1(
