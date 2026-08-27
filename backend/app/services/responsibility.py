@@ -322,9 +322,7 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
     )
     authorizations = list(
         db.execute(
-            select(ExecutionAuthorization).where(
-                ExecutionAuthorization.workflow_ref == workflow.id
-            )
+            select(ExecutionAuthorization).where(ExecutionAuthorization.workflow_ref == workflow.id)
         ).scalars()
     )
     effects = list(
