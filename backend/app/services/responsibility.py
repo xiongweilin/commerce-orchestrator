@@ -504,7 +504,7 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
     obligation_rows = [
         {
             "id": str(row.id),
-            "status": row.status.value,
+            "status": row.status.value if hasattr(row.status, "value") else str(row.status),
             "createdAt": row.created_at.isoformat(),
             "dischargedAt": _iso(row.discharged_at),
             "recordedByUserId": str(row.recorded_by_user_id),
