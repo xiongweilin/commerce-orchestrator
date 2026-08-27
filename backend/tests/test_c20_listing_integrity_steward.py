@@ -1,15 +1,20 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from portable_runtime.responsibility import (
+    EffectClass,
+    ResourceVector,
+    ResponsibilityKernel,
+    ResponsibilityStatus,
+)
+from portable_runtime.stores.memory import InMemoryStateStore
 
 from app.core.errors import ValidationError
 from app.experiments.listing_integrity_steward import (
     LISTING_INTEGRITY_MISSION,
     EscalationRoute,
     IntegrityAssessmentKind,
-    MissionStatus,
     ShopifyReadback,
-    StewardResourceEnvelope,
     StewardWorkKind,
     assess_listing_integrity,
     build_listing_integrity_snapshot,
@@ -22,6 +27,10 @@ from app.models.catalog import CatalogRevision, CatalogRevisionStatus
 from app.models.listing import ListingPublication, ListingStatus
 from app.models.publication_qualification import PublicationQualificationStatus
 from app.services.publication_qualification import append_publication_qualification_assessment
+
+
+def _kernel() -> ResponsibilityKernel:
+    return ResponsibilityKernel(InMemoryStateStore())
 
 
 def _listing(db):
@@ -80,6 +89,7 @@ def _readback(now: datetime, *, title: str = "C20 title") -> ShopifyReadback:
 
 
 def test_current_readback_can_verify_health_without_creating_work(db):
+    kernel = _kernel()
     _revision, listing = _listing(db)
     now = datetime(2026, 8, 27, 3, 0, tzinfo=timezone.utc)
     snapshot = build_listing_integrity_snapshot(
@@ -88,14 +98,28 @@ def test_current_readback_can_verify_health_without_creating_work(db):
         observed_at=now,
         readback=_readback(now),
     )
-    assessment = assess_listing_integrity(snapshot, assessment_id="assessment:c20:healthy")
+    assessment = assess_listing_integrity(
+        kernel,
+        snapshot,
+        assessment_id="assessment:c20:healthy",
+    )
 
-    assert assessment.kind is IntegrityAssessmentKind.HEALTH_VERIFIED
-    assert assessment.authority_bearing is False
-    assert propose_listing_integrity_work(assessment, proposal_id="proposal:c20:none") is None
+    assert assessment.assessment_kind == "listing-integrity:health-verified"
+    assert (
+        propose_listing_integrity_work(
+            kernel,
+            assessment,
+            proposal_id="proposal:c20:none",
+        )
+        is None
+    )
+    assert kernel.store.list_work() == []
+    assert kernel.store.list_authorizations() == []
+    assert kernel.current_status(LISTING_INTEGRITY_MISSION.id) is ResponsibilityStatus.ACTIVE
 
 
 def test_drift_produces_diagnosis_proposal_not_external_effect_authority(db):
+    kernel = _kernel()
     _revision, listing = _listing(db)
     now = datetime(2026, 8, 27, 3, 0, tzinfo=timezone.utc)
     snapshot = build_listing_integrity_snapshot(
@@ -104,18 +128,31 @@ def test_drift_produces_diagnosis_proposal_not_external_effect_authority(db):
         observed_at=now,
         readback=_readback(now, title="drifted title"),
     )
-    assessment = assess_listing_integrity(snapshot, assessment_id="assessment:c20:drift")
-    proposal = propose_listing_integrity_work(assessment, proposal_id="proposal:c20:drift")
+    assessment = assess_listing_integrity(
+        kernel,
+        snapshot,
+        assessment_id="assessment:c20:drift",
+    )
+    proposal = propose_listing_integrity_work(
+        kernel,
+        assessment,
+        proposal_id="proposal:c20:drift",
+    )
 
-    assert assessment.kind is IntegrityAssessmentKind.DRIFT_DETECTED
-    assert assessment.differences["title"] == ("C20 title", "drifted title")
+    assert assessment.assessment_kind == "listing-integrity:drift-detected"
+    assert snapshot.expected_fields["title"] == "C20 title"
+    assert snapshot.observed_fields is not None
+    assert snapshot.observed_fields["title"] == "drifted title"
     assert proposal is not None
-    assert proposal.work_kind is StewardWorkKind.READ_ONLY_DIAGNOSIS
-    assert proposal.authority_bearing is False
+    assert proposal.work_kind == StewardWorkKind.READ_ONLY_DIAGNOSIS.value
+    assert proposal.effect_class is EffectClass.READ_ONLY
+    assert kernel.store.list_work() == []
+    assert kernel.store.list_authorizations() == []
     assert route_external_repair() is EscalationRoute.HUMAN_DECISION_REQUIRED
 
 
 def test_stale_qualification_yields_requalification_preparation_not_qualification(db):
+    kernel = _kernel()
     revision, listing = _listing(db)
     now = datetime(2026, 8, 27, 3, 0, tzinfo=timezone.utc)
 
@@ -135,17 +172,27 @@ def test_stale_qualification_yields_requalification_preparation_not_qualificatio
             evidence_ref="shopify-readback:stale-qualification",
         ),
     )
-    assessment = assess_listing_integrity(snapshot, assessment_id="assessment:c20:stale")
-    proposal = propose_listing_integrity_work(assessment, proposal_id="proposal:c20:requalify")
+    assessment = assess_listing_integrity(
+        kernel,
+        snapshot,
+        assessment_id="assessment:c20:stale",
+    )
+    proposal = propose_listing_integrity_work(
+        kernel,
+        assessment,
+        proposal_id="proposal:c20:requalify",
+    )
 
     assert snapshot.qualification_current is False
-    assert assessment.kind is IntegrityAssessmentKind.QUALIFICATION_NOT_CURRENT
+    assert assessment.assessment_kind == "listing-integrity:qualification-not-current"
     assert proposal is not None
-    assert proposal.work_kind is StewardWorkKind.REQUALIFICATION_PREPARATION
-    assert proposal.authority_bearing is False
+    assert proposal.work_kind == StewardWorkKind.REQUALIFICATION_PREPARATION.value
+    assert proposal.effect_class is EffectClass.READ_ONLY
+    assert kernel.store.list_authorizations() == []
 
 
 def test_no_observed_failure_is_not_verified_health(db):
+    kernel = _kernel()
     _revision, listing = _listing(db)
     now = datetime(2026, 8, 27, 3, 0, tzinfo=timezone.utc)
 
@@ -157,12 +204,14 @@ def test_no_observed_failure_is_not_verified_health(db):
         readback_expected_by=now + timedelta(minutes=5),
     )
     before_assessment = assess_listing_integrity(
+        kernel,
         before_due,
         assessment_id="assessment:c20:no-evidence",
     )
-    assert before_assessment.kind is IntegrityAssessmentKind.INSUFFICIENT_EVIDENCE
+    assert before_assessment.assessment_kind == "listing-integrity:insufficient-evidence"
     assert (
         propose_listing_integrity_work(
+            kernel,
             before_assessment,
             proposal_id="proposal:c20:no-evidence",
         )
@@ -177,19 +226,23 @@ def test_no_observed_failure_is_not_verified_health(db):
         readback_expected_by=now + timedelta(minutes=5),
     )
     after_assessment = assess_listing_integrity(
+        kernel,
         after_due,
         assessment_id="assessment:c20:missing",
     )
     proposal = propose_listing_integrity_work(
+        kernel,
         after_assessment,
         proposal_id="proposal:c20:readback",
     )
-    assert after_assessment.kind is IntegrityAssessmentKind.EXPECTED_READBACK_MISSING
+    assert after_assessment.assessment_kind == "listing-integrity:expected-readback-missing"
     assert proposal is not None
-    assert proposal.work_kind is StewardWorkKind.READBACK_INVESTIGATION
+    assert proposal.work_kind == StewardWorkKind.READ_ONLY_DIAGNOSIS.value
+    assert proposal.effect_class is EffectClass.READ_ONLY
 
 
 def test_commitment_is_resource_bounded_and_does_not_mint_execution_authorization(db):
+    kernel = _kernel()
     _revision, listing = _listing(db)
     now = datetime(2026, 8, 27, 3, 0, tzinfo=timezone.utc)
     snapshot = build_listing_integrity_snapshot(
@@ -198,37 +251,50 @@ def test_commitment_is_resource_bounded_and_does_not_mint_execution_authorizatio
         observed_at=now,
         readback=_readback(now, title="drifted title"),
     )
-    assessment = assess_listing_integrity(snapshot, assessment_id="assessment:c20:budget")
-    proposal = propose_listing_integrity_work(assessment, proposal_id="proposal:c20:budget")
+    assessment = assess_listing_integrity(
+        kernel,
+        snapshot,
+        assessment_id="assessment:c20:budget",
+    )
+    proposal = propose_listing_integrity_work(
+        kernel,
+        assessment,
+        proposal_id="proposal:c20:budget",
+    )
     assert proposal is not None
 
     with pytest.raises(ValidationError, match="resource envelope"):
         commit_steward_work(
+            kernel,
             proposal,
             commitment_id="commitment:c20:too-small",
-            envelope=StewardResourceEnvelope(
+            envelope=ResourceVector(
                 api_calls=1,
                 compute_units=1,
                 human_attention_units=0,
+                concurrency_slots=0,
             ),
             committed_at=now,
         )
 
     commitment = commit_steward_work(
+        kernel,
         proposal,
         commitment_id="commitment:c20:bounded",
-        envelope=StewardResourceEnvelope(
+        envelope=ResourceVector(
             api_calls=10,
             compute_units=10,
             human_attention_units=1,
+            concurrency_slots=2,
         ),
         committed_at=now,
     )
-    assert commitment.authority_bearing is False
-    assert commitment.execution_authorization_ref is None
+    assert commitment.object_type == "Commitment"
+    assert kernel.store.list_authorizations() == []
 
 
 def test_completing_steward_work_does_not_discharge_listing_integrity_mission(db):
+    kernel = _kernel()
     _revision, listing = _listing(db)
     now = datetime(2026, 8, 27, 3, 0, tzinfo=timezone.utc)
     snapshot = build_listing_integrity_snapshot(
@@ -237,21 +303,43 @@ def test_completing_steward_work_does_not_discharge_listing_integrity_mission(db
         observed_at=now,
         readback=_readback(now, title="drifted title"),
     )
-    assessment = assess_listing_integrity(snapshot, assessment_id="assessment:c20:complete")
-    proposal = propose_listing_integrity_work(assessment, proposal_id="proposal:c20:complete")
+    assessment = assess_listing_integrity(
+        kernel,
+        snapshot,
+        assessment_id="assessment:c20:complete",
+    )
+    proposal = propose_listing_integrity_work(
+        kernel,
+        assessment,
+        proposal_id="proposal:c20:complete",
+    )
     assert proposal is not None
     commitment = commit_steward_work(
+        kernel,
         proposal,
         commitment_id="commitment:c20:complete",
-        envelope=StewardResourceEnvelope(
+        envelope=ResourceVector(
             api_calls=10,
             compute_units=10,
             human_attention_units=1,
+            concurrency_slots=2,
         ),
         committed_at=now,
     )
-    completed_ref, mission_status = complete_steward_work(commitment)
+    completed_ref, mission_status = complete_steward_work(kernel, commitment)
 
-    assert completed_ref == commitment.id
-    assert mission_status is MissionStatus.ACTIVE
-    assert LISTING_INTEGRITY_MISSION.status is MissionStatus.ACTIVE
+    completed_work = kernel.store.get_work(completed_ref)
+    assert completed_work is not None
+    assert completed_work.status == "completed"
+    assert mission_status is ResponsibilityStatus.ACTIVE
+    assert kernel.current_status(LISTING_INTEGRITY_MISSION.id) is ResponsibilityStatus.ACTIVE
+    assert kernel.store.list_authorizations() == []
+
+
+def test_portable_mission_identity_is_not_a_model_session_or_authority() -> None:
+    assert LISTING_INTEGRITY_MISSION.object_type == "StandingResponsibility"
+    assert not hasattr(LISTING_INTEGRITY_MISSION, "provider_id")
+    assert not hasattr(LISTING_INTEGRITY_MISSION, "model_id")
+    assert not hasattr(LISTING_INTEGRITY_MISSION, "session_id")
+    assert not hasattr(LISTING_INTEGRITY_MISSION, "execution_authorization")
+    assert IntegrityAssessmentKind.HEALTH_VERIFIED.value == "health-verified"
