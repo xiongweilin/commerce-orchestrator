@@ -5,16 +5,22 @@ import { useRouter } from "next/navigation";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
 import type { WorkItemDecisionResponse } from "@/lib/types";
 
+interface AuthorizedDecisionResponse extends WorkItemDecisionResponse {
+  authorizationId: string;
+}
+
 /**
- * 工作项决策表单：批准 / 拒绝 + 原因。
- * POST /v1/work-items/{id}/decisions，成功后刷新页面（列表项消失、工作流状态更新）。
+ * 工作项决策表单。listing-publication 的批准动作显式调用 authorized-decision；
+ * 普通 Decision 不会自动产生 ExecutionAuthorization。
  */
 export default function DecisionForm({
   workItemId,
   expectedWorkflowVersion,
+  requiresExecutionAuthorization = false,
 }: {
   workItemId: string;
   expectedWorkflowVersion: number;
+  requiresExecutionAuthorization?: boolean;
 }) {
   const router = useRouter();
   const [decision, setDecision] = useState<"approve" | "reject">("approve");
@@ -29,13 +35,29 @@ export default function DecisionForm({
     setError(null);
     setSuccess(null);
     try {
-      const result = await api.post<WorkItemDecisionResponse>(`/v1/work-items/${workItemId}/decisions`, {
-        decision,
-        reason: reason.trim() ? reason.trim() : undefined,
-        expectedWorkflowVersion,
-      }, { idempotencyKey: newIdempotencyKey() });
-      setSuccess(`已${decision === "approve" ? "批准" : "拒绝"}（状态：${result.status}）`);
-      // 稍等片刻让用户看到结果提示，再刷新列表
+      const authorized = requiresExecutionAuthorization && decision === "approve";
+      const path = authorized
+        ? `/v1/work-items/${workItemId}/authorized-decisions`
+        : `/v1/work-items/${workItemId}/decisions`;
+      const body = authorized
+        ? {
+            decision: "approve" as const,
+            reason: reason.trim() ? reason.trim() : undefined,
+            expectedWorkflowVersion,
+            scope: { purpose: "publish", channel: "shopify" },
+          }
+        : {
+            decision,
+            reason: reason.trim() ? reason.trim() : undefined,
+            expectedWorkflowVersion,
+          };
+      const result = await api.post<WorkItemDecisionResponse | AuthorizedDecisionResponse>(
+        path,
+        body,
+        { idempotencyKey: newIdempotencyKey() },
+      );
+      const authId = "authorizationId" in result ? `，授权 ${result.authorizationId}` : "";
+      setSuccess(`已${decision === "approve" ? "批准" : "拒绝"}（状态：${result.status}${authId}）`);
       window.setTimeout(() => router.refresh(), 700);
     } catch (err) {
       if (err instanceof ApiError && err.code === "workflow_version_conflict") {
@@ -62,7 +84,7 @@ export default function DecisionForm({
             checked={decision === "approve"}
             onChange={() => setDecision("approve")}
           />
-          批准
+          {requiresExecutionAuthorization ? "批准并显式授权发布" : "批准"}
         </label>
         <label className="radio">
           <input
@@ -75,6 +97,11 @@ export default function DecisionForm({
           拒绝
         </label>
       </div>
+      {requiresExecutionAuthorization && decision === "approve" ? (
+        <p className="muted">
+          此动作会同时记录 Decision 与独立的 exact-scope ExecutionAuthorization；二者不是同一事实。
+        </p>
+      ) : null}
       <textarea
         className="input textarea"
         placeholder="原因（可选）"

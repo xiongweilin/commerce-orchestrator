@@ -51,6 +51,7 @@ def append_publication_qualification_assessment(
     adapter_version: str,
     environment_ref: str,
     assessment_status: PublicationQualificationStatus | str,
+    assessed_by_user_id: uuid.UUID | None = None,
     evidence_refs: Iterable[str] = (),
     source_revision_refs: Iterable[str] = (),
 ) -> PublicationQualificationAssessment:
@@ -76,6 +77,7 @@ def append_publication_qualification_assessment(
         environment_ref=_required_text(environment_ref, "environment_ref"),
         assessment_status=status,
         evidence_refs=evidence,
+        assessed_by_user_id=assessed_by_user_id,
     )
     db.add(assessment)
     db.flush()

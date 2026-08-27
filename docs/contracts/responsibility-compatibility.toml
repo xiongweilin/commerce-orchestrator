@@ -1,0 +1,29 @@
+alignment_version = "commerce-responsibility-alignment-v1"
+portable_contract_catalog = "portable-runtime-contracts-v1"
+portable_contract_owner = "portable-runtime/contracts"
+reference_package = "portable-runtime"
+reference_revision = "53e7d3eabe5cfc01fff734825cb837e6a3cd8ed3"
+
+required_contracts = [
+  "responsibility-separation-v1",
+  "responsibility-record-plane-1.0",
+  "experience-use-requirement-v1",
+  "experience-use-admission-v1",
+  "resolved-experience-use-snapshot-v1",
+  "historical-experience-use-v1",
+]
+
+[boundaries]
+dbos_is_execution_substrate = true
+portable_runtime_replaces_dbos = false
+commerce_domain_fact_ownership_changes = false
+typescript_mints_authority = false
+console_mints_authority = false
+
+[commerce_specializations]
+work_item_decision = "Decision"
+publication_qualification = "commerce-current-publication-qualification"
+effect_ledger = "execution-fact-ledger"
+effect_realization = "reality-verification-assessment"
+reconciliation_resolution = "recovery-disposition-and-verification"
+workflow_completion = "declared-scope-bounded-completion"

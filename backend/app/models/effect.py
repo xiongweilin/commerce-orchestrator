@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Enum, Index, Integer, String, Text, Uuid
+from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPkMixin, VersionMixin, enum_values
@@ -24,9 +24,10 @@ class EffectStatus(enum.StrEnum):
 class EffectLedgerEntry(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     """One row per intended external side effect (system.operation).
 
-    ``operation`` holds the operation name without the system prefix; combine
-    with ``target_system`` to form ``EFFECT_OPS`` entries from
-    ``app.schemas.events`` (e.g. target_system="shopify", operation="product_publish").
+    ``approval_ref`` is a legacy provenance column retained for compatibility;
+    it MUST NOT be interpreted as execution authority.  New responsibility-aware
+    writes use ``workflow_ref`` for orchestration provenance and
+    ``authorization_ref`` for explicit execution authority.
     """
 
     __tablename__ = "effect_ledger_entry"
@@ -45,6 +46,12 @@ class EffectLedgerEntry(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     approval_ref: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    workflow_ref: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_run.id"), nullable=True, index=True
+    )
+    authorization_ref: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("execution_authorization.id"), nullable=True, index=True
+    )
     status: Mapped[EffectStatus] = mapped_column(
         Enum(EffectStatus, native_enum=False, length=32, values_callable=enum_values),
         nullable=False,
