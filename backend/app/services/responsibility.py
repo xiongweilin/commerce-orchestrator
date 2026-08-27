@@ -10,10 +10,18 @@ from typing import Any
 
 from sqlalchemy import or_, select
 
-from app.core.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
+from app.core.errors import (
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from app.core.time import utc_now
 from app.models.effect import EffectLedgerEntry
-from app.models.effect_realization import EffectRealizationAssessment, EffectRealizationStatus
+from app.models.effect_realization import (
+    EffectRealizationAssessment,
+    EffectRealizationStatus,
+)
 from app.models.responsibility import (
     ConfirmedOutcome,
     ExecutionAuthorization,
@@ -21,7 +29,7 @@ from app.models.responsibility import (
     ResponsibilityObligation,
     ResponsibilityObligationStatus,
 )
-from app.models.workflow import WorkItem, WorkItemDecision, WorkItemDecisionType, WorkflowRun
+from app.models.workflow import WorkflowRun, WorkItem, WorkItemDecision, WorkItemDecisionType
 from app.schemas.events import EFFECT_OPS
 
 
@@ -84,7 +92,9 @@ def issue_execution_authorization(
         raise ValidationError("work item references missing workflow")
 
     target = _required_text(target_system, "target_system")
-    operations = sorted({_required_text(operation, "allowed_operation") for operation in allowed_operations})
+    operations = sorted(
+        {_required_text(operation, "allowed_operation") for operation in allowed_operations}
+    )
     if not operations:
         raise ValidationError("allowed_operations must not be empty")
     for operation in operations:
@@ -208,7 +218,9 @@ def confirm_effect_outcome(
             or existing.outcome_type != outcome_type
             or list(existing.evidence_refs) != list(assessment.evidence_refs)
         ):
-            raise ConflictError("confirmed outcome is immutable; conflicting re-confirmation refused")
+            raise ConflictError(
+                "confirmed outcome is immutable; conflicting re-confirmation refused"
+            )
         return existing
 
     outcome = ConfirmedOutcome(
@@ -275,7 +287,10 @@ def discharge_responsibility_obligation(
     return obligation
 
 
-def current_open_obligations_for_projections(db, projection_refs: list[str]) -> list[ResponsibilityObligation]:
+def current_open_obligations_for_projections(
+    db,
+    projection_refs: list[str],
+) -> list[ResponsibilityObligation]:
     refs = {ref for ref in projection_refs if str(ref).strip()}
     if not refs:
         return []
@@ -338,7 +353,9 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
         []
         if not effect_ids
         else list(
-            db.execute(select(ConfirmedOutcome).where(ConfirmedOutcome.effect_id.in_(effect_ids))).scalars()
+            db.execute(
+                select(ConfirmedOutcome).where(ConfirmedOutcome.effect_id.in_(effect_ids))
+            ).scalars()
         )
     )
     bindings = list(
