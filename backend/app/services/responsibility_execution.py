@@ -1,8 +1,8 @@
 """Commerce execution-authority specializations for bounded domain workflows.
 
-The module keeps Decision and ExecutionAuthorization distinct.  Profiles are
+The module keeps Decision and ExecutionAuthorization distinct. Profiles are
 server-owned and bind authority to the exact subject/version/fingerprint and
-operation set.  Effect planning consumes the matching authorization and the
+operation set. Effect planning consumes the matching authorization and the
 physical dispatch boundary revalidates the same current facts.
 """
 
@@ -32,16 +32,13 @@ from app.models.workflow import WorkflowRun, WorkItem, WorkItemDecision
 from app.responsibility.store import CommerceResponsibilityStore
 from app.services.current_use_eligibility import compose_current_use_eligibility
 from app.services.publication_qualification import require_current_publication_qualification
-from app.services.responsibility import (
-    authorization_allows_effect,
-    issue_execution_authorization,
-)
+from app.services.responsibility import authorization_allows_effect, issue_execution_authorization
 from app.services.responsibility_profiles import listing_experience_required
 
 LISTING_PUBLICATION_WORKFLOW = "listing-publication"
 LISTING_PUBLICATION_EFFECT = "shopify.product_publish"
 LISTING_SUBJECT_TYPE = "listing_publication"
-RETURN_WORKFLOWS = frozenset({"return", "return-to-refund"})
+RETURN_WORKFLOWS = frozenset({"return-to-refund"})
 RETURN_SUBJECT_TYPE = "return_case"
 RETURN_ENVIRONMENT_REF = "commerce"
 
@@ -127,8 +124,6 @@ def _canonical_fingerprint(payload: dict[str, object]) -> str:
 
 
 def _listing_fingerprint(listing: ListingPublication) -> str:
-    """Fingerprint publication-relevant subject content, excluding lifecycle state."""
-
     return _canonical_fingerprint(
         {
             "id": str(listing.id),
@@ -141,8 +136,6 @@ def _listing_fingerprint(listing: ListingPublication) -> str:
 
 
 def listing_authorization_subject(db, item: WorkItem) -> ListingAuthorizationSubject:
-    """Resolve the exact subject/context of a listing-publication approval item."""
-
     run = db.get(WorkflowRun, item.workflow_id)
     if run is None:
         raise ValidationError("work item references missing workflow")
@@ -159,8 +152,7 @@ def listing_authorization_subject(db, item: WorkItem) -> ListingAuthorizationSub
     listing = db.get(ListingPublication, listing_id)
     if listing is None:
         raise NotFoundError("listing publication not found")
-    listing_payload = listing.payload or {}
-    qualification = listing_payload.get("qualification_context")
+    qualification = (listing.payload or {}).get("qualification_context")
     if not isinstance(qualification, dict):
         raise ValidationError("listing publication is missing qualification context")
     policy_version = str(qualification.get("policy_version") or "").strip()
@@ -182,7 +174,7 @@ def _return_case_for_item(db, item: WorkItem) -> tuple[WorkflowRun, ReturnCase]:
     if run is None:
         raise ValidationError("work item references missing workflow")
     if run.workflow_type not in RETURN_WORKFLOWS:
-        raise ValidationError("return authorization requires a ReturnCase workflow")
+        raise ValidationError("return authorization requires return-to-refund workflow")
     raw = (item.payload_json or {}).get("case_id")
     if raw is None:
         raise ValidationError("return financial work item is missing case_id")
@@ -217,12 +209,7 @@ def return_authorization_subject(
         "disposition": None if case.disposition is None else case.disposition.value,
         "workflow_ref": str(run.id),
     }
-    fingerprint = _canonical_fingerprint(
-        {
-            "subject_ref": str(case.id),
-            **scope,
-        }
-    )
+    fingerprint = _canonical_fingerprint({"subject_ref": str(case.id), **scope})
     return ReturnAuthorizationSubject(
         subject_type=RETURN_SUBJECT_TYPE,
         subject_ref=str(case.id),
@@ -238,8 +225,6 @@ def authorization_profile_for_work_item(
     db,
     item: WorkItem,
 ) -> WorkItemAuthorizationProfile | None:
-    """Resolve the server-owned execution-authority profile for one work item."""
-
     run = db.get(WorkflowRun, item.workflow_id)
     if run is None:
         raise ValidationError("work item references missing workflow")
@@ -262,8 +247,6 @@ def issue_listing_execution_authorization(
     scope: dict[str, object],
     expires_at: dt.datetime | None = None,
 ) -> ExecutionAuthorization:
-    """Explicitly mint and attach the exact publication authorization."""
-
     subject = listing_authorization_subject(db, item)
     authorization = issue_execution_authorization(
         db,
@@ -298,8 +281,6 @@ def issue_work_item_execution_authorization(
     listing_scope: dict[str, object] | None = None,
     expires_at: dt.datetime | None = None,
 ) -> tuple[ExecutionAuthorization, WorkItemAuthorizationProfile]:
-    """Mint only the profile implied by workflow type + next_step + server facts."""
-
     profile = authorization_profile_for_work_item(db, item)
     if profile is None:
         raise ValidationError("work item does not have an execution-authorization profile")
@@ -392,7 +373,6 @@ def _current_experience_use(
     required = listing_experience_required(db, listing)
     if not required:
         return True, "not-required", None, ()
-
     bindings = list(
         db.execute(
             select(ResponsibilityBinding)
@@ -410,43 +390,25 @@ def _current_experience_use(
     if len(bindings) != 1:
         return False, "unavailable", None, ("ambiguous-historical-experience-binding",)
     binding = bindings[0]
-
     store = CommerceResponsibilityStore(db)
     historical = get_historical_experience_use_contract(store, binding.judgment_ref)
     if historical is None:
-        return (
-            False,
-            "unavailable",
-            binding.historical_use_ref,
-            ("historical-experience-use-missing",),
-        )
+        return False, "unavailable", binding.historical_use_ref, ("historical-experience-use-missing",)
     if (
         historical.id != binding.historical_use_ref
         or historical.requirement_digest != binding.requirement_digest
         or historical.snapshot_digest != binding.snapshot_digest
     ):
-        return (
-            False,
-            "unavailable",
-            binding.historical_use_ref,
-            ("historical-experience-binding-mismatch",),
-        )
-
+        return False, "unavailable", binding.historical_use_ref, ("historical-experience-binding-mismatch",)
     try:
         snapshot = json.loads(historical.snapshot_semantic_json)
-        requirement_payload = snapshot["requirement"]
-        requirement = ExperienceUseRequirementV1.model_validate(requirement_payload)
+        requirement = ExperienceUseRequirementV1.model_validate(snapshot["requirement"])
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return False, "unavailable", historical.id, ("historical-experience-requirement-invalid",)
-
     admission = evaluate_experience_use_contract(store, requirement)
     if admission.requirement_digest != binding.requirement_digest:
         return False, "unavailable", historical.id, ("current-experience-requirement-drift",)
-    current_use = compose_current_use_eligibility(
-        db,
-        admission=admission,
-        requirement=requirement,
-    )
+    current_use = compose_current_use_eligibility(db, admission=admission, requirement=requirement)
     if not current_use.eligible:
         reasons = current_use.reasons or (f"current-experience-{current_use.status}",)
         return False, current_use.status, historical.id, reasons
@@ -461,12 +423,9 @@ def publication_dispatch_eligibility(
     authorization: ExecutionAuthorization,
     operation: str,
 ) -> CommercePublicationDispatchEligibility:
-    """Evaluate all current listing gates without creating authority or effects."""
-
     subject = listing_authorization_subject(db, item)
     listing = _listing_for_item(db, item)
     reasons: list[str] = []
-
     authorization_current = (
         authorization.workflow_ref == run.id
         and authorization.policy_version == subject.policy_version
@@ -482,25 +441,17 @@ def publication_dispatch_eligibility(
     )
     if not authorization_current:
         reasons.append("execution-authorization-not-current")
-
     qualification_current, qualification_reason = _current_publication_qualification(db, listing)
     if not qualification_current:
         reasons.append(f"publication-qualification:{qualification_reason}")
-
     experience_required = listing_experience_required(db, listing)
-    (
-        experience_current,
-        experience_status,
-        historical_ref,
-        experience_reasons,
-    ) = _current_experience_use(
+    experience_current, experience_status, historical_ref, experience_reasons = _current_experience_use(
         db,
         run=run,
         listing=listing,
         subject=subject,
     )
     reasons.extend(f"experience:{reason}" for reason in experience_reasons)
-
     return CommercePublicationDispatchEligibility(
         eligible=authorization_current and qualification_current and experience_current,
         authorization_current=authorization_current,
@@ -537,8 +488,6 @@ def _authorization_from_item(db, item: WorkItem) -> ExecutionAuthorization | Non
 
 
 def _legacy_unbound_effect_exists(db, run: WorkflowRun, operation: str) -> bool:
-    """Preserve pre-C18 rows: an already-recorded unbound effect is not backfilled."""
-
     target_system, _, op = operation.partition(".")
     if not target_system or not op:
         return False
@@ -566,18 +515,14 @@ def _resolve_return_authorization(
     run: WorkflowRun,
     operation: str,
 ) -> ExecutionAuthorization | None:
-    profile = (
-        RETURN_CREDIT_NOTE_PROFILE
-        if operation in RETURN_CREDIT_NOTE_PROFILE.allowed_operations
-        else RETURN_REFUND_PROFILE
-        if operation in RETURN_REFUND_PROFILE.allowed_operations
-        else None
-    )
-    if profile is None:
+    if operation in RETURN_CREDIT_NOTE_PROFILE.allowed_operations:
+        profile = RETURN_CREDIT_NOTE_PROFILE
+        expected_step = "approve_credit_note"
+    elif operation in RETURN_REFUND_PROFILE.allowed_operations:
+        profile = RETURN_REFUND_PROFILE
+        expected_step = "approve_refund"
+    else:
         return None
-    expected_step = (
-        "approve_credit_note" if profile is RETURN_CREDIT_NOTE_PROFILE else "approve_refund"
-    )
     item = next(
         (
             candidate
@@ -590,7 +535,6 @@ def _resolve_return_authorization(
         if _legacy_unbound_effect_exists(db, run, operation):
             return None
         raise ValidationError(f"{profile.name} requires its financial approval work item")
-
     authorization = _authorization_from_item(db, item)
     if authorization is None:
         if _legacy_unbound_effect_exists(db, run, operation):
@@ -598,7 +542,6 @@ def _resolve_return_authorization(
         raise ValidationError(
             f"{profile.name} requires explicit ExecutionAuthorization; Decision alone is insufficient"
         )
-
     subject = return_authorization_subject(db, item, profile)
     decision = db.execute(
         select(WorkItemDecision).where(WorkItemDecision.work_item_id == item.id)
@@ -634,20 +577,15 @@ def resolve_effect_authorization(
     workflow_ref: uuid.UUID | None,
     operation: str,
 ) -> ExecutionAuthorization | None:
-    """Resolve and revalidate the bounded authority profile for an effect."""
-
     if workflow_ref is None:
         return None
     run = db.get(WorkflowRun, workflow_ref)
     if run is None:
         raise ValidationError("effect workflow_ref does not resolve to a workflow")
-
     if run.workflow_type in RETURN_WORKFLOWS:
         return _resolve_return_authorization(db, run=run, operation=operation)
-
     if run.workflow_type != LISTING_PUBLICATION_WORKFLOW or operation != LISTING_PUBLICATION_EFFECT:
         return None
-
     item = next(
         (candidate for candidate in _items_for_run(db, run) if (candidate.payload_json or {}).get("listing_id")),
         None,
@@ -659,7 +597,6 @@ def resolve_effect_authorization(
         raise ValidationError(
             "listing publication requires explicit ExecutionAuthorization; Decision alone is insufficient"
         )
-
     eligibility = publication_dispatch_eligibility(
         db,
         run=run,
@@ -668,13 +605,9 @@ def resolve_effect_authorization(
         operation=operation,
     )
     if not eligibility.authorization_current:
-        raise ValidationError(
-            "ExecutionAuthorization is absent, stale, expired, revoked, or rebound"
-        )
+        raise ValidationError("ExecutionAuthorization is absent, stale, expired, revoked, or rebound")
     if not eligibility.publication_qualification_current:
-        raise ValidationError(
-            "listing publication current qualification is not eligible for dispatch"
-        )
+        raise ValidationError("listing publication current qualification is not eligible for dispatch")
     if eligibility.experience_required and eligibility.experience_status != "allowed":
         detail = "; ".join(eligibility.reasons) or eligibility.experience_status
         raise ValidationError(f"listing publication current Experience is not eligible: {detail}")
