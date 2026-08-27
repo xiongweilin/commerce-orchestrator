@@ -72,6 +72,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Build backend builder target
+        run: docker build --target builder -t commerce-orchestrator-backend-builder:ci ./backend
+
       # env_file: .env 要求文件存在；用模板生成（模板内只有占位符）
       - name: Prepare .env from template
         run: cp .env.example .env
