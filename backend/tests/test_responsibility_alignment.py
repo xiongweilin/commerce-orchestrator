@@ -12,8 +12,10 @@ from portable_runtime.public_contracts.models import (
     ExperienceUseRequirementV1,
     HistoricalExperienceUseCommitV1,
 )
+from portable_runtime.records.authorization import create_grant_for_approval
 from portable_runtime.records.knowledge import KnowledgeProjection
-from portable_runtime.records.models import Assertion
+from portable_runtime.records.models import Assertion, ChangeObjectRecord, EvidenceArtifact
+from portable_runtime.records.relations import RecordRelation
 from sqlalchemy import select
 
 from app.core.errors import ValidationError
@@ -136,18 +138,67 @@ def _listing_workflow(db, user_id, *, experience_derived: bool = False):
 
 def _bind_listing_experience(db, run, listing):
     store = CommerceResponsibilityStore(db)
+    projection_id = f"projection_listing_{listing.id}"
+    claim = Assertion(
+        id=f"claim_listing_{listing.id}",
+        statement="feedback-derived listing content remains supported",
+        epistemic_status="supported",
+        lifecycle_status="current",
+    )
+    epistemic_judgment = Assertion(
+        id=f"epistemic_listing_{listing.id}",
+        statement="available evidence supports reuse for publication",
+        epistemic_status="supported",
+        lifecycle_status="current",
+        metadata={
+            "epistemic_role": "epistemic-judgment",
+            "judgment_for_refs": [claim.id],
+        },
+    )
+    evidence = EvidenceArtifact(
+        id=f"evidence_listing_{listing.id}",
+        kind="feedback-evaluation",
+        lifecycle_status="current",
+    )
+    scope = ChangeObjectRecord(
+        id=f"scope_listing_{listing.id}",
+        lifecycle_status="draft",
+    )
+    for record in (claim, epistemic_judgment, evidence, scope):
+        store.save_record(record)
+
+    grant = create_grant_for_approval(
+        principal_ref="human:knowledge-owner",
+        grantee_ref="agent:catalog-evaluator",
+        allowed_capabilities=["knowledge.promote"],
+        subject_version_refs=[scope.id],
+        resource_scope=[projection_id],
+        effect_ceiling="write-local",
+        ttl_seconds=None,
+    )
+    store.save_authorization(grant)
     projection = KnowledgeProjection(
-        id=f"projection_listing_{listing.id}",
+        id=projection_id,
         title="feedback-derived listing experience",
         lifecycle_status="official",
+        current_assertion_refs=[claim.id],
+        evidence_summary_refs=[evidence.id],
+        epistemic_judgment_refs=[epistemic_judgment.id],
+        authorization_refs=[grant.id],
+        scope_version_refs=[scope.id],
         validity_scope={"purpose": "publish"},
         environment_bindings={"commerce": "prod-r1"},
+        metadata={
+            "actor_ref": "agent:catalog-evaluator",
+            "resource_ref": projection_id,
+            "effect_class": "write-local",
+        },
     )
     store.save_knowledge_projection(projection)
     requirement = ExperienceUseRequirementV1(
         projection_refs=[projection.id],
         use_scope={"purpose": "publish", "channel": "shopify"},
-        subject_version_refs=[f"listing:{listing.id}:v{listing.version}"],
+        subject_version_refs=[scope.id, f"listing:{listing.id}:v{listing.version}"],
         environment_bindings={"commerce": "prod-r1"},
         use_context={"workflow": "listing-publication"},
     )
@@ -250,8 +301,14 @@ def test_listing_full_experience_history_dispatch_vertical_is_fail_closed(db, ma
     )
     assert effect.authorization_ref == authorization.id
 
-    store.save_knowledge_projection(
-        projection.model_copy(update={"lifecycle_status": "deprecated"})
+    store.save_relation(
+        RecordRelation(
+            id=f"revalidation_{projection.id}",
+            relation_type="requires-revalidation",
+            subject_ref=projection.id,
+            object_ref=projection.current_assertion_refs[0],
+            metadata={"reason": "new feedback requires current-use revalidation"},
+        )
     )
     db.flush()
     with pytest.raises(ValidationError, match="current Experience is not eligible"):
