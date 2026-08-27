@@ -154,9 +154,7 @@ def build_listing_integrity_snapshot(
 
     context = payload.get("qualification_context") or {}
     purpose = _required_text(context.get("purpose"), "qualification purpose")
-    policy_version = _required_text(
-        context.get("policy_version"), "qualification policy_version"
-    )
+    policy_version = _required_text(context.get("policy_version"), "qualification policy_version")
     adapter_version = _required_text(
         context.get("adapter_version"), "qualification adapter_version"
     )
