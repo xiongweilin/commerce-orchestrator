@@ -15,6 +15,7 @@ from portable_runtime.experience.historical_use import (
     HistoricalExperienceUseCommitRequest,
     prepare_historical_experience_use_commit,
 )
+from portable_runtime.records.authorization import AuthorizationGrant
 from portable_runtime.records.knowledge import (
     KnowledgeProjection,
     validate_projection_for_official,
@@ -35,6 +36,7 @@ from portable_runtime.records.models import (
     PolicyRecord,
     RevisionRecord,
 )
+from portable_runtime.records.relations import RecordRelation, validate_relation
 from portable_runtime.records.validation import validate_canonical_write, validate_record
 from sqlalchemy import select
 
@@ -60,6 +62,8 @@ _RECORD_TYPES: dict[str, type[BaseRecord]] = {
     "Policy": PolicyRecord,
     "Derivation": Derivation,
 }
+_RELATION_EVENT_TYPE = "ResponsibilityRelationRecorded"
+_AUTHORIZATION_EVENT_TYPE = "ResponsibilityAuthorizationRecorded"
 
 
 def _semantic_payload(value: Any) -> dict[str, Any]:
@@ -184,8 +188,50 @@ class CommerceResponsibilityStore:
         )
         self.db.flush()
 
+    def save_relation(self, value: RecordRelation) -> None:
+        """Persist a portable relation as an append-only responsibility event."""
+
+        errors = validate_relation(value)
+        if errors:
+            raise ValidationError("invalid portable responsibility relation: " + "; ".join(errors))
+        event = Event(
+            id=f"event_relation_{value.id}",
+            type=_RELATION_EVENT_TYPE,
+            subject_ref=value.subject_ref,
+            payload={"relation": value.model_dump(mode="json")},
+            created_at=value.created_at,
+        )
+        self.append_event(event)
+
+    def save_authorization(self, value: AuthorizationGrant) -> None:
+        """Persist explicit governance provenance; this does not authorize Commerce effects."""
+
+        event = Event(
+            id=f"event_authorization_{value.id}",
+            type=_AUTHORIZATION_EVENT_TYPE,
+            subject_ref=value.id,
+            payload={"authorization": value.model_dump(mode="json")},
+            created_at=value.created_at,
+        )
+        self.append_event(event)
+
     def export_state(self) -> dict[str, list[dict[str, object]]]:
         """Return one coherent view used by the portable Experience evaluator."""
+
+        events = self.list_events()
+        relations: list[dict[str, object]] = []
+        authorizations: list[dict[str, object]] = []
+        for event in events:
+            if event.type == _RELATION_EVENT_TYPE:
+                raw = event.payload.get("relation")
+                if isinstance(raw, dict):
+                    relations.append(RecordRelation.model_validate(raw).model_dump(mode="json"))
+            elif event.type == _AUTHORIZATION_EVENT_TYPE:
+                raw = event.payload.get("authorization")
+                if isinstance(raw, dict):
+                    authorizations.append(
+                        AuthorizationGrant.model_validate(raw).model_dump(mode="json")
+                    )
 
         return {
             "record": [record.model_dump(mode="json") for record in self.list_records()],
@@ -193,9 +239,9 @@ class CommerceResponsibilityStore:
                 projection.model_dump(mode="json")
                 for projection in self.list_knowledge_projections()
             ],
-            "event": [event.model_dump(mode="json") for event in self.list_events()],
-            "relation": [],
-            "authorization": [],
+            "event": [event.model_dump(mode="json") for event in events],
+            "relation": relations,
+            "authorization": authorizations,
             "authorization_use": [],
         }
 
