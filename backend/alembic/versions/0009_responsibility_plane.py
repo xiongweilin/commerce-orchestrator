@@ -146,7 +146,6 @@ def upgrade() -> None:
             name="fk_confirmed_outcome_confirmed_by_user_id_user",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_confirmed_outcome"),
-        sa.UniqueConstraint("effect_id", name="uq_confirmed_outcome_effect_id"),
         sa.UniqueConstraint(
             "realization_assessment_id",
             name="uq_confirmed_outcome_realization_assessment_id",
