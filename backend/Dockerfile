@@ -18,6 +18,15 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+# portable-runtime 只作为构建期 reference/conformance oracle，不进入 Commerce runtime venv。
+# 此 SHA 必须与 docs/contracts/responsibility-compatibility.toml 的 reference_revision 一致；
+# backend/tests/test_reference_oracle_contract.py 对该一致性做 fail-closed 校验。
+ARG PORTABLE_RUNTIME_ORACLE_REV=53e7d3eabe5cfc01fff734825cb837e6a3cd8ed3
+RUN uv venv /opt/reference-oracle \
+    && uv pip install --python /opt/reference-oracle/bin/python --no-deps \
+      "portable-runtime @ https://github.com/xiongweilin/portable-runtime/archive/${PORTABLE_RUNTIME_ORACLE_REV}.tar.gz" \
+    && /opt/reference-oracle/bin/python -c 'from pathlib import Path; import tomllib; p = next(Path("/opt/reference-oracle").glob("lib/python*/site-packages/portable_runtime/_contracts/catalog.toml")); c = tomllib.loads(p.read_text()); assert c["catalog_version"] == "portable-runtime-contracts-v1"; assert c["owner"] == "portable-runtime/contracts"'
+
 # 先只拷贝依赖清单，最大化层缓存（README.md 是 hatchling 构建所需的 readme 文件）
 COPY pyproject.toml uv.lock README.md ./
 # 仅安装非 dev 依赖（--frozen 严格按 uv.lock，不重新解析）

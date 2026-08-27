@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { getServerToken } from "@/lib/server-auth";
 import type { WorkflowDetail, WorkflowEffect, WorkflowEvent } from "@/lib/types";
+import type { ResponsibilityInspector } from "@/lib/responsibility-types";
 import StatusBadge from "@/components/StatusBadge";
 import ErrorBox from "@/components/ErrorBox";
 import RefreshButton from "@/components/RefreshButton";
@@ -46,6 +47,66 @@ function EffectRow({ effect }: { effect: WorkflowEffect }) {
   );
 }
 
+function ResponsibilityCard({
+  responsibility,
+  error,
+}: {
+  responsibility: ResponsibilityInspector | null;
+  error: string | null;
+}) {
+  return (
+    <div className="card">
+      <h2>责任检查器（Responsibility Inspector）</h2>
+      <p className="muted">
+        只读投影，不承担 authority。Decision、Authorization、execution、reality 与 ConfirmedOutcome 分层展示。
+      </p>
+      {error ? <ErrorBox error={error} title="责任投影不可用" /> : null}
+      {responsibility ? (
+        <div className="kv-grid">
+          <details open>
+            <summary>
+              Decisions {responsibility.decisions.length} / Authorizations {responsibility.authorizations.length}
+            </summary>
+            <pre>
+              {jsonText({
+                decisions: responsibility.decisions,
+                authorizations: responsibility.authorizations,
+              })}
+            </pre>
+          </details>
+          <details open>
+            <summary>
+              Execution {responsibility.execution.length} / Reality {responsibility.reality.length} / Confirmed {responsibility.confirmedOutcomes.length}
+            </summary>
+            <pre>
+              {jsonText({
+                execution: responsibility.execution,
+                reality: responsibility.reality,
+                confirmedOutcomes: responsibility.confirmedOutcomes,
+              })}
+            </pre>
+          </details>
+          <details>
+            <summary>
+              Historical Experience {responsibility.historical.length} / Open responsibility {responsibility.openResponsibility.length}
+            </summary>
+            <pre>
+              {jsonText({
+                historical: responsibility.historical,
+                openResponsibility: responsibility.openResponsibility,
+              })}
+            </pre>
+          </details>
+          <details>
+            <summary>语义分离约束</summary>
+            <pre>{responsibility.shortcuts.join("\n")}</pre>
+          </details>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default async function WorkflowDetailPage({
   params,
 }: {
@@ -54,10 +115,13 @@ export default async function WorkflowDetailPage({
   const { id } = await params;
 
   let workflow: WorkflowDetail | null = null;
+  let responsibility: ResponsibilityInspector | null = null;
+  let responsibilityError: string | null = null;
   let error: string | null = null;
+  const token = await getServerToken();
   try {
     workflow = await api.get<WorkflowDetail>(`/v1/workflows/${encodeURIComponent(id)}`, {
-      token: await getServerToken(),
+      token,
     });
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
@@ -78,6 +142,20 @@ export default async function WorkflowDetailPage({
         <ErrorBox error={error ?? "未知错误"} title="加载失败" />
       </div>
     );
+  }
+
+  try {
+    responsibility = await api.get<ResponsibilityInspector>(
+      `/v1/workflows/${encodeURIComponent(id)}/responsibility`,
+      { token },
+    );
+  } catch (err) {
+    responsibilityError =
+      err instanceof ApiError
+        ? err.correlationId
+          ? `${err.message}（关联ID：${err.correlationId}）`
+          : err.message
+        : "无法读取责任投影";
   }
 
   return (
@@ -138,6 +216,8 @@ export default async function WorkflowDetailPage({
           </div>
         </div>
       )}
+
+      <ResponsibilityCard responsibility={responsibility} error={responsibilityError} />
 
       <div className="card">
         <h2>事件时间线（{workflow.events.length}）</h2>
@@ -204,6 +284,7 @@ export default async function WorkflowDetailPage({
                     expectedWorkflowVersion={
                       item.expectedWorkflowVersion ?? item.expectedVersion ?? 1
                     }
+                    requiresExecutionAuthorization={workflow.type === "listing-publication"}
                   />
                 ) : null}
               </div>
