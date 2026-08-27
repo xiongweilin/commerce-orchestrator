@@ -403,7 +403,11 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
         profile = None if item is None else authorization_profile_for_work_item(db, item)
         payload = {} if item is None else (item.payload_json or {})
         next_step = payload.get("next_step")
-        if next_step is None and profile is not None and workflow.workflow_type == LISTING_PUBLICATION_WORKFLOW:
+        if (
+            next_step is None
+            and profile is not None
+            and workflow.workflow_type == LISTING_PUBLICATION_WORKFLOW
+        ):
             next_step = "approve"
         decision_rows.append(
             {
