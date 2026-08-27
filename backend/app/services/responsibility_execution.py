@@ -19,8 +19,11 @@ from sqlalchemy import select
 from app.core.errors import NotFoundError, ValidationError
 from app.models.listing import ListingPublication
 from app.models.responsibility import ExecutionAuthorization
-from app.models.workflow import WorkItem, WorkItemDecision, WorkflowRun
-from app.services.responsibility import authorization_allows_effect, issue_execution_authorization
+from app.models.workflow import WorkflowRun, WorkItem, WorkItemDecision
+from app.services.responsibility import (
+    authorization_allows_effect,
+    issue_execution_authorization,
+)
 
 LISTING_PUBLICATION_WORKFLOW = "listing-publication"
 LISTING_PUBLICATION_EFFECT = "shopify.product_publish"
@@ -166,7 +169,8 @@ def resolve_effect_authorization(
     auth_ref = (item.payload_json or {}).get("authorization_ref")
     if not auth_ref:
         raise ValidationError(
-            "listing publication requires explicit ExecutionAuthorization; Decision alone is insufficient"
+            "listing publication requires explicit ExecutionAuthorization; "
+            "Decision alone is insufficient"
         )
     try:
         authorization_id = uuid.UUID(str(auth_ref))
@@ -180,7 +184,9 @@ def resolve_effect_authorization(
     if authorization.workflow_ref != run.id:
         raise ValidationError("ExecutionAuthorization belongs to a different workflow")
     if authorization.policy_version != subject.policy_version:
-        raise ValidationError("ExecutionAuthorization policy version no longer matches current subject")
+        raise ValidationError(
+            "ExecutionAuthorization policy version no longer matches current subject"
+        )
     if not authorization_allows_effect(
         authorization,
         operation=operation,
@@ -190,7 +196,9 @@ def resolve_effect_authorization(
         subject_fingerprint=subject.subject_fingerprint,
         environment_ref=subject.environment_ref,
     ):
-        raise ValidationError("ExecutionAuthorization is absent, stale, expired, revoked, or rebound")
+        raise ValidationError(
+            "ExecutionAuthorization is absent, stale, expired, revoked, or rebound"
+        )
     return authorization
 
 
