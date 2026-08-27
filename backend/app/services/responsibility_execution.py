@@ -393,13 +393,23 @@ def _current_experience_use(
     store = CommerceResponsibilityStore(db)
     historical = get_historical_experience_use_contract(store, binding.judgment_ref)
     if historical is None:
-        return False, "unavailable", binding.historical_use_ref, ("historical-experience-use-missing",)
+        return (
+            False,
+            "unavailable",
+            binding.historical_use_ref,
+            ("historical-experience-use-missing",),
+        )
     if (
         historical.id != binding.historical_use_ref
         or historical.requirement_digest != binding.requirement_digest
         or historical.snapshot_digest != binding.snapshot_digest
     ):
-        return False, "unavailable", binding.historical_use_ref, ("historical-experience-binding-mismatch",)
+        return (
+            False,
+            "unavailable",
+            binding.historical_use_ref,
+            ("historical-experience-binding-mismatch",),
+        )
     try:
         snapshot = json.loads(historical.snapshot_semantic_json)
         requirement = ExperienceUseRequirementV1.model_validate(snapshot["requirement"])
@@ -408,7 +418,11 @@ def _current_experience_use(
     admission = evaluate_experience_use_contract(store, requirement)
     if admission.requirement_digest != binding.requirement_digest:
         return False, "unavailable", historical.id, ("current-experience-requirement-drift",)
-    current_use = compose_current_use_eligibility(db, admission=admission, requirement=requirement)
+    current_use = compose_current_use_eligibility(
+        db,
+        admission=admission,
+        requirement=requirement,
+    )
     if not current_use.eligible:
         reasons = current_use.reasons or (f"current-experience-{current_use.status}",)
         return False, current_use.status, historical.id, reasons
@@ -445,7 +459,12 @@ def publication_dispatch_eligibility(
     if not qualification_current:
         reasons.append(f"publication-qualification:{qualification_reason}")
     experience_required = listing_experience_required(db, listing)
-    experience_current, experience_status, historical_ref, experience_reasons = _current_experience_use(
+    (
+        experience_current,
+        experience_status,
+        historical_ref,
+        experience_reasons,
+    ) = _current_experience_use(
         db,
         run=run,
         listing=listing,
@@ -540,7 +559,8 @@ def _resolve_return_authorization(
         if _legacy_unbound_effect_exists(db, run, operation):
             return None
         raise ValidationError(
-            f"{profile.name} requires explicit ExecutionAuthorization; Decision alone is insufficient"
+            f"{profile.name} requires explicit ExecutionAuthorization; "
+            "Decision alone is insufficient"
         )
     subject = return_authorization_subject(db, item, profile)
     decision = db.execute(
@@ -587,7 +607,11 @@ def resolve_effect_authorization(
     if run.workflow_type != LISTING_PUBLICATION_WORKFLOW or operation != LISTING_PUBLICATION_EFFECT:
         return None
     item = next(
-        (candidate for candidate in _items_for_run(db, run) if (candidate.payload_json or {}).get("listing_id")),
+        (
+            candidate
+            for candidate in _items_for_run(db, run)
+            if (candidate.payload_json or {}).get("listing_id")
+        ),
         None,
     )
     if item is None:
@@ -595,7 +619,8 @@ def resolve_effect_authorization(
     authorization = _authorization_from_item(db, item)
     if authorization is None:
         raise ValidationError(
-            "listing publication requires explicit ExecutionAuthorization; Decision alone is insufficient"
+            "listing publication requires explicit ExecutionAuthorization; "
+            "Decision alone is insufficient"
         )
     eligibility = publication_dispatch_eligibility(
         db,
@@ -605,9 +630,13 @@ def resolve_effect_authorization(
         operation=operation,
     )
     if not eligibility.authorization_current:
-        raise ValidationError("ExecutionAuthorization is absent, stale, expired, revoked, or rebound")
+        raise ValidationError(
+            "ExecutionAuthorization is absent, stale, expired, revoked, or rebound"
+        )
     if not eligibility.publication_qualification_current:
-        raise ValidationError("listing publication current qualification is not eligible for dispatch")
+        raise ValidationError(
+            "listing publication current qualification is not eligible for dispatch"
+        )
     if eligibility.experience_required and eligibility.experience_status != "allowed":
         detail = "; ".join(eligibility.reasons) or eligibility.experience_status
         raise ValidationError(f"listing publication current Experience is not eligible: {detail}")
