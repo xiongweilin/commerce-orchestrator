@@ -91,8 +91,7 @@ def submit_work_item_decision(
     profile = authorization_profile_for_work_item(db, item)
     if body.decision == "approve" and profile is not None:
         raise ValidationError(
-            f"{profile.name} requires explicit execution authorization; "
-            "use authorized-decisions"
+            f"{profile.name} requires explicit execution authorization; use authorized-decisions"
         )
     result = submit_decision(
         work_item_id=work_item_id,
