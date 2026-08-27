@@ -167,7 +167,10 @@ def _listing_for_item(db, item: WorkItem) -> ListingPublication:
     return listing
 
 
-def _current_publication_qualification(db, listing: ListingPublication) -> tuple[bool, str | None]:
+def _current_publication_qualification(
+    db,
+    listing: ListingPublication,
+) -> tuple[bool, str | None]:
     payload = listing.payload or {}
     raw_revision_id = payload.get("catalog_revision_id") or payload.get("revision_id")
     qualification = payload.get("qualification_context")
@@ -225,13 +228,23 @@ def _current_experience_use(
     store = CommerceResponsibilityStore(db)
     historical = get_historical_experience_use_contract(store, binding.judgment_ref)
     if historical is None:
-        return False, "unavailable", binding.historical_use_ref, ("historical-experience-use-missing",)
+        return (
+            False,
+            "unavailable",
+            binding.historical_use_ref,
+            ("historical-experience-use-missing",),
+        )
     if (
         historical.id != binding.historical_use_ref
         or historical.requirement_digest != binding.requirement_digest
         or historical.snapshot_digest != binding.snapshot_digest
     ):
-        return False, "unavailable", binding.historical_use_ref, ("historical-experience-binding-mismatch",)
+        return (
+            False,
+            "unavailable",
+            binding.historical_use_ref,
+            ("historical-experience-binding-mismatch",),
+        )
 
     try:
         snapshot = json.loads(historical.snapshot_semantic_json)
@@ -284,7 +297,12 @@ def publication_dispatch_eligibility(
         reasons.append(f"publication-qualification:{qualification_reason}")
 
     experience_required = listing_experience_required(db, listing)
-    experience_current, experience_status, historical_ref, experience_reasons = _current_experience_use(
+    (
+        experience_current,
+        experience_status,
+        historical_ref,
+        experience_reasons,
+    ) = _current_experience_use(
         db,
         run=run,
         listing=listing,
