@@ -1,5 +1,5 @@
 closure_version = "commerce-persistent-responsibility-closure-v1"
-status = "candidate"
+status = "verified"
 portable_revision = "b26487a6efe3933c5d92d637b522eac211e153c1"
 portable_contract = "persistent-responsibility-v1"
 commerce_alignment = "commerce-responsibility-alignment-v1"
@@ -13,5 +13,5 @@ terminal_completion_authority_preserved = true
 worker_uses_durable_store = true
 
 [evidence]
-commerce_merge_sha = "pending"
-github_actions_run_id = "pending"
+commerce_merge_sha = "a19adbf414b6e09ed869494ef8b37d655515df1e"
+github_actions_run_id = "33049905766"
