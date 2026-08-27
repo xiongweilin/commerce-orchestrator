@@ -1,41 +1,98 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
 import type { WorkItemDecisionResponse } from "@/lib/types";
 
+type AuthorizationProfile =
+  | "listing-publication-v1"
+  | "return-credit-note-v1"
+  | "return-refund-v1";
+
 interface AuthorizedDecisionResponse extends WorkItemDecisionResponse {
   authorizationId: string;
+  authorizationProfile: AuthorizationProfile;
 }
 
-/**
- * 工作项决策表单。listing-publication 的批准动作显式调用 authorized-decision；
- * 普通 Decision 不会自动产生 ExecutionAuthorization。
- */
+interface WorkItemProjection {
+  workItemId: string;
+  authorizationProfile: AuthorizationProfile | null;
+}
+
+interface WorkItemPage {
+  items: WorkItemProjection[];
+}
+
+const profileLabel: Record<AuthorizationProfile, string> = {
+  "listing-publication-v1": "批准并显式授权发布",
+  "return-credit-note-v1": "批准并授权 Odoo 贷项通知单",
+  "return-refund-v1": "批准并授权 Shopify 退款",
+};
+
 export default function DecisionForm({
   workItemId,
   expectedWorkflowVersion,
+  authorizationProfile = null,
   requiresExecutionAuthorization = false,
 }: {
   workItemId: string;
   expectedWorkflowVersion: number;
+  authorizationProfile?: AuthorizationProfile | null;
+  /** Transitional compatibility for the listing workflow detail page. */
   requiresExecutionAuthorization?: boolean;
 }) {
   const router = useRouter();
+  const explicitProfile =
+    authorizationProfile ??
+    (requiresExecutionAuthorization ? ("listing-publication-v1" as const) : null);
+  const [resolvedProfile, setResolvedProfile] = useState<AuthorizationProfile | null>(
+    explicitProfile,
+  );
+  const [profileResolved, setProfileResolved] = useState(explicitProfile !== null);
   const [decision, setDecision] = useState<"approve" | "reject">("approve");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (explicitProfile !== null) {
+      setResolvedProfile(explicitProfile);
+      setProfileResolved(true);
+      return;
+    }
+    let cancelled = false;
+    setProfileResolved(false);
+    api
+      .get<WorkItemPage>("/v1/work-items?status=pending&limit=500")
+      .then((page) => {
+        if (cancelled) return;
+        const item = page.items.find((candidate) => candidate.workItemId === workItemId);
+        setResolvedProfile(item?.authorizationProfile ?? null);
+        setProfileResolved(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError("无法确认该工作项的执行授权配置；为避免绕过授权要求，审批已暂停。");
+        setProfileResolved(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [explicitProfile, workItemId]);
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!profileResolved) {
+      setError("执行授权配置尚未确认，不能提交决策。");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     setSuccess(null);
     try {
-      const authorized = requiresExecutionAuthorization && decision === "approve";
+      const authorized = resolvedProfile !== null && decision === "approve";
       const path = authorized
         ? `/v1/work-items/${workItemId}/authorized-decisions`
         : `/v1/work-items/${workItemId}/decisions`;
@@ -44,7 +101,9 @@ export default function DecisionForm({
             decision: "approve" as const,
             reason: reason.trim() ? reason.trim() : undefined,
             expectedWorkflowVersion,
-            scope: { purpose: "publish", channel: "shopify" },
+            ...(resolvedProfile === "listing-publication-v1"
+              ? { scope: { purpose: "publish", channel: "shopify" } }
+              : {}),
           }
         : {
             decision,
@@ -84,7 +143,7 @@ export default function DecisionForm({
             checked={decision === "approve"}
             onChange={() => setDecision("approve")}
           />
-          {requiresExecutionAuthorization ? "批准并显式授权发布" : "批准"}
+          {resolvedProfile ? profileLabel[resolvedProfile] : "批准"}
         </label>
         <label className="radio">
           <input
@@ -97,9 +156,9 @@ export default function DecisionForm({
           拒绝
         </label>
       </div>
-      {requiresExecutionAuthorization && decision === "approve" ? (
+      {resolvedProfile && decision === "approve" ? (
         <p className="muted">
-          此动作会同时记录 Decision 与独立的 exact-scope ExecutionAuthorization；二者不是同一事实。
+          此动作记录 Decision 与独立的 exact-scope ExecutionAuthorization；允许的系统、操作与业务范围由服务器计算。
         </p>
       ) : null}
       <textarea
@@ -110,8 +169,12 @@ export default function DecisionForm({
         onChange={(event) => setReason(event.target.value)}
       />
       <div className="form-footer">
-        <button type="submit" className="btn btn-primary" disabled={submitting}>
-          {submitting ? "提交中…" : "提交决策"}
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={submitting || !profileResolved}
+        >
+          {submitting ? "提交中…" : profileResolved ? "提交决策" : "确认授权配置中…"}
         </button>
       </div>
       {error && <div className="error-box">{error}</div>}
