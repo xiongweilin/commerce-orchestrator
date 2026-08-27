@@ -302,29 +302,50 @@ def current_open_obligations_for_projections(
     return [row for row in rows if refs.intersection(set(row.projection_refs or []))]
 
 
+def _iso(value: dt.datetime | None) -> str | None:
+    return None if value is None else value.isoformat()
+
+
 def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
     """Non-authoritative inspector projection over durable Commerce facts."""
+
+    from app.services.responsibility_execution import (
+        LISTING_PUBLICATION_WORKFLOW,
+        authorization_profile_for_work_item,
+        explain_listing_current_responsibility,
+    )
 
     workflow = db.get(WorkflowRun, workflow_id)
     if workflow is None:
         raise NotFoundError("workflow not found")
-    item_ids = list(
-        db.execute(select(WorkItem.id).where(WorkItem.workflow_id == workflow.id)).scalars()
+    items = list(
+        db.execute(
+            select(WorkItem)
+            .where(WorkItem.workflow_id == workflow.id)
+            .order_by(WorkItem.created_at, WorkItem.id)
+        ).scalars()
     )
+    item_by_id = {item.id: item for item in items}
+    item_ids = list(item_by_id)
     decisions = (
         []
         if not item_ids
         else list(
             db.execute(
-                select(WorkItemDecision).where(WorkItemDecision.work_item_id.in_(item_ids))
+                select(WorkItemDecision)
+                .where(WorkItemDecision.work_item_id.in_(item_ids))
+                .order_by(WorkItemDecision.created_at, WorkItemDecision.id)
             ).scalars()
         )
     )
     authorizations = list(
         db.execute(
-            select(ExecutionAuthorization).where(ExecutionAuthorization.workflow_ref == workflow.id)
+            select(ExecutionAuthorization)
+            .where(ExecutionAuthorization.workflow_ref == workflow.id)
+            .order_by(ExecutionAuthorization.issued_at, ExecutionAuthorization.id)
         ).scalars()
     )
+    authorization_by_id = {row.id: row for row in authorizations}
     effects = list(
         db.execute(
             select(EffectLedgerEntry).where(
@@ -358,17 +379,145 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
     )
     bindings = list(
         db.execute(
-            select(ResponsibilityBinding).where(ResponsibilityBinding.workflow_ref == workflow.id)
+            select(ResponsibilityBinding)
+            .where(ResponsibilityBinding.workflow_ref == workflow.id)
+            .order_by(ResponsibilityBinding.created_at, ResponsibilityBinding.id)
         ).scalars()
     )
-    obligations = list(
+    responsibility_obligations = list(
         db.execute(
-            select(ResponsibilityObligation).where(
-                ResponsibilityObligation.workflow_ref == workflow.id,
-                ResponsibilityObligation.status == ResponsibilityObligationStatus.OPEN,
-            )
+            select(ResponsibilityObligation)
+            .where(ResponsibilityObligation.workflow_ref == workflow.id)
+            .order_by(ResponsibilityObligation.created_at, ResponsibilityObligation.id)
         ).scalars()
     )
+    open_obligations = [
+        row
+        for row in responsibility_obligations
+        if row.status == ResponsibilityObligationStatus.OPEN
+    ]
+
+    decision_rows: list[dict[str, Any]] = []
+    for row in decisions:
+        item = item_by_id.get(row.work_item_id)
+        profile = None if item is None else authorization_profile_for_work_item(db, item)
+        payload = {} if item is None else (item.payload_json or {})
+        next_step = payload.get("next_step")
+        if next_step is None and profile is not None and workflow.workflow_type == LISTING_PUBLICATION_WORKFLOW:
+            next_step = "approve"
+        decision_rows.append(
+            {
+                "id": str(row.id),
+                "workItemId": str(row.work_item_id),
+                "decision": row.decision.value,
+                "userId": str(row.user_id),
+                "createdAt": row.created_at.isoformat(),
+                "nextStep": None if next_step is None else str(next_step),
+                "requiredRoles": [] if item is None else list(item.required_roles or []),
+                "authorizationProfile": None if profile is None else profile.name,
+                "authorityBearing": False,
+            }
+        )
+
+    current_responsibility: dict[str, Any] | None = None
+    if workflow.workflow_type == LISTING_PUBLICATION_WORKFLOW:
+        listing_items = [item for item in items if (item.payload_json or {}).get("listing_id")]
+        explain_item: WorkItem | None = None
+        if len(listing_items) == 1:
+            explain_item = listing_items[0]
+        else:
+            bound_items = [
+                item
+                for item in listing_items
+                if (item.payload_json or {}).get("authorization_ref")
+            ]
+            if len(bound_items) == 1:
+                explain_item = bound_items[0]
+        if explain_item is None:
+            current_responsibility = {
+                "kind": "listing-publication",
+                "eligible": False,
+                "status": "unavailable",
+                "authorizationCurrent": False,
+                "publicationQualificationCurrent": None,
+                "experienceRequired": None,
+                "experienceStatus": "unavailable",
+                "portableStatus": "unavailable",
+                "historicalUseRef": None,
+                "requirementDigest": None,
+                "applicableObligationRefs": [],
+                "reasons": ["listing-responsibility-work-item-ambiguous-or-missing"],
+                "authorityBearing": False,
+            }
+        else:
+            raw_auth_ref = (explain_item.payload_json or {}).get("authorization_ref")
+            authorization = None
+            if raw_auth_ref:
+                try:
+                    authorization = authorization_by_id.get(uuid.UUID(str(raw_auth_ref)))
+                except ValueError:
+                    authorization = None
+            try:
+                explanation = explain_listing_current_responsibility(
+                    db,
+                    run=workflow,
+                    item=explain_item,
+                    authorization=authorization,
+                )
+            except (NotFoundError, ValidationError) as exc:
+                current_responsibility = {
+                    "kind": "listing-publication",
+                    "eligible": False,
+                    "status": "unavailable",
+                    "authorizationCurrent": False,
+                    "publicationQualificationCurrent": None,
+                    "experienceRequired": None,
+                    "experienceStatus": "unavailable",
+                    "portableStatus": "unavailable",
+                    "historicalUseRef": None,
+                    "requirementDigest": None,
+                    "applicableObligationRefs": [],
+                    "reasons": [str(exc)],
+                    "authorityBearing": False,
+                }
+            else:
+                current_responsibility = {
+                    "kind": "listing-publication",
+                    "eligible": explanation.eligible,
+                    "status": explanation.status,
+                    "authorizationCurrent": explanation.authorization_current,
+                    "publicationQualificationCurrent": (
+                        explanation.publication_qualification_current
+                    ),
+                    "experienceRequired": explanation.experience_required,
+                    "experienceStatus": explanation.experience_status,
+                    "portableStatus": explanation.portable_status,
+                    "historicalUseRef": explanation.historical_use_ref,
+                    "requirementDigest": explanation.requirement_digest,
+                    "applicableObligationRefs": list(
+                        explanation.applicable_obligation_refs
+                    ),
+                    "reasons": list(explanation.reasons),
+                    "authorityBearing": False,
+                }
+
+    obligation_rows = [
+        {
+            "id": str(row.id),
+            "status": row.status.value,
+            "createdAt": row.created_at.isoformat(),
+            "dischargedAt": _iso(row.discharged_at),
+            "recordedByUserId": str(row.recorded_by_user_id),
+            "subjectRef": row.subject_ref,
+            "sourceKind": row.source_kind,
+            "sourceRef": row.source_ref,
+            "reason": row.reason,
+            "scope": row.scope,
+            "projectionRefs": list(row.projection_refs),
+        }
+        for row in responsibility_obligations
+    ]
+
     return {
         "schema": "commerce-responsibility-inspector-v1",
         "authorityBearing": False,
@@ -378,6 +527,7 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
             "status": workflow.status.value,
             "boundedCompletionOnly": True,
         },
+        "currentResponsibility": current_responsibility,
         "historical": [
             {
                 "subjectType": row.subject_type,
@@ -385,20 +535,13 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
                 "subjectVersion": row.subject_version,
                 "judgmentRef": row.judgment_ref,
                 "historicalUseRef": row.historical_use_ref,
+                "requirementDigest": row.requirement_digest,
+                "snapshotDigest": row.snapshot_digest,
+                "createdAt": row.created_at.isoformat(),
             }
             for row in bindings
         ],
-        "decisions": [
-            {
-                "id": str(row.id),
-                "workItemId": str(row.work_item_id),
-                "decision": row.decision.value,
-                "userId": str(row.user_id),
-                "createdAt": row.created_at.isoformat(),
-                "authorityBearing": False,
-            }
-            for row in decisions
-        ],
+        "decisions": decision_rows,
         "authorizations": [
             {
                 "id": str(row.id),
@@ -408,10 +551,13 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
                 "subjectVersion": row.subject_version,
                 "targetSystem": row.target_system,
                 "allowedOperations": list(row.allowed_operations),
+                "scope": dict(row.scope or {}),
                 "policyVersion": row.policy_version,
                 "environmentRef": row.environment_ref,
-                "expiresAt": None if row.expires_at is None else row.expires_at.isoformat(),
-                "revokedAt": None if row.revoked_at is None else row.revoked_at.isoformat(),
+                "issuedAt": row.issued_at.isoformat(),
+                "issuedByUserId": str(row.issued_by_user_id),
+                "expiresAt": _iso(row.expires_at),
+                "revokedAt": _iso(row.revoked_at),
             }
             for row in authorizations
         ],
@@ -443,11 +589,15 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
                 "id": str(row.id),
                 "effectId": str(row.effect_id),
                 "outcomeType": row.outcome_type,
+                "realizationAssessmentRef": str(row.realization_assessment_id),
                 "verificationRefs": list(row.evidence_refs),
+                "confirmedAt": row.confirmed_at.isoformat(),
+                "confirmedByUserId": str(row.confirmed_by_user_id),
                 "authorityBearing": False,
             }
             for row in outcomes
         ],
+        "responsibilityObligations": obligation_rows,
         "openResponsibility": [
             {
                 "id": str(row.id),
@@ -458,7 +608,7 @@ def workflow_responsibility_view(db, workflow_id: uuid.UUID) -> dict[str, Any]:
                 "scope": row.scope,
                 "projectionRefs": list(row.projection_refs),
             }
-            for row in obligations
+            for row in open_obligations
         ],
         "shortcuts": [
             "Decision != Authorization",
