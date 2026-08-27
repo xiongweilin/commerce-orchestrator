@@ -18,10 +18,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# portable-runtime 只作为构建期 reference/conformance oracle，不进入 Commerce runtime venv。
+# portable-runtime 同时作为 reference/conformance oracle 和 Commerce runtime dependency。
 # 此 SHA 必须与 docs/contracts/responsibility-compatibility.toml 的 reference_revision 一致；
 # backend/tests/test_reference_oracle_contract.py 对该一致性做 fail-closed 校验。
-ARG PORTABLE_RUNTIME_ORACLE_REV=53e7d3eabe5cfc01fff734825cb837e6a3cd8ed3
+ARG PORTABLE_RUNTIME_ORACLE_REV=b26487a6efe3933c5d92d637b522eac211e153c1
 RUN uv venv /opt/reference-oracle \
     && uv pip install --python /opt/reference-oracle/bin/python --no-deps \
       "portable-runtime @ https://github.com/xiongweilin/portable-runtime/archive/${PORTABLE_RUNTIME_ORACLE_REV}.tar.gz" \
@@ -41,6 +41,9 @@ COPY alembic.ini ./
 
 # 安装项目本身（editable），保证 `uv run uvicorn ...` / `uv run python -m app.worker` 可用
 RUN uv sync --frozen --no-dev
+# Commerce 的 responsibility runtime 消费同一个精确 pin；不从理论仓库动态加载语义。
+RUN uv pip install --python /app/.venv/bin/python --no-deps \
+    "portable-runtime @ https://github.com/xiongweilin/portable-runtime/archive/${PORTABLE_RUNTIME_ORACLE_REV}.tar.gz"
 
 # ------------------------- runtime：精简、非 root、无构建工具 -------------------------
 FROM python:3.12-slim AS runtime
@@ -61,6 +64,8 @@ RUN apt-get update \
 
 # 非 root 运行用户
 RUN groupadd --system app && useradd --system --gid app --no-create-home --home-dir /app app
+RUN mkdir -p /var/lib/commerce-responsibility \
+    && chown app:app /var/lib/commerce-responsibility
 
 WORKDIR /app
 
