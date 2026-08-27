@@ -18,28 +18,28 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("responsibility_binding", sa.Column("workflow_ref", sa.Uuid(), nullable=True))
-    op.create_foreign_key(
-        "fk_responsibility_binding_workflow_ref_workflow_run",
-        "responsibility_binding",
-        "workflow_run",
-        ["workflow_ref"],
-        ["id"],
-    )
+    with op.batch_alter_table("responsibility_binding") as batch_op:
+        batch_op.add_column(sa.Column("workflow_ref", sa.Uuid(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_responsibility_binding_workflow_ref_workflow_run",
+            "workflow_run",
+            ["workflow_ref"],
+            ["id"],
+        )
     op.create_index(
         "ix_responsibility_binding_workflow_ref",
         "responsibility_binding",
         ["workflow_ref"],
     )
 
-    op.add_column("responsibility_obligation", sa.Column("workflow_ref", sa.Uuid(), nullable=True))
-    op.create_foreign_key(
-        "fk_responsibility_obligation_workflow_ref_workflow_run",
-        "responsibility_obligation",
-        "workflow_run",
-        ["workflow_ref"],
-        ["id"],
-    )
+    with op.batch_alter_table("responsibility_obligation") as batch_op:
+        batch_op.add_column(sa.Column("workflow_ref", sa.Uuid(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_responsibility_obligation_workflow_ref_workflow_run",
+            "workflow_run",
+            ["workflow_ref"],
+            ["id"],
+        )
     op.create_index(
         "ix_responsibility_obligation_workflow_ref",
         "responsibility_obligation",
@@ -49,17 +49,17 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_responsibility_obligation_workflow_ref", table_name="responsibility_obligation")
-    op.drop_constraint(
-        "fk_responsibility_obligation_workflow_ref_workflow_run",
-        "responsibility_obligation",
-        type_="foreignkey",
-    )
-    op.drop_column("responsibility_obligation", "workflow_ref")
+    with op.batch_alter_table("responsibility_obligation") as batch_op:
+        batch_op.drop_constraint(
+            "fk_responsibility_obligation_workflow_ref_workflow_run",
+            type_="foreignkey",
+        )
+        batch_op.drop_column("workflow_ref")
 
     op.drop_index("ix_responsibility_binding_workflow_ref", table_name="responsibility_binding")
-    op.drop_constraint(
-        "fk_responsibility_binding_workflow_ref_workflow_run",
-        "responsibility_binding",
-        type_="foreignkey",
-    )
-    op.drop_column("responsibility_binding", "workflow_ref")
+    with op.batch_alter_table("responsibility_binding") as batch_op:
+        batch_op.drop_constraint(
+            "fk_responsibility_binding_workflow_ref_workflow_run",
+            type_="foreignkey",
+        )
+        batch_op.drop_column("workflow_ref")
