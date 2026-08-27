@@ -1,6 +1,6 @@
 # 事件契约（唯一事实源）
 
-> 本文档是事件信封、事件类型、effect 操作、反馈类型的唯一契约事实源。**命名不可改动**；其他子代理/实现使用完全相同的字符串。关联决策：ADR-0005（信封与 outbox/inbox）。
+> 本文档是事件信封、事件类型、effect 操作、反馈类型的契约事实源。命名不可随意改动；实现新增事件时必须同步此文件。关联决策：ADR-0005、ADR-0011、ADR-0012。
 
 ## 1. 事件信封
 
@@ -9,19 +9,19 @@
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `eventId` | uuid（uuid7） | 是 | 事件唯一 id |
-| `type` | string | 是 | 事件类型，见第 2 节枚举 |
-| `aggregateId` | string | 是 | 业务聚合 id（如目录修订 id、退款 case id） |
-| `version` | int | 是 | 聚合版本号（乐观并发） |
-| `occurredAt` | string（ISO-8601 UTC） | 是 | 发生时刻 |
-| `correlationId` | uuid | 是 | 根追踪 id，贯穿全链路 |
-| `causationId` | uuid? | 否 | 产生本事件的上游事件/命令 id；根为 null |
-| `producer` | string | 是 | 产生方域名，见第 5 节 |
-| `schemaVersion` | int | 是 | 事件 payload schema 版本，起始 1 |
-| `payload` | object | 是 | 业务负载（按类型定义） |
-| `traceparent` | string? | 否 | W3C trace context（`00-<trace-id>-<span-id>-01`）；API ingress 创建 span 后随 outbox 事件传播，worker 提取并为其建 span |
-| `tracestate` | string? | 否 | W3C trace context 附加状态（vendor 字段，随 `traceparent` 一起透传） |
+| `type` | string | 是 | 事件类型，见第 2 节 |
+| `aggregateId` | string | 是 | 业务聚合 id |
+| `version` | int | 是 | 聚合版本号 |
+| `occurredAt` | ISO-8601 UTC | 是 | 发生时刻 |
+| `correlationId` | uuid | 是 | 根追踪 id |
+| `causationId` | uuid? | 否 | 上游事件/命令 id |
+| `producer` | string | 是 | 产生方域名 |
+| `schemaVersion` | int | 是 | payload schema 版本，从 1 开始 |
+| `payload` | object | 是 | 业务负载 |
+| `traceparent` | string? | 否 | W3C trace context |
+| `tracestate` | string? | 否 | W3C trace context 附加状态 |
 
-## 2. 事件类型清单（命名不可改动）
+## 2. 事件类型清单
 
 ### feedback
 
@@ -49,33 +49,58 @@
 
 ### workflow
 
-`workflow.accepted` · `workflow.decision_recorded` · `workflow.completed` · `workflow.failed` · `workflow.cancelled`
+`workflow.accepted` · `workflow.decision_recorded` · `workflow.completion_recheck_requested` · `workflow.completed` · `workflow.failed` · `workflow.cancelled`
 
-#### `workflow.decision_recorded` payload
+#### `workflow.decision_recorded`
 
-审批决定落库后由工作流域发出，worker 以 `DBOS.send(destination=workflow_id, topic=work_item_id, idempotency_key=decision_id)` 送达对应 workflow（durable decision messaging，ADR-0011）。字段：
+审批决定落库后发出。worker 通过：
+
+```text
+DBOS.send(
+  destination=workflow_id,
+  topic=work_item_id,
+  idempotency_key=decision_id,
+)
+```
+
+将决定 durable 送达工作流。payload 至少包含：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `workflow_id` | uuid | 目标 workflow run id（= DBOS workflow id） |
-| `work_item_id` | uuid | 决定所属 work item id（= DBOS.send topic） |
-| `decision_id` | uuid | `WorkItemDecision` id（= DBOS.send idempotency key，防重复送达） |
+| `workflow_id` | uuid | 目标 workflow run id |
+| `work_item_id` | uuid | work item id / DBOS topic |
+| `decision_id` | uuid | `WorkItemDecision` id / send idempotency key |
 | `decision` | string | `approve \| reject \| confirm \| cancel` |
-| `actor_user_id` | uuid | 审批人 |
-| `reason` | string? | 审批备注 |
-| `submitted_version` | int | 提交时携带的版本（`expectedWorkflowVersion`） |
+| `actor_user_id` | uuid | 决策人 |
+| `reason` | string? | 决策备注 |
+| `submitted_version` | int | `expectedWorkflowVersion` |
 
-投递语义：`DBOS.send` 幂等，重复 relay 不产生第二条业务流程；决策早于 `DBOS.recv` 时 workflow 仍能正确收到。
+重复 relay 不产生第二条业务决策；决定早于 `DBOS.recv` 到达也必须可被后续接收。
+
+#### `workflow.completion_recheck_requested`
+
+仅用于已处于 blocked completion assessment 的 workflow。它要求等待中的 DBOS workflow 重新评估当前 bounded-completion evidence，不创建新证据、不直接改变 workflow 状态。
+
+payload：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `workflow_id` | uuid | 要求重新评估的 workflow |
+| `requested_by_user_id` | uuid | 请求人 |
+
+worker 将该事件转为 `DBOS.send` 到固定 topic `completion-recheck`。
 
 ### effect
 
 `effect.planned` · `effect.dispatched` · `effect.succeeded` · `effect.failed` · `effect.outcome_unknown` · `effect.reconciled` · `effect.manual_reconciliation`
 
+`effect.succeeded` 只表示 adapter/execution report 成功，不等价于 `ConfirmedOutcome`。
+
 ## 3. 初始反馈类型（固定 11 类）
 
 `product_quality` · `content_accuracy` · `pricing_promotion` · `availability` · `payment` · `fulfillment` · `packaging` · `service` · `return_refund` · `fraud_abuse` · `other`
 
-## 4. Effect 操作清单（system.operation）
+## 4. Effect 操作清单
 
 ### shopify
 
@@ -87,17 +112,31 @@
 
 ## 5. producer / schemaVersion 规则
 
-**producer 取值**（与事实所有权表一致）：
+producer：
 
 `feedback_intelligence` · `operating_policy` · `catalog` · `listing` · `order` · `procurement` · `return` · `workflow` · `effect` · `shopify_adapter` · `odoo_adapter`
 
 规则：
 
-- 事件 `type` 必须属于对应 producer 的域（如 `catalog.*` 只能由 `catalog` 或经授权的下游产生，见 data-ownership.md）。
-- `schemaVersion` 从 1 开始，**仅追加式演进**：允许新增字段，禁止重命名/删除/改类型；破坏性变更必须升 `schemaVersion` 并编写消费端迁移映射。
+- 事件 `type` 必须属于对应 producer 的域。
+- `schemaVersion` 从 1 开始，默认仅追加式演进；破坏性变更必须升版本并提供消费端迁移映射。
 - 消费者必须忽略未知字段；同一事件重新投递不改变 `eventId`。
-- inbox 唯一键 `(consumer, eventId)`；跨数据库边界使用显式 outbox（ADR-0005）。
+- inbox 唯一键为 `(consumer, eventId)`。
+- 同库内 workflow durability 由 DBOS 负责，不额外构建第二套队列真相。
+- 跨数据库边界按 ADR-0005 使用显式 outbox。
 
-## 6. 事件流示例（首条纵向切片）
+## 6. 当前主链示例
 
-`feedback.observed → feedback.clustered → feedback.candidate_created → feedback.reviewed → feedback.promoted → catalog.revision_drafted → catalog.normalized → catalog.validated → catalog.approved → catalog.official → listing.publishing → listing.published → effect.planned → effect.dispatched → effect.succeeded → effect.reconciled → workflow.completed`
+```text
+workflow.accepted
+  -> DBOS workflow
+  -> workflow.decision_recorded (需要人工决策时)
+  -> effect.planned
+  -> effect.dispatched
+  -> effect.succeeded | effect.failed | effect.outcome_unknown
+  -> reality verification / reconciliation
+  -> workflow.completion_recheck_requested (仅 blocked completion 后显式请求)
+  -> workflow.completed
+```
+
+责任层的 `ExecutionAuthorization`、`EffectRealizationAssessment`、`ConfirmedOutcome`、`ResponsibilityObligation` 等主要是持久化语义记录，不因为存在对应表就强制要求新增同名事件。事件与记录类型不得互相推断等价关系。

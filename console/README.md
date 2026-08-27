@@ -1,96 +1,188 @@
 # Operations Console
 
-The **internal operations console** of the e-commerce control tower (Next.js 16 + TypeScript, App Router). Used to view workflows, the approval inbox, reconciliation differences, failed-inbox operations, and to issue operations commands. The backend is FastAPI (default `http://localhost:8000`, API v1), accessed through a same-origin **BFF secure session** — no direct backend connection, no JWT in localStorage.
+Next.js 16 + React 19 + TypeScript operations console for Commerce Orchestrator. The console is an internal inspection/request surface over the FastAPI backend; it is deliberately **non-authoritative**.
 
-## Tech stack
+It can request decisions and display responsibility/authority facts, but it does not mint or infer execution authority.
 
-- Next.js 16.x (`output: "standalone"`, App Router, server components + client forms)
-- React 19.x, TypeScript (strict)
-- Zero extra runtime dependencies: no Tailwind, no UI library; hand-written CSS (`app/globals.css`, light theme + dark header, Chinese UI)
+## Runtime and security model
+
+- App Router / TypeScript strict mode.
+- Same-origin BFF secure session.
+- JWT is stored only in an HttpOnly `commerce_session` cookie after backend `/v1/me` verification.
+- Non-GET BFF requests require CSRF token + Origin validation.
+- Client components call the same-origin BFF; they do not receive the JWT.
+- Server components may call `COMMERCE_API_BASE` with the server-side session.
+- No JWT in `localStorage`.
 
 ## Quick start
 
-Requirements: Node.js >= 20.9 (24 recommended), npm 11.
-
 ```bash
 npm install
-npm run dev        # dev mode http://localhost:3000
-npm run build      # production build (outputs .next/standalone, used by the Dockerfile)
-npm start          # production start http://localhost:3000
-npm run gen:types  # generate TypeScript types from the backend OpenAPI (lib/generated/openapi.ts)
+npm run dev
+npm run build
+npm run gen:types
 ```
 
-> Windows note: ports 3001–3100 are in the system reserved range on this machine (`netsh interface ipv4 show excludedportrange protocol=tcp`), and binding fails with `EACCES`. Use a port outside the reserved range for development, e.g. `npm run dev -- -p 3200` or `npm start -- -H 127.0.0.1 -p 3200`.
+Requirements: Node.js >= 20.9; Node 24 / npm 11 are recommended for this sandbox.
 
-## Environment variables
+Generated API types come from backend FastAPI OpenAPI and are written to `lib/generated/openapi.ts`. Do not hand-edit that file.
 
-| Variable | Default | Notes |
+## Environment
+
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `COMMERCE_API_BASE` | `http://localhost:8000` | backend FastAPI address (**server-private**, used only by BFF/server components; the client only reaches the same-origin BFF) |
-| `COMMERCE_CONSOLE_ORIGIN` | request's own origin | allowed console origin (Origin check for BFF non-GET requests; read first, falls back to `CONSOLE_ORIGIN`; when unset, the request's own origin) |
-| `COMMERCE_SESSION_MOCK` | unset | dev mode only (non-production): `1` makes POST /api/session skip the backend `/v1/me` verification |
-| `OPENAPI_URL` | `<COMMERCE_API_BASE>/openapi.json` | full URL `npm run gen:types` pulls the OpenAPI from |
+| `COMMERCE_API_BASE` | `http://localhost:8000` | server-private FastAPI base URL |
+| `COMMERCE_CONSOLE_ORIGIN` | request origin | non-GET Origin validation |
+| `COMMERCE_SESSION_MOCK` | unset | non-production development-only session verification bypass |
+| `OPENAPI_URL` | `<COMMERCE_API_BASE>/openapi.json` | type generation source |
 
-## Authentication
+## Current pages
 
-Uses the **Next.js BFF secure session** (rework plan §4.3):
+The console currently includes operations views for:
 
-- Enter a JWT once in the top-right; `POST /api/session` has the BFF verify it against the backend `/v1/me`, then writes the JWT to an **HttpOnly cookie** (`commerce_session`, `SameSite=Strict`, `Path=/`, `Secure` forced outside dev, Max-Age no longer than the JWT's remaining TTL and ≤ 8 hours), and generates a non-sensitive `commerce_csrf` cookie.
-- Client components always reach the same-origin BFF `/api/backend[...]`, never touching the JWT; non-GET requests carry `X-CSRF-Token` (matching the `commerce_csrf` cookie) + an Origin check.
-- Server components read the HttpOnly session via `lib/server-auth.ts` and connect to `COMMERCE_API_BASE` directly.
-- `DELETE /api/session` logs out and clears both cookies.
+- overview/runtime health;
+- workflows and workflow detail;
+- approval inbox;
+- reconciliation runs and differences;
+- command entry;
+- failed inbox operations for `system_admin`;
+- Responsibility Inspector for workflow responsibility chains.
 
-> The backend `/v1/me` is implemented; in dev mode `COMMERCE_SESSION_MOCK=1` can temporarily skip backend verification (effective only when `NODE_ENV !== "production"`).
+The backend remains the source of status/eligibility/authority decisions.
 
-## Pages
+## Approval behavior
 
-| Route | Page | Main API |
-| --- | --- | --- |
-| `/` | Overview: workflow-count cards, quick entries, system status | `GET /v1/workflows?limit=1` (reads total) |
-| `/workflows` | Workflow list: status filter, refresh, pagination; rows link to details | `GET /v1/workflows?status=&limit=&offset=` |
-| `/workflows/[id]` | Workflow details: status header, current step, version, event timeline, effect ledger, work-item decision form | `GET /v1/workflows/{id}`、`POST /v1/work-items/{id}/decisions` |
-| `/approvals` | Approval inbox: pending work-item cards + inline approve/reject forms | `GET /v1/work-items?status=pending` |
-| `/reconciliations` | Reconciliation: start a run (with Idempotency-Key) + run list | `POST/GET /v1/reconciliations` |
-| `/reconciliations/[runId]` | Reconciliation details: differences table (MANUAL_RECONCILIATION highlighted) + resolution-note form | `GET /v1/reconciliations/{runId}`、`POST /v1/reconciliations/{runId}/diffs/{diffId}/resolve` |
-| `/ops/inbox` | Ops inbox: failed-inbox view + retry (navigation visible only to system_admin) | `GET /v1/ops/inbox?status=failed`、`POST /v1/ops/inbox/{id}/retry` |
-| `/commands` | Command entry: type selection + JSON payload + a fresh Idempotency-Key each time, shows the 202 result | `POST /v1/catalog-revisions`、`/v1/listing-publications`、`/v1/procurements`、`/v1/returns`、`/v1/reconciliations` |
+`DecisionForm` distinguishes ordinary decisions from approvals that require execution authority.
 
-The overview page has four health cards (worker / inbox / effect / reconciliation), sourced from `GET /readyz` and `GET /v1/ops/runtime`.
+For a pending work item the console consumes the server-projected:
+
+```text
+authorizationProfile
+```
+
+Current values are:
+
+```text
+listing-publication-v1
+return-credit-note-v1
+return-refund-v1
+```
+
+If approve requires a profile, the console calls:
+
+```text
+POST /v1/work-items/{work_item_id}/authorized-decisions
+```
+
+Otherwise it calls:
+
+```text
+POST /v1/work-items/{work_item_id}/decisions
+```
+
+Reject remains an ordinary Decision.
+
+The console sends a fresh `Idempotency-Key` for decision requests and includes `expectedWorkflowVersion`.
+
+### Fail-closed profile resolution
+
+If the page did not already receive an explicit profile, `DecisionForm` resolves the profile from the pending work-item projection. If that lookup fails, approval is paused rather than guessing that no authorization is required.
+
+### What the console does not do
+
+The console must not infer authority from:
+
+- `allowedOperations`;
+- `scope.channel` or other scope values;
+- projection refs;
+- portable status;
+- historical Experience use;
+- a successful effect status.
+
+It only selects the appropriate request path from server-projected profile metadata. Actual target system, allowed operations, subject bindings and dispatch eligibility are revalidated by the backend.
+
+## Responsibility Inspector
+
+The workflow Responsibility Inspector consumes:
+
+```text
+GET /v1/workflows/{workflow_id}/responsibility
+```
+
+The server response is explicitly non-authority-bearing and exposes separate sections for:
+
+```text
+CURRENT responsibility
+HISTORICAL reliance
+Decisions
+ExecutionAuthorizations
+Execution effects
+Reality assessments
+ConfirmedOutcomes
+Responsibility obligations
+Open responsibility
+```
+
+The UI preserves the distinction between CURRENT and HISTORICAL:
+
+- historical records describe what was relied on at the time;
+- current responsibility is a fresh server evaluation;
+- historical existence never becomes current eligibility through client logic.
+
+The UI also keeps:
+
+```text
+Decision != Authorization
+EffectLedger.succeeded != ConfirmedOutcome
+workflow completed != universal responsibility discharge
+```
+
+as presentation constraints.
+
+Discharged responsibility obligations remain visible in historical responsibility data, while `openResponsibility` contains only current open obligations.
+
+## Health / ops
+
+Overview health data comes from backend probes and `GET /v1/ops/runtime` where the current session has the required role.
+
+Backend probes:
+
+```text
+/livez
+/healthz
+/readyz
+```
+
+`/readyz` includes database, Alembic head, adapter configuration and worker heartbeat checks.
 
 ## Directory structure
 
 ```text
 console/
-├── app/                     # App Router pages (layout / overview / workflows / approvals / reconciliations / commands / ops)
-│   ├── api/                 # BFF routes: session / me / backend proxy (CSRF + Origin check)
-│   ├── globals.css          # global styles (hand-written CSS)
-│   ├── workflows/[id]/     # workflow details
-│   ├── reconciliations/[runId]/  # reconciliation details
-│   └── ops/inbox/           # failed-inbox view + retry (system_admin)
-├── components/              # StatusBadge / ErrorBox / Loading / forms / refresh button / session management / health cards
+├── app/                     App Router pages and BFF routes
+│   ├── api/                 session / me / backend proxy
+│   ├── workflows/           workflow views + Responsibility Inspector
+│   ├── reconciliations/     reconciliation views
+│   └── ops/                 system-admin operations
+├── components/              forms/status/error/health/responsibility UI
 ├── lib/
-│   ├── api.ts               # fetch wrapper: server connects to COMMERCE_API_BASE / client goes through the same-origin BFF + CSRF
-│   ├── types.ts             # API v1 contract types (read models per api-contract.md; command types from generated)
-│   ├── generated/openapi.ts # generated from OpenAPI by scripts/gen-types.mjs (never hand-edit)
-│   ├── session.ts           # session cookie constants (client/server shared)
-│   ├── session-server.ts    # session cookie read/write / CSRF / Max-Age computation (server)
-│   ├── format.ts            # time / short-id / JSON display helpers
-│   └── server-auth.ts       # server reads JWT / current user from the HttpOnly session (fail-closed)
-├── scripts/gen-types.mjs    # OpenAPI -> TypeScript type generation (deterministic output)
-├── public/favicon.svg
+│   ├── api.ts               API wrapper + Idempotency-Key helpers
+│   ├── generated/openapi.ts generated FastAPI schema types
+│   ├── session*.ts          BFF session helpers
+│   ├── server-auth.ts       server-side auth access
+│   └── types.ts             console-specific projections
+├── scripts/gen-types.mjs
 ├── package.json
-├── package-lock.json        # generated by npm install
-├── tsconfig.json
-├── next.config.ts           # output: "standalone"
-└── next-env.d.ts
+└── next.config.ts
 ```
 
-## Notes (assumptions made while implementing)
+## Build-time behavior
 
-- Workflow/work-item/reconciliation status values are authoritative on the backend; unknown statuses show the raw string (neutral-gray badge). `MANUAL_RECONCILIATION` shows as a purple highlighted badge "人工对账".
-- The reconciliation `summary` difference-count field name is not fixed; compatible with `diffCount / diff_count / unmatched / mismatchCount / unresolved` naming, showing "—" when unavailable.
-- The workflow-list status filter set is the seven states of plan §2.1: `accepted / running / awaiting_approval / completed / needs_reconciliation / failed / cancelled`.
-- The reconciliation-difference resolve endpoint may not be wired yet: when the backend returns 404/405/501 or the corresponding error code, the page shows an "interface not ready" message instead of crashing.
-- The workflow event contract field is `type` (no longer `eventType`); approval decisions submit `expectedWorkflowVersion` (compatibly reads legacy `expectedVersion`).
-- The backend `/v1/me`, `/readyz`, `/livez`, `/v1/ops/*` are all implemented; when the backend is unreachable, the corresponding cards show "unknown".
-- All data pages render dynamically (`force-dynamic`), never requesting the backend at build time; when the backend is unreachable, pages show an error message instead of failing the build.
+Data pages are dynamic and should not require a live backend during `npm run build`. Runtime backend failures are rendered as operational errors rather than converting the console into an authority source or silently assuming success.
+
+## Documentation
+
+- `../docs/current-implementation.md`
+- `../docs/contracts/api-contract.md`
+- `../docs/contracts/responsibility-alignment.md`
+- `../docs/architecture/responsibility-layering.md`
