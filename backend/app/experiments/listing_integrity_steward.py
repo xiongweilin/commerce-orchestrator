@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from portable_runtime.core.models import Run
 from portable_runtime.responsibility import (
     Commitment,
-    EffectClass,
     ListingIntegrityState,
     PortfolioAdmissionDecision,
     PriorityDimensions,
@@ -32,6 +32,7 @@ from portable_runtime.responsibility import (
     listing_integrity_proposal,
     record_domain_assessment,
 )
+from portable_runtime.workflows.completion import CompletionAuthority
 
 from app.core.errors import ValidationError
 from app.models.catalog import CatalogRevision
@@ -392,12 +393,25 @@ def route_external_repair() -> EscalationRoute:
 def complete_steward_work(
     kernel: ResponsibilityKernel,
     commitment: Commitment,
+    *,
+    run: Run,
+    verification_refs: list[str],
 ) -> tuple[str, ResponsibilityStatus]:
-    """Complete bounded Work without discharging the StandingResponsibility."""
+    """Complete bounded Work only through the portable terminal authority gate."""
 
     work = kernel.materialize_work(commitment.id)
-    if work.status != "completed":
-        kernel.store.save_work(work.model_copy(update={"status": "completed"}))
+    if run.work_id != work.id:
+        raise ValidationError("steward run must bind the materialized responsibility Work")
+    existing_run = kernel.store.get_run(run.id)
+    if existing_run is None:
+        kernel.store.save_run(run)
+    elif existing_run.work_id != work.id:
+        raise ValidationError("steward run id is already bound to another Work")
+    CompletionAuthority(kernel.store).authorize(
+        work=work,
+        run=run,
+        verification_refs=verification_refs,
+    )
     return work.id, kernel.current_status(commitment.responsibility_ref)
 
 
