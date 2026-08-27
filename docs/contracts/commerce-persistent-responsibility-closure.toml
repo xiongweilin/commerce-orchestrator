@@ -1,0 +1,17 @@
+closure_version = "commerce-persistent-responsibility-closure-v1"
+status = "candidate"
+portable_revision = "b26487a6efe3933c5d92d637b522eac211e153c1"
+portable_contract = "persistent-responsibility-v1"
+commerce_alignment = "commerce-responsibility-alignment-v1"
+listing_integrity_profile = "c20"
+
+[validated]
+canonical_objects = true
+restart_continuity = true
+effect_authority_separate = true
+terminal_completion_authority_preserved = true
+worker_uses_durable_store = true
+
+[evidence]
+commerce_merge_sha = "pending"
+github_actions_run_id = "pending"

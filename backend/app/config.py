@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # Runtime
     environment: str = "dev"
     log_level: str = "INFO"
+    responsibility_state_path: str = ".runtime/responsibility.sqlite3"
 
     # Inbox relay (WP4; field names fixed by .env.example)
     inbox_poll_interval_ms: int = 500
