@@ -195,7 +195,7 @@ class CommerceResponsibilityStore:
         if errors:
             raise ValidationError("invalid portable responsibility relation: " + "; ".join(errors))
         event = Event(
-            id=value.id,
+            id=f"event_relation_{value.id}",
             type=_RELATION_EVENT_TYPE,
             subject_ref=value.subject_ref,
             payload={"relation": value.model_dump(mode="json")},
@@ -207,7 +207,7 @@ class CommerceResponsibilityStore:
         """Persist explicit governance provenance; this does not authorize Commerce effects."""
 
         event = Event(
-            id=value.id,
+            id=f"event_authorization_{value.id}",
             type=_AUTHORIZATION_EVENT_TYPE,
             subject_ref=value.id,
             payload={"authorization": value.model_dump(mode="json")},
