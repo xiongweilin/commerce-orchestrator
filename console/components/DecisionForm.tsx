@@ -5,22 +5,30 @@ import { useRouter } from "next/navigation";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
 import type { WorkItemDecisionResponse } from "@/lib/types";
 
+type AuthorizationProfile =
+  | "listing-publication-v1"
+  | "return-credit-note-v1"
+  | "return-refund-v1";
+
 interface AuthorizedDecisionResponse extends WorkItemDecisionResponse {
   authorizationId: string;
+  authorizationProfile: AuthorizationProfile;
 }
 
-/**
- * 工作项决策表单。listing-publication 的批准动作显式调用 authorized-decision；
- * 普通 Decision 不会自动产生 ExecutionAuthorization。
- */
+const profileLabel: Record<AuthorizationProfile, string> = {
+  "listing-publication-v1": "批准并显式授权发布",
+  "return-credit-note-v1": "批准并授权 Odoo 贷项通知单",
+  "return-refund-v1": "批准并授权 Shopify 退款",
+};
+
 export default function DecisionForm({
   workItemId,
   expectedWorkflowVersion,
-  requiresExecutionAuthorization = false,
+  authorizationProfile = null,
 }: {
   workItemId: string;
   expectedWorkflowVersion: number;
-  requiresExecutionAuthorization?: boolean;
+  authorizationProfile?: AuthorizationProfile | null;
 }) {
   const router = useRouter();
   const [decision, setDecision] = useState<"approve" | "reject">("approve");
@@ -35,7 +43,7 @@ export default function DecisionForm({
     setError(null);
     setSuccess(null);
     try {
-      const authorized = requiresExecutionAuthorization && decision === "approve";
+      const authorized = authorizationProfile !== null && decision === "approve";
       const path = authorized
         ? `/v1/work-items/${workItemId}/authorized-decisions`
         : `/v1/work-items/${workItemId}/decisions`;
@@ -44,7 +52,9 @@ export default function DecisionForm({
             decision: "approve" as const,
             reason: reason.trim() ? reason.trim() : undefined,
             expectedWorkflowVersion,
-            scope: { purpose: "publish", channel: "shopify" },
+            ...(authorizationProfile === "listing-publication-v1"
+              ? { scope: { purpose: "publish", channel: "shopify" } }
+              : {}),
           }
         : {
             decision,
@@ -84,7 +94,7 @@ export default function DecisionForm({
             checked={decision === "approve"}
             onChange={() => setDecision("approve")}
           />
-          {requiresExecutionAuthorization ? "批准并显式授权发布" : "批准"}
+          {authorizationProfile ? profileLabel[authorizationProfile] : "批准"}
         </label>
         <label className="radio">
           <input
@@ -97,9 +107,9 @@ export default function DecisionForm({
           拒绝
         </label>
       </div>
-      {requiresExecutionAuthorization && decision === "approve" ? (
+      {authorizationProfile && decision === "approve" ? (
         <p className="muted">
-          此动作会同时记录 Decision 与独立的 exact-scope ExecutionAuthorization；二者不是同一事实。
+          此动作记录 Decision 与独立的 exact-scope ExecutionAuthorization；允许的系统、操作与业务范围由服务器计算。
         </p>
       ) : null}
       <textarea
