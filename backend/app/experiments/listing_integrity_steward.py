@@ -401,11 +401,13 @@ def complete_steward_work(
     run: Run,
     verification_refs: list[str],
 ) -> tuple[str, ResponsibilityStatus]:
-    """Complete bounded Work only through the portable terminal authority gate."""
+    """Complete the persisted run-bound Work through the portable terminal gate."""
 
-    work = kernel.materialize_work(commitment.id)
-    if run.work_id != work.id:
-        raise ValidationError("steward run must bind the materialized responsibility Work")
+    work = kernel.store.get_work(run.work_id)
+    if work is None:
+        raise ValidationError("steward run must bind an existing responsibility Work")
+    if work.metadata.get("responsibility_commitment_ref") != commitment.id:
+        raise ValidationError("steward Work is not bound to the supplied Commitment")
     existing_run = kernel.store.get_run(run.id)
     if existing_run is None:
         kernel.store.save_run(run)
