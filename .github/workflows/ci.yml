@@ -16,9 +16,32 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: commerce-orchestrator/backend
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: commerce-orchestrator
+
+      - name: Read pinned portable-runtime revision
+        id: portable-pin
+        working-directory: commerce-orchestrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["portable_runtime_revision"])')"
+          printf 'revision=%s\n' "$REV" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: xiongweilin/portable-runtime
+          ref: ${{ steps.portable-pin.outputs.revision }}
+          path: portable-runtime
+          token: ${{ secrets.PORTABLE_RUNTIME_TOKEN || github.token }}
+
+      - name: Verify portable-runtime checkout
+        shell: pwsh
+        working-directory: commerce-orchestrator
+        run: ./tools/Verify-PortableRuntimeRevision.ps1 -PortableRuntimePath ../portable-runtime
 
       - name: Install uv (pinned to uv.lock generation version)
         uses: astral-sh/setup-uv@v7
@@ -28,13 +51,8 @@ jobs:
       - name: Install locked dependencies (incl. dev extras)
         run: uv sync --frozen --extra dev
 
-      - name: Install pinned portable-runtime reference oracle
-        shell: bash
-        run: |
-          set -euo pipefail
-          REV="$(.venv/bin/python -c 'import tomllib; print(tomllib.load(open("../docs/contracts/responsibility-compatibility.toml", "rb"))["reference_revision"])')"
-          uv pip install --python .venv/bin/python --no-deps \
-            "portable-runtime @ https://github.com/xiongweilin/portable-runtime/archive/${REV}.tar.gz"
+      - name: Install pinned portable-runtime runtime wheel
+        run: uv pip install --python .venv/bin/python --no-deps ../../portable-runtime
 
       - name: Ruff lint
         run: uv run ruff check app
@@ -71,18 +89,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: commerce-orchestrator
+
+      - name: Read pinned portable-runtime revision
+        id: portable-pin
+        working-directory: commerce-orchestrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["portable_runtime_revision"])')"
+          printf 'revision=%s\n' "$REV" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: xiongweilin/portable-runtime
+          ref: ${{ steps.portable-pin.outputs.revision }}
+          path: portable-runtime
+          token: ${{ secrets.PORTABLE_RUNTIME_TOKEN || github.token }}
+
+      - name: Verify portable-runtime checkout
+        shell: pwsh
+        working-directory: commerce-orchestrator
+        run: ./tools/Verify-PortableRuntimeRevision.ps1 -PortableRuntimePath ../portable-runtime
 
       - name: Build backend builder target
-        run: docker build --target builder -t commerce-orchestrator-backend-builder:ci ./backend
+        working-directory: commerce-orchestrator
+        run: docker build --target builder --build-context portable_runtime=../portable-runtime -t commerce-orchestrator-backend-builder:ci ./backend
 
       # env_file: .env 要求文件存在；用模板生成（模板内只有占位符）
       - name: Prepare .env from template
-        run: cp .env.example .env
+        working-directory: commerce-orchestrator
+        run: |
+          cp .env.example .env
+          printf '\nPORTABLE_RUNTIME_CONTEXT=../portable-runtime\n' >> .env
 
       - name: Validate compose file
+        working-directory: commerce-orchestrator
         run: docker compose config -q
 
       - name: Assert required service topology
+        working-directory: commerce-orchestrator
         run: |
           set -euo pipefail
           services="$(docker compose config --services)"

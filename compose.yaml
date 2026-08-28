@@ -78,7 +78,10 @@ services:
   # 一次性迁移：以 commerce_migrator 角色执行 Alembic DDL（uv run alembic upgrade head）。
   # API/worker 启动时不自行改 schema。
   migrate:
-    build: ./backend
+    build:
+      context: ./backend
+      additional_contexts:
+        portable_runtime: ${PORTABLE_RUNTIME_CONTEXT:-D:/agent/portable-runtime}
     image: commerce-orchestrator-backend:local
     container_name: commerce-migrate
     restart: "no"
@@ -92,7 +95,10 @@ services:
         condition: service_completed_successfully
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      additional_contexts:
+        portable_runtime: ${PORTABLE_RUNTIME_CONTEXT:-D:/agent/portable-runtime}
     image: commerce-orchestrator-backend:local  # api/worker 共用镜像，compose 只构建一次
     container_name: commerce-api
     restart: unless-stopped
@@ -121,7 +127,10 @@ services:
       start_period: 20s
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      additional_contexts:
+        portable_runtime: ${PORTABLE_RUNTIME_CONTEXT:-D:/agent/portable-runtime}
     image: commerce-orchestrator-backend:local
     container_name: commerce-worker
     restart: unless-stopped

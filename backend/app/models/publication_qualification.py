@@ -25,7 +25,9 @@ class PublicationQualificationAssessment(UUIDPkMixin, Base):
     __tablename__ = "publication_qualification_assessment"
 
     catalog_revision_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("catalog_revision.id"), nullable=False, index=True
+        ForeignKey("catalog_revision.id", name="fk_pub_qual_assessment_catalog_revision_id"),
+        nullable=False,
+        index=True,
     )
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
     purpose: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -45,7 +47,10 @@ class PublicationQualificationAssessment(UUIDPkMixin, Base):
     )
     evidence_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     assessed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("user.id"), nullable=True, index=True
+        Uuid,
+        ForeignKey("user.id", name="fk_pub_qual_assessment_assessed_by_user"),
+        nullable=True,
+        index=True,
     )
     assessed_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
