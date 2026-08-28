@@ -4,6 +4,8 @@ Responsibilities:
 
 - bootstrap DBOS (v2 single-mainline definitions) and **exit non-zero** on
   any bootstrap/launch failure — there is no idle-loop fallback;
+- bootstrap the durable portable responsibility journal and listing-integrity
+  StandingResponsibility without granting effect authority;
 - run the inbox relay loop (SKIP LOCKED claim, lease recovery, backoff,
   dead-letter) for the ``worker`` consumer;
 - heartbeat ``runtime_heartbeat`` (upsert semantics per WP1);
@@ -256,9 +258,20 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("worker_starting")
 
     try:
+        from app.experiments.listing_integrity_steward import (
+            ensure_listing_integrity_responsibility,
+        )
+        from app.responsibility.runtime import get_responsibility_kernel
         from app.workflows.bootstrap import start_worker
 
         start_worker()  # raises on bootstrap / DBOS launch failure
+        responsibility_kernel = get_responsibility_kernel()
+        responsibility = ensure_listing_integrity_responsibility(responsibility_kernel)
+        logger.info(
+            "responsibility_runtime_ready",
+            responsibility_ref=responsibility.id,
+            state_path=str(getattr(responsibility_kernel.store, "path", "")),
+        )
     except Exception:
         logger.exception("worker_bootstrap_failed")
         return 1
@@ -284,6 +297,12 @@ def main(argv: list[str] | None = None) -> int:
             DBOS.destroy()
         except Exception:  # noqa: BLE001 - shutdown cleanup must not mask status
             logger.exception("dbos_destroy_failed")
+        try:
+            from app.responsibility.runtime import close_responsibility_kernel
+
+            close_responsibility_kernel()
+        except Exception:  # noqa: BLE001 - shutdown cleanup must not mask status
+            logger.exception("responsibility_runtime_close_failed")
     logger.info("worker_stopping")
     return 0
 

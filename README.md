@@ -66,7 +66,7 @@ The backend Compose services (`migrate`, `api`, and `worker`) share one image. C
 Before a local build, verify the checkout against the canonical pin and then build the backend image:
 
 ```powershell
-$env:PORTABLE_RUNTIME_CONTEXT = 'D:/agent/portable-runtime-worktrees/53e7d3e'
+$env:PORTABLE_RUNTIME_CONTEXT = 'D:/agent/portable-runtime-worktrees/b26487a'
 .\tools\Verify-PortableRuntimeRevision.ps1 -PortableRuntimePath $env:PORTABLE_RUNTIME_CONTEXT
 docker compose build migrate api worker
 ```
