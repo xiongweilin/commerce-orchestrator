@@ -38,7 +38,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["catalog_revision_id"],
             ["catalog_revision.id"],
-            name="fk_publication_qualification_assessment_catalog_revision_id_catalog_revision",
+            name="fk_pub_qual_assessment_catalog_revision_id",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_publication_qualification_assessment"),
     )

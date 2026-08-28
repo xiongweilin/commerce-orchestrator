@@ -57,7 +57,21 @@ DBOS
 = durable execution substrate used by this repository
 ```
 
-`portable-runtime` does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The exact portable compatibility baseline remains the versioned pin in `docs/contracts/responsibility-compatibility.toml`; it is advanced only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
+`portable-runtime` is a first-class Commerce backend runtime dependency, delivered as a wheel built from the exact revision pinned in `docs/contracts/responsibility-compatibility.toml`. It does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The portable compatibility pin advances only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
+
+### Backend image build dependency
+
+The backend Compose services (`migrate`, `api`, and `worker`) share one image. Compose passes the pinned `portable-runtime` checkout as the `portable_runtime` additional build context; the Dockerfile builds a wheel from that context and installs it into the image's shared venv. The host source tree is never bind-mounted into the runtime container.
+
+Before a local build, verify the checkout against the canonical pin and then build the backend image:
+
+```powershell
+$env:PORTABLE_RUNTIME_CONTEXT = 'D:/agent/portable-runtime-worktrees/53e7d3e'
+.\tools\Verify-PortableRuntimeRevision.ps1 -PortableRuntimePath $env:PORTABLE_RUNTIME_CONTEXT
+docker compose build migrate api worker
+```
+
+Set `PORTABLE_RUNTIME_CONTEXT` when the checkout is elsewhere (for example, CI uses `../portable-runtime`).
 
 ## Current design invariants
 

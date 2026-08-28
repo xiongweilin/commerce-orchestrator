@@ -121,7 +121,10 @@ class ConfirmedOutcome(UUIDPkMixin, Base):
     )
     realization_assessment_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
-        ForeignKey("effect_realization_assessment.id"),
+        ForeignKey(
+            "effect_realization_assessment.id",
+            name="fk_confirmed_outcome_realization_assessment_id",
+        ),
         nullable=False,
         unique=True,
     )

@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["reconciliation_diff_id"],
             ["reconciliation_diff.id"],
-            name="fk_reconciliation_resolution_reconciliation_diff_id_reconciliation_diff",
+            name="fk_reconciliation_resolution_diff_id",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_reconciliation_resolution"),
     )

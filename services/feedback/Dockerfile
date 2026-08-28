@@ -16,7 +16,7 @@ RUN pip install --upgrade pip && \
     pip install --index-url https://download.pytorch.org/whl/cpu torch && \
     pip install 'sentence-transformers>=3.3,<4'
 
-COPY pyproject.toml README.md alembic.ini ./
+COPY pyproject.toml alembic.ini ./
 COPY feedback_app ./feedback_app
 COPY tools ./tools
 COPY migrations ./migrations

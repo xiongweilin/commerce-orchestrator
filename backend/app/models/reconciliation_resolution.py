@@ -35,7 +35,9 @@ class ReconciliationResolution(UUIDPkMixin, Base):
     __tablename__ = "reconciliation_resolution"
 
     reconciliation_diff_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("reconciliation_diff.id"), nullable=False, index=True
+        ForeignKey("reconciliation_diff.id", name="fk_reconciliation_resolution_diff_id"),
+        nullable=False,
+        index=True,
     )
     resolution_kind: Mapped[ReconciliationResolutionKind] = mapped_column(
         Enum(

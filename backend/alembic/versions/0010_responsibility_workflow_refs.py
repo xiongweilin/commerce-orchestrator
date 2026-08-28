@@ -18,6 +18,17 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Alembic revision identities are durable. This revision is 33 characters
+    # long, so keep the version table permanently wide enough for it and for
+    # future identifiers; downgrade intentionally does not shrink the column.
+    with op.batch_alter_table("alembic_version") as batch_op:
+        batch_op.alter_column(
+            "version_num",
+            existing_type=sa.String(length=32),
+            type_=sa.String(length=64),
+            existing_nullable=False,
+        )
+
     with op.batch_alter_table("responsibility_binding") as batch_op:
         batch_op.add_column(sa.Column("workflow_ref", sa.Uuid(), nullable=True))
         batch_op.create_foreign_key(

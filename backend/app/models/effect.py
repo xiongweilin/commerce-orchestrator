@@ -50,7 +50,10 @@ class EffectLedgerEntry(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
         Uuid, ForeignKey("workflow_run.id"), nullable=True, index=True
     )
     authorization_ref: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("execution_authorization.id"), nullable=True, index=True
+        Uuid,
+        ForeignKey("execution_authorization.id", name="fk_effect_ledger_entry_authorization_ref"),
+        nullable=True,
+        index=True,
     )
     status: Mapped[EffectStatus] = mapped_column(
         Enum(EffectStatus, native_enum=False, length=32, values_callable=enum_values),

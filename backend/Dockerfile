@@ -1,10 +1,31 @@
 # syntax=docker/dockerfile:1
 #
-# commerce-orchestrator backend 镜像（api 与 worker 共用，仅启动命令不同）。
-# 多阶段构建：builder 中按 uv.lock 装入 venv 并安装项目，
-# runtime 阶段只保留 venv + 源码，不保留编译工具链（hatchling、uv 缓存等）。
+# commerce-orchestrator backend 镜像（api、worker、migrate 共用，仅启动命令不同）。
+# 多阶段构建：从 Compose additional_contexts 提供的 portable-runtime 源码构建
+# wheel，把 wheel 安装进共享 venv；runtime 阶段只保留 venv + 应用源码。
 #
 # uv 版本固定为生成 backend/uv.lock 时的版本：0.12.3。
+
+# Canonical runtime dependency pin; tools/Verify-PortableRuntimeRevision.ps1 checks
+# that the additional build context is checked out at this exact revision.
+ARG PORTABLE_RUNTIME_REV=53e7d3eabe5cfc01fff734825cb837e6a3cd8ed3
+
+# ------------------------- portable-runtime：构建运行时 wheel -------------------------
+FROM python:3.12-slim AS portable-runtime-wheel
+
+# Compose 通过 additional_contexts 提供名为 portable_runtime 的本地 sibling 源码树。
+# 构建输入的 revision 由 tools/Verify-PortableRuntimeRevision.ps1 在构建前校验。
+ARG PORTABLE_RUNTIME_REV
+
+# 从官方 uv 镜像复制静态二进制（固定版本，与 uv.lock 生成环境一致）
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
+
+WORKDIR /src/portable-runtime
+COPY --from=portable_runtime pyproject.toml README.md ./
+COPY --from=portable_runtime src ./src
+COPY --from=portable_runtime contracts ./contracts
+
+RUN uv build --wheel --out-dir /wheels .
 
 # ------------------------- builder：解析锁定依赖 + 安装项目 -------------------------
 FROM python:3.12-slim AS builder
@@ -18,14 +39,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# portable-runtime 只作为构建期 reference/conformance oracle，不进入 Commerce runtime venv。
-# 此 SHA 必须与 docs/contracts/responsibility-compatibility.toml 的 reference_revision 一致；
-# backend/tests/test_reference_oracle_contract.py 对该一致性做 fail-closed 校验。
-ARG PORTABLE_RUNTIME_ORACLE_REV=53e7d3eabe5cfc01fff734825cb837e6a3cd8ed3
-RUN uv venv /opt/reference-oracle \
-    && uv pip install --python /opt/reference-oracle/bin/python --no-deps \
-      "portable-runtime @ https://github.com/xiongweilin/portable-runtime/archive/${PORTABLE_RUNTIME_ORACLE_REV}.tar.gz" \
-    && /opt/reference-oracle/bin/python -c 'from pathlib import Path; import tomllib; p = next(Path("/opt/reference-oracle").glob("lib/python*/site-packages/portable_runtime/_contracts/catalog.toml")); c = tomllib.loads(p.read_text()); assert c["catalog_version"] == "portable-runtime-contracts-v1"; assert c["owner"] == "portable-runtime/contracts"'
+# portable-runtime 是 Commerce 的正式运行时依赖。它的源码由 Compose
+# additional_contexts 提供，先在独立 stage 构建 wheel，再安装到最终 runtime venv；
+# 不依赖 GitHub 下载，也不把 upstream 源码 vendor 到 Commerce 仓库。
+ARG PORTABLE_RUNTIME_REV
 
 # 先只拷贝依赖清单，最大化层缓存（README.md 是 hatchling 构建所需的 readme 文件）
 COPY pyproject.toml uv.lock README.md ./
@@ -42,8 +59,17 @@ COPY alembic.ini ./
 # 安装项目本身（editable），保证 `uv run uvicorn ...` / `uv run python -m app.worker` 可用
 RUN uv sync --frozen --no-dev
 
+# 让 `docker build --target builder` 也验证 portable-runtime wheel stage；
+# 最终安装仍在 runtime stage 对共享 venv 执行。
+COPY --from=portable-runtime-wheel /wheels /portable-runtime-wheels
+RUN test -f /portable-runtime-wheels/portable_runtime-*.whl
+
 # ------------------------- runtime：精简、非 root、无构建工具 -------------------------
 FROM python:3.12-slim AS runtime
+
+ARG PORTABLE_RUNTIME_REV
+
+LABEL org.metratio.portable-runtime.revision="${PORTABLE_RUNTIME_REV}"
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
@@ -75,6 +101,15 @@ COPY alembic.ini ./
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/app /app/app
 COPY --from=builder /app/alembic /app/alembic
+COPY --from=portable-runtime-wheel /wheels /wheels
+
+# 安装 portable-runtime wheel 到共享 backend venv；api、worker、migrate 因而使用
+# 完全相同的运行时依赖集合。wheel 已在 portable-runtime-wheel stage 中构建。
+RUN uv pip install --python /app/.venv/bin/python --no-deps /wheels/portable_runtime-*.whl \
+    && /app/.venv/bin/python -c 'from portable_runtime.public_contracts.catalog import contract_catalog; c = contract_catalog(); assert c["catalog_version"] == "portable-runtime-contracts-v1"; assert c["owner"] == "portable-runtime/contracts"' \
+    && rm -rf /wheels /tmp/uv-cache \
+    && mkdir -p /tmp/uv-cache \
+    && chown app:app /tmp/uv-cache
 
 USER app
 

@@ -135,10 +135,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["realization_assessment_id"],
             ["effect_realization_assessment.id"],
-            name=(
-                "fk_confirmed_outcome_realization_assessment_id_"
-                "effect_realization_assessment"
-            ),
+            name="fk_confirmed_outcome_realization_assessment_id",
         ),
         sa.ForeignKeyConstraint(
             ["confirmed_by_user_id"],
@@ -212,7 +209,7 @@ def upgrade() -> None:
             ["id"],
         )
         batch_op.create_foreign_key(
-            "fk_effect_ledger_entry_authorization_ref_execution_authorization",
+            "fk_effect_ledger_entry_authorization_ref",
             "execution_authorization",
             ["authorization_ref"],
             ["id"],
@@ -227,7 +224,7 @@ def upgrade() -> None:
     with op.batch_alter_table("publication_qualification_assessment") as batch_op:
         batch_op.add_column(sa.Column("assessed_by_user_id", sa.Uuid(), nullable=True))
         batch_op.create_foreign_key(
-            "fk_publication_qualification_assessment_assessed_by_user_id_user",
+            "fk_pub_qual_assessment_assessed_by_user",
             "user",
             ["assessed_by_user_id"],
             ["id"],
@@ -246,7 +243,7 @@ def downgrade() -> None:
     )
     with op.batch_alter_table("publication_qualification_assessment") as batch_op:
         batch_op.drop_constraint(
-            "fk_publication_qualification_assessment_assessed_by_user_id_user",
+            "fk_pub_qual_assessment_assessed_by_user",
             type_="foreignkey",
         )
         batch_op.drop_column("assessed_by_user_id")
@@ -255,7 +252,7 @@ def downgrade() -> None:
     op.drop_index("ix_effect_ledger_entry_workflow_ref", table_name="effect_ledger_entry")
     with op.batch_alter_table("effect_ledger_entry") as batch_op:
         batch_op.drop_constraint(
-            "fk_effect_ledger_entry_authorization_ref_execution_authorization",
+            "fk_effect_ledger_entry_authorization_ref",
             type_="foreignkey",
         )
         batch_op.drop_constraint(
