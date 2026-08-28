@@ -8,7 +8,7 @@
 
 # Canonical runtime dependency pin; tools/Verify-PortableRuntimeRevision.ps1 checks
 # that the additional build context is checked out at this exact revision.
-ARG PORTABLE_RUNTIME_REV=53e7d3eabe5cfc01fff734825cb837e6a3cd8ed3
+ARG PORTABLE_RUNTIME_REV=b26487a6efe3933c5d92d637b522eac211e153c1
 
 # ------------------------- portable-runtime：构建运行时 wheel -------------------------
 FROM python:3.12-slim AS portable-runtime-wheel
@@ -87,6 +87,8 @@ RUN apt-get update \
 
 # 非 root 运行用户
 RUN groupadd --system app && useradd --system --gid app --no-create-home --home-dir /app app
+RUN mkdir -p /var/lib/commerce-responsibility \
+    && chown app:app /var/lib/commerce-responsibility
 
 WORKDIR /app
 

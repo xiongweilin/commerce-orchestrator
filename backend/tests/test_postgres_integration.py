@@ -191,7 +191,7 @@ def test_empty_database_migrates_to_head() -> None:
                 )
             }
         engine.dispose()
-        assert head == "0006_remote_entity_ids"
+        assert head == "0010_responsibility_workflow_refs"
         for expected in (
             "workflow_run",
             "work_item",

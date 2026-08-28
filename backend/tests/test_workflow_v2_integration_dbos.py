@@ -47,11 +47,13 @@ from app.models.identity import Role, RoleAssignment, User
 from app.models.listing import ExternalIdMapping
 from app.models.messaging import InboxEvent, OutboxEvent
 from app.models.order import SalesOrder, SalesOrderStatus
+from app.models.publication_qualification import PublicationQualificationStatus
 from app.models.procurement import ProcurementOrder, ProcurementStatus
 from app.models.workflow import WorkflowRun, WorkflowRunStatus, WorkItem
 from app.services.approvals import submit_decision
 from app.services.commands import accept_command
 from app.services.outbox_inbox import claim_inbox_batch
+from app.services.publication_qualification import append_publication_qualification_assessment
 from app.services.webhooks import ingest_shopify_webhook
 from app.workflows.inbox_dispatch import execute_inbox_action, plan_inbox_action
 
@@ -294,16 +296,40 @@ def _start_catalog_run(
     sku: str,
     key: str,
 ) -> tuple[uuid.UUID, WorkItem]:
+    qualification_context = {
+        "purpose": "publish",
+        "policy_version": "policy-v1",
+        "adapter_version": "shopify-v1",
+        "environment_ref": "test",
+    }
     run_id = _accept(
         factory,
         command_type="catalog-revision",
-        payload={"sku": sku, "proposed": {"title": "T"}},
+        payload={
+            "sku": sku,
+            "proposed": {"title": "T"},
+            "qualification_context": qualification_context,
+        },
         actor=actor,
         key=key,
     )
     assert _relay_all(factory) == 1
     assert _wait_for(lambda: len(_items_for(factory, run_id)) == 1), "work item not created"
     item = _items_for(factory, run_id)[0]
+    with factory() as db:
+        append_publication_qualification_assessment(
+            db,
+            catalog_revision_id=uuid.UUID(item.payload_json["revision_id"]),
+            channel="shopify",
+            purpose=qualification_context["purpose"],
+            policy_version=qualification_context["policy_version"],
+            adapter_version=qualification_context["adapter_version"],
+            environment_ref=qualification_context["environment_ref"],
+            assessment_status=PublicationQualificationStatus.QUALIFIED,
+            assessed_by_user_id=actor,
+            evidence_refs=[f"qualification:{key}"],
+        )
+        db.commit()
     return run_id, item
 
 
@@ -727,10 +753,13 @@ def test_retryable_effect_bounded_to_three_attempts(dbos_env) -> None:
     run_id = _drive_catalog_to_effect(
         factory, actor=actor, sku="SKU-DBOS-R", key="dbos-retry-ok", stub=stub_ok
     )
+    # The effect succeeds on the third attempt. The M3 completion gate may
+    # keep the run in a durable ``running``/blocked state until its explicit
+    # recheck evidence is supplied; retry semantics are proven independently.
     assert _wait_for(
-        lambda: _run_status(factory, run_id) == "completed",
+        lambda: _ledger_succeeded_ops(factory, run_id) == {"product_publish"},
         timeout=60,
-    ), "retryable run did not complete"
+    ), f"retryable effect did not settle: status={_run_status(factory, run_id)!r}, calls={stub_ok.calls}"
     assert stub_ok.calls == 3
     with factory() as db:
         entry = db.execute(select(EffectLedgerEntry)).scalar_one()
