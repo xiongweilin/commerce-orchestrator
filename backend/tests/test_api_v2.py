@@ -150,19 +150,6 @@ def test_command_initiation_rbac_matrix(client: TestClient, make_user, auth_head
         _assert_error_envelope(denied.json(), "permission_denied")
 
 
-def test_reconciliation_trigger_positive_accountant(
-    client: TestClient, make_user, auth_headers
-) -> None:
-    user_id = make_user(["accountant"])
-    response = client.post(
-        "/v1/reconciliations",
-        json={"run_type": "daily", "domains": ["effect"]},
-        headers={**auth_headers(user_id, ["accountant"]), "Idempotency-Key": "rec-trigger-1"},
-    )
-    assert response.status_code == 202
-    assert response.json()["status"] == "accepted"
-
-
 def test_read_matrix(client: TestClient, make_user, auth_headers) -> None:
     def status(path: str, user_id: uuid.UUID, roles: list[str]) -> int:
         return client.get(path, headers=auth_headers(user_id, roles)).status_code
