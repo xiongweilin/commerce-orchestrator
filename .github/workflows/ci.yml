@@ -40,16 +40,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      # 只扫描 CI 实际构建/测试的组件：backend 与两个前端 lockfile。
-      # services/feedback（embedding extra）不在 compose 断言的部署拓扑内，其 transformers 4.x 漏洞需要未经验证的大版本升级，
-      # 因此单独作为待决项，不放进本门禁。
+      # 全仓库扫描：backend、console 与 services 下的所有 lockfile。
       - name: OSV-Scanner (built surfaces)
         uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
         with:
           scan-args: |-
-            --lockfile=./backend/uv.lock
-            --lockfile=./console/package-lock.json
-            --lockfile=./services/feedback/web/package-lock.json
+            --recursive
+            ./
   backend:
     name: Backend (lint + tests)
     runs-on: ubuntu-latest
