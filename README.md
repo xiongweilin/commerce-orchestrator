@@ -45,7 +45,7 @@ AI is still deliberately bounded: it may generate candidate suggestions, but it 
 The repository consumes generic portable responsibility contracts but owns only its Commerce specialization and business/runtime boundary:
 
 ```text
-portable-runtime/contracts
+agent-kernel/contracts
 = generic downstream portable product contracts consumed here
 
 commerce-orchestrator
@@ -57,21 +57,21 @@ DBOS
 = durable execution substrate used by this repository
 ```
 
-`portable-runtime` is a first-class Commerce backend runtime dependency, delivered as a wheel built from the exact revision pinned in `docs/contracts/responsibility-compatibility.toml`. It does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The portable compatibility pin advances only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
+`agent-kernel` is a first-class Commerce backend runtime dependency, delivered as a wheel built from the exact revision pinned in `docs/contracts/responsibility-compatibility.toml`. It does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The portable compatibility pin advances only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
 
 ### Backend image build dependency
 
-The backend Compose services (`migrate`, `api`, and `worker`) share one image. Compose passes the pinned `portable-runtime` checkout as the `portable_runtime` additional build context; the Dockerfile builds a wheel from that context and installs it into the image's shared venv. The host source tree is never bind-mounted into the runtime container.
+The backend Compose services (`migrate`, `api`, and `worker`) share one image. Compose passes the pinned `agent-kernel` checkout as the `agent_kernel` additional build context; the Dockerfile builds a wheel from that context and installs it into the image's shared venv. The host source tree is never bind-mounted into the runtime container.
 
 Before a local build, verify the checkout against the canonical pin and then build the backend image:
 
 ```powershell
-$env:PORTABLE_RUNTIME_CONTEXT = 'D:/agent/portable-runtime-worktrees/b26487a'
-.\tools\Verify-PortableRuntimeRevision.ps1 -PortableRuntimePath $env:PORTABLE_RUNTIME_CONTEXT
+$env:AGENT_KERNEL_CONTEXT = 'D:/agent/agent-kernel-worktrees/b26487a'
+.\tools\Verify-AgentKernelRevision.ps1 -AgentKernelPath $env:AGENT_KERNEL_CONTEXT
 docker compose build migrate api worker
 ```
 
-Set `PORTABLE_RUNTIME_CONTEXT` when the checkout is elsewhere (for example, CI uses `../portable-runtime`).
+Set `AGENT_KERNEL_CONTEXT` when the checkout is elsewhere (for example, CI uses `../agent-kernel`).
 
 ## Current design invariants
 
@@ -282,7 +282,7 @@ npm run dev
 | [`docs/contracts/event-contract.md`](docs/contracts/event-contract.md) | Event names and effect operation vocabulary |
 | [`docs/contracts/data-ownership.md`](docs/contracts/data-ownership.md) | Fact ownership and write boundaries |
 | [`docs/contracts/responsibility-alignment.md`](docs/contracts/responsibility-alignment.md) | Commerce responsibility semantics and negative invariants |
-| [`docs/contracts/responsibility-compatibility.toml`](docs/contracts/responsibility-compatibility.toml) | Portable-runtime compatibility boundary |
+| [`docs/contracts/responsibility-compatibility.toml`](docs/contracts/responsibility-compatibility.toml) | agent-kernel compatibility boundary |
 | [`docs/adr/`](docs/adr/) | Historical architecture decisions (0001–0015) |
 | [`docs/runbooks/`](docs/runbooks/) | Development/ops/reconciliation/privacy/worker runbooks |
 | [`backend/README.md`](backend/README.md) | Backend implementation/development notes |

@@ -3,19 +3,19 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from portable_runtime.public_contracts.catalog import contract_catalog
-from portable_runtime.public_contracts.experience import (
+from agent_kernel.public_contracts.catalog import contract_catalog
+from agent_kernel.public_contracts.experience import (
     commit_historical_experience_use_contract,
     evaluate_experience_use_contract,
 )
-from portable_runtime.public_contracts.models import (
+from agent_kernel.public_contracts.models import (
     ExperienceUseRequirementV1,
     HistoricalExperienceUseCommitV1,
 )
-from portable_runtime.records.authorization import create_grant_for_approval
-from portable_runtime.records.knowledge import KnowledgeProjection
-from portable_runtime.records.models import Assertion, ChangeObjectRecord, EvidenceArtifact
-from portable_runtime.records.relations import RecordRelation
+from agent_kernel.records.authorization import create_grant_for_approval
+from agent_kernel.records.knowledge import KnowledgeProjection
+from agent_kernel.records.models import Assertion, ChangeObjectRecord, EvidenceArtifact
+from agent_kernel.records.relations import RecordRelation
 from sqlalchemy import select
 
 from app.core.errors import ValidationError
@@ -443,7 +443,7 @@ def test_workflow_inspector_isolates_sidecars(db, make_user):
 
 
 def test_portable_public_contract_oracle_is_the_experience_reference(db):
-    assert contract_catalog()["owner"] == "portable-runtime/contracts"
+    assert contract_catalog()["owner"] == "agent-kernel/contracts"
     store = CommerceResponsibilityStore(db)
     projection = KnowledgeProjection(
         id="projection_candidate",

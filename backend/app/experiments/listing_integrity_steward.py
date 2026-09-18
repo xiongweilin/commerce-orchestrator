@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from portable_runtime.core.models import Run
-from portable_runtime.responsibility import (
+from agent_kernel.core.models import Run
+from agent_kernel.responsibility import (
     Commitment,
     ListingIntegrityState,
     PortfolioAdmissionDecision,
@@ -32,7 +32,7 @@ from portable_runtime.responsibility import (
     listing_integrity_proposal,
     record_domain_assessment,
 )
-from portable_runtime.workflows.completion import CompletionAuthority
+from agent_kernel.workflows.completion import CompletionAuthority
 
 from app.core.errors import ValidationError
 from app.models.catalog import CatalogRevision

@@ -22,26 +22,26 @@ jobs:
         with:
           path: commerce-orchestrator
 
-      - name: Read pinned portable-runtime revision
+      - name: Read pinned agent-kernel revision
         id: portable-pin
         working-directory: commerce-orchestrator
         shell: bash
         run: |
           set -euo pipefail
-          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["portable_runtime_revision"])')"
+          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["agent_kernel_revision"])')"
           printf 'revision=%s\n' "$REV" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
         with:
-          repository: xiongweilin/portable-runtime
+          repository: xiongweilin/agent-kernel
           ref: ${{ steps.portable-pin.outputs.revision }}
-          path: portable-runtime
-          token: ${{ secrets.PORTABLE_RUNTIME_TOKEN || github.token }}
+          path: agent-kernel
+          token: ${{ secrets.AGENT_KERNEL_TOKEN || github.token }}
 
-      - name: Verify portable-runtime checkout
+      - name: Verify agent-kernel checkout
         shell: pwsh
         working-directory: commerce-orchestrator
-        run: ./tools/Verify-PortableRuntimeRevision.ps1 -PortableRuntimePath ../portable-runtime
+        run: ./tools/Verify-AgentKernelRevision.ps1 -AgentKernelPath ../agent-kernel
 
       - name: Install uv (pinned to uv.lock generation version)
         uses: astral-sh/setup-uv@v7
@@ -51,8 +51,8 @@ jobs:
       - name: Install locked dependencies (incl. dev extras)
         run: uv sync --frozen --extra dev
 
-      - name: Install pinned portable-runtime runtime wheel
-        run: uv pip install --python .venv/bin/python --no-deps ../../portable-runtime
+      - name: Install pinned agent-kernel runtime wheel
+        run: uv pip install --python .venv/bin/python --no-deps ../../agent-kernel
 
       - name: Ruff lint
         run: uv run ruff check app
@@ -92,37 +92,37 @@ jobs:
         with:
           path: commerce-orchestrator
 
-      - name: Read pinned portable-runtime revision
+      - name: Read pinned agent-kernel revision
         id: portable-pin
         working-directory: commerce-orchestrator
         shell: bash
         run: |
           set -euo pipefail
-          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["portable_runtime_revision"])')"
+          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["agent_kernel_revision"])')"
           printf 'revision=%s\n' "$REV" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
         with:
-          repository: xiongweilin/portable-runtime
+          repository: xiongweilin/agent-kernel
           ref: ${{ steps.portable-pin.outputs.revision }}
-          path: portable-runtime
-          token: ${{ secrets.PORTABLE_RUNTIME_TOKEN || github.token }}
+          path: agent-kernel
+          token: ${{ secrets.AGENT_KERNEL_TOKEN || github.token }}
 
-      - name: Verify portable-runtime checkout
+      - name: Verify agent-kernel checkout
         shell: pwsh
         working-directory: commerce-orchestrator
-        run: ./tools/Verify-PortableRuntimeRevision.ps1 -PortableRuntimePath ../portable-runtime
+        run: ./tools/Verify-AgentKernelRevision.ps1 -AgentKernelPath ../agent-kernel
 
       - name: Build backend builder target
         working-directory: commerce-orchestrator
-        run: docker build --target builder --build-context portable_runtime=../portable-runtime -t commerce-orchestrator-backend-builder:ci ./backend
+        run: docker build --target builder --build-context agent_kernel=../agent-kernel -t commerce-orchestrator-backend-builder:ci ./backend
 
       # env_file: .env 要求文件存在；用模板生成（模板内只有占位符）
       - name: Prepare .env from template
         working-directory: commerce-orchestrator
         run: |
           cp .env.example .env
-          printf '\nPORTABLE_RUNTIME_CONTEXT=../portable-runtime\n' >> .env
+          printf '\nAGENT_KERNEL_CONTEXT=../agent-kernel\n' >> .env
 
       - name: Validate compose file
         working-directory: commerce-orchestrator

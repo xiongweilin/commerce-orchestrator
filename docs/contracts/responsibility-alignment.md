@@ -2,7 +2,7 @@
 
 Status: canonical Commerce specialization contract.
 
-`portable-runtime/contracts/` owns the generic responsibility semantics consumed here. This document owns only Commerce-specific specialization and mapping. If a Commerce mapping conflicts with the required portable contract catalog, the portable contract wins for generic semantic meaning; Commerce domain facts and fact ownership remain governed by `data-ownership.md`.
+`agent-kernel/contracts/` owns the generic responsibility semantics consumed here. This document owns only Commerce-specific specialization and mapping. If a Commerce mapping conflicts with the required portable contract catalog, the portable contract wins for generic semantic meaning; Commerce domain facts and fact ownership remain governed by `data-ownership.md`.
 
 ## Frozen architecture boundary
 

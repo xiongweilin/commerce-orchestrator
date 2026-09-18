@@ -1,4 +1,4 @@
-"""Durable portable-runtime responsibility kernel for Commerce workers.
+"""Durable agent-kernel responsibility kernel for Commerce workers.
 
 Commerce PostgreSQL remains authoritative for domain facts, Decisions,
 ExecutionAuthorization, effects and verified outcomes.  This module owns only
@@ -12,8 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Lock
 
-from portable_runtime.responsibility import ResponsibilityKernel
-from portable_runtime.stores.sqlite import SQLiteStateStore
+from agent_kernel.responsibility import ResponsibilityKernel
+from agent_kernel.stores.sqlite import SQLiteStateStore
 
 from app.config import get_settings
 

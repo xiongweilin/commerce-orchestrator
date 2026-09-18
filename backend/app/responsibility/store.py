@@ -9,18 +9,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from portable_runtime.core.models import Event
-from portable_runtime.experience.historical_use import (
+from agent_kernel.core.models import Event
+from agent_kernel.experience.historical_use import (
     HistoricalExperienceUse,
     HistoricalExperienceUseCommitRequest,
     prepare_historical_experience_use_commit,
 )
-from portable_runtime.records.authorization import AuthorizationGrant
-from portable_runtime.records.knowledge import (
+from agent_kernel.records.authorization import AuthorizationGrant
+from agent_kernel.records.knowledge import (
     KnowledgeProjection,
     validate_projection_for_official,
 )
-from portable_runtime.records.models import (
+from agent_kernel.records.models import (
     ActionRecord,
     Assertion,
     BaseRecord,
@@ -36,8 +36,8 @@ from portable_runtime.records.models import (
     PolicyRecord,
     RevisionRecord,
 )
-from portable_runtime.records.relations import RecordRelation, validate_relation
-from portable_runtime.records.validation import validate_canonical_write, validate_record
+from agent_kernel.records.relations import RecordRelation, validate_relation
+from agent_kernel.records.validation import validate_canonical_write, validate_record
 from sqlalchemy import select
 
 from app.core.errors import ConflictError, ValidationError

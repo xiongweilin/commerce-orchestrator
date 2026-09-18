@@ -1,7 +1,7 @@
 """Commerce-owned responsibility profiles for domain workflows.
 
 Profiles compose independent responsibility requirements without granting
-Decision, Authorization, or effect authority.  Portable-runtime remains the
+Decision, Authorization, or effect authority.  `agent-kernel` remains the
 semantic oracle for portable contracts; these profiles are Commerce policy.
 """
 

@@ -1,6 +1,6 @@
 # Commerce persistent-responsibility runtime boundary
 
-Commerce consumes `portable-runtime` at the exact revision declared in
+Commerce consumes `agent-kernel` at the exact revision declared in
 `docs/contracts/responsibility-compatibility.toml`.
 
 ## Ownership

@@ -1,6 +1,6 @@
 """Commerce responsibility-plane persistence projections.
 
-These tables persist Commerce specializations and portable-runtime semantic
+These tables persist Commerce specializations and agent-kernel semantic
 records in the Commerce PostgreSQL database. They do not replace DBOS, Odoo,
 Shopify or existing domain aggregate ownership.
 """

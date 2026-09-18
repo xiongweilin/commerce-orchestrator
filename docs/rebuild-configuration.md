@@ -32,7 +32,7 @@ This document records the current non-secret configuration shape and values. Sec
 - services/feedback/docs/deployment.md
 - services/feedback/migrations/README
 - services/feedback/web/Dockerfile
-- tools/Verify-PortableRuntimeRevision.ps1
+- tools/Verify-AgentKernelRevision.ps1
 
 ## Current environment files
 

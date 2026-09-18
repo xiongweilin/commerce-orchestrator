@@ -47,7 +47,7 @@ The experiment is intended to falsify, not canonize, these candidate cuts:
 - completed diagnostic work is not discharge of the standing mission;
 - standing responsibility is not permanent authority.
 
-The portable-runtime Stage-4 experiment contains the broader candidate set, including priority judgment, delegation, and subdelegation. Commerce only specializes cuts that this domain can currently falsify.
+The agent-kernel Stage-4 experiment contains the broader candidate set, including priority judgment, delegation, and subdelegation. Commerce only specializes cuts that this domain can currently falsify.
 
 ## Fact ownership
 
@@ -89,7 +89,7 @@ Positive:
 - the first standing responsibility outlives bounded Work;
 - positive events and missing expected evidence can both create situations;
 - autonomous diagnosis can increase without silently increasing effect authority;
-- Commerce becomes a reference domain for the portable-runtime Stage-4 hypothesis.
+- Commerce becomes a reference domain for the agent-kernel Stage-4 hypothesis.
 
 Costs:
 

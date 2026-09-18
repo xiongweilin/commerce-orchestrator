@@ -16,11 +16,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
-from portable_runtime.public_contracts.experience import (
+from agent_kernel.public_contracts.experience import (
     evaluate_experience_use_contract,
     get_historical_experience_use_contract,
 )
-from portable_runtime.public_contracts.models import ExperienceUseRequirementV1
+from agent_kernel.public_contracts.models import ExperienceUseRequirementV1
 from sqlalchemy import or_, select
 
 from app.core.errors import NotFoundError, ValidationError

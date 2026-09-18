@@ -1,8 +1,8 @@
 alignment_version = "commerce-responsibility-alignment-v1"
-portable_contract_catalog = "portable-runtime-contracts-v1"
-portable_contract_owner = "portable-runtime/contracts"
-portable_runtime_package = "portable-runtime"
-portable_runtime_revision = "b26487a6efe3933c5d92d637b522eac211e153c1"
+portable_contract_catalog = "agent-kernel-contracts-v1"
+portable_contract_owner = "agent-kernel/contracts"
+agent_kernel_package = "agent-kernel"
+agent_kernel_revision = "17acfba8338683bdb0f3d1c93aa671778603482a"
 
 required_contracts = [
   "responsibility-separation-v1",
@@ -16,7 +16,7 @@ required_contracts = [
 
 [boundaries]
 dbos_is_execution_substrate = true
-portable_runtime_replaces_dbos = false
+agent_kernel_replaces_dbos = false
 commerce_domain_fact_ownership_changes = false
 typescript_mints_authority = false
 console_mints_authority = false

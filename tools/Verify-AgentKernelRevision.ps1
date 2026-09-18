@@ -4,12 +4,12 @@ param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
 
     [Parameter()]
-    [string]$PortableRuntimePath = $(
-        if ($env:PORTABLE_RUNTIME_CONTEXT) {
-            $env:PORTABLE_RUNTIME_CONTEXT
+    [string]$AgentKernelPath = $(
+        if ($env:AGENT_KERNEL_CONTEXT) {
+            $env:AGENT_KERNEL_CONTEXT
         }
         else {
-            'D:\agent\portable-runtime'
+            'D:\agent\agent-kernel'
         }
     )
 )
@@ -25,31 +25,31 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $dockerfilePath -PathType Leaf)) {
     throw "Backend Dockerfile not found: $dockerfilePath"
 }
-if (-not (Test-Path -LiteralPath $PortableRuntimePath -PathType Container)) {
-    throw "portable-runtime context not found: $PortableRuntimePath"
+if (-not (Test-Path -LiteralPath $AgentKernelPath -PathType Container)) {
+    throw "agent-kernel context not found: $AgentKernelPath"
 }
 
-$manifestMatch = Select-String -LiteralPath $manifestPath -Pattern '^portable_runtime_revision\s*=\s*"([0-9a-f]{40})"\s*$'
+$manifestMatch = Select-String -LiteralPath $manifestPath -Pattern '^agent_kernel_revision\s*=\s*"([0-9a-f]{40})"\s*$'
 if (-not $manifestMatch) {
-    throw "portable_runtime_revision is missing or invalid in $manifestPath"
+    throw "agent_kernel_revision is missing or invalid in $manifestPath"
 }
 $expectedRevision = $manifestMatch.Matches[0].Groups[1].Value
 
 $dockerfileText = Get-Content -LiteralPath $dockerfilePath -Raw
-$dockerfileMatch = [regex]::Match($dockerfileText, 'ARG PORTABLE_RUNTIME_REV=([0-9a-f]{40})')
+$dockerfileMatch = [regex]::Match($dockerfileText, 'ARG AGENT_KERNEL_REV=([0-9a-f]{40})')
 if (-not $dockerfileMatch.Success) {
-    throw "PORTABLE_RUNTIME_REV pin is missing or invalid in $dockerfilePath"
+    throw "AGENT_KERNEL_REV pin is missing or invalid in $dockerfilePath"
 }
 if ($dockerfileMatch.Groups[1].Value -ne $expectedRevision) {
     throw "Dockerfile pin $($dockerfileMatch.Groups[1].Value) does not match manifest pin $expectedRevision"
 }
 
-$actualRevision = (& git -C $PortableRuntimePath rev-parse HEAD 2>&1 | Out-String).Trim()
+$actualRevision = (& git -C $AgentKernelPath rev-parse HEAD 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) {
-    throw "Unable to resolve portable-runtime HEAD at ${PortableRuntimePath}: $actualRevision"
+    throw "Unable to resolve agent-kernel HEAD at ${AgentKernelPath}: $actualRevision"
 }
 if ($actualRevision -ne $expectedRevision) {
-    throw "portable-runtime HEAD $actualRevision does not match expected revision $expectedRevision"
+    throw "agent-kernel HEAD $actualRevision does not match expected revision $expectedRevision"
 }
 
-Write-Output "portable-runtime revision verified: $actualRevision"
+Write-Output "agent-kernel revision verified: $actualRevision"

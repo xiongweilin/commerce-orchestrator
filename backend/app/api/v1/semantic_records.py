@@ -6,15 +6,15 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
-from portable_runtime.public_contracts.experience import (
+from agent_kernel.public_contracts.experience import (
     commit_historical_experience_use_contract,
     evaluate_experience_use_contract,
 )
-from portable_runtime.public_contracts.models import (
+from agent_kernel.public_contracts.models import (
     ExperienceUseRequirementV1,
     HistoricalExperienceUseCommitV1,
 )
-from portable_runtime.records.knowledge import KnowledgeProjection
+from agent_kernel.records.knowledge import KnowledgeProjection
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from portable_runtime.public_contracts.models import (
+from agent_kernel.public_contracts.models import (
     ExperienceUseAdmissionV1,
     ExperienceUseRequirementV1,
 )

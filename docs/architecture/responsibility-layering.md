@@ -31,7 +31,7 @@ ConfirmedOutcome where required + bounded completion assessment
 
 ## Ownership
 
-- `portable-runtime/contracts/` owns generic portable responsibility semantics.
+- `agent-kernel/contracts/` owns generic portable responsibility semantics.
 - Commerce owns its API/event vocabulary and domain specializations.
 - Commerce PostgreSQL owns Commerce orchestration and responsibility persistence.
 - DBOS remains the only durable workflow engine.

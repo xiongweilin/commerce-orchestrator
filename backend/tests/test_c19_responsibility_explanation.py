@@ -4,17 +4,17 @@ import uuid
 from decimal import Decimal
 from pathlib import Path
 
-from portable_runtime.public_contracts.experience import (
+from agent_kernel.public_contracts.experience import (
     commit_historical_experience_use_contract,
     evaluate_experience_use_contract,
 )
-from portable_runtime.public_contracts.models import (
+from agent_kernel.public_contracts.models import (
     ExperienceUseRequirementV1,
     HistoricalExperienceUseCommitV1,
 )
-from portable_runtime.records.authorization import create_grant_for_approval
-from portable_runtime.records.knowledge import KnowledgeProjection
-from portable_runtime.records.models import Assertion, ChangeObjectRecord, EvidenceArtifact
+from agent_kernel.records.authorization import create_grant_for_approval
+from agent_kernel.records.knowledge import KnowledgeProjection
+from agent_kernel.records.models import Assertion, ChangeObjectRecord, EvidenceArtifact
 
 from app.models.catalog import (
     CatalogCandidateStatus,

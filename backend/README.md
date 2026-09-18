@@ -51,7 +51,7 @@ backend/app/
   connectors/              Shopify / Odoo / Dify / projection integrations
   core/                    db / errors / security / logging / telemetry / time
   models/                  SQLAlchemy models
-  responsibility/          portable-runtime persistence seam
+  responsibility/          agent-kernel persistence seam
   schemas/                 Pydantic + shared vocabularies
   services/                domain/application services
   workflows/               DBOS workflow definitions and execution wrappers

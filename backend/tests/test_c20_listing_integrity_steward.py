@@ -1,17 +1,17 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from portable_runtime.core.models import Run
-from portable_runtime.records.models import EvidenceArtifact
-from portable_runtime.responsibility import (
+from agent_kernel.core.models import Run
+from agent_kernel.records.models import EvidenceArtifact
+from agent_kernel.responsibility import (
     EffectClass,
     ResourceVector,
     ResponsibilityKernel,
     ResponsibilityStatus,
 )
-from portable_runtime.stores.memory import InMemoryStateStore
-from portable_runtime.stores.sqlite import SQLiteStateStore
-from portable_runtime.workflows.completion import CompletionAuthority
+from agent_kernel.stores.memory import InMemoryStateStore
+from agent_kernel.stores.sqlite import SQLiteStateStore
+from agent_kernel.workflows.completion import CompletionAuthority
 
 from app.core.errors import ValidationError
 from app.experiments.listing_integrity_steward import (

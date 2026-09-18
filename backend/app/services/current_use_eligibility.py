@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from portable_runtime.public_contracts.models import (
+from agent_kernel.public_contracts.models import (
     ExperienceUseAdmissionV1,
     ExperienceUseRequirementV1,
 )
