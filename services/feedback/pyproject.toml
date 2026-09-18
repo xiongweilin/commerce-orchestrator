@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-embedding = ["sentence-transformers>=3.3,<4"]
+embedding = ["sentence-transformers>=6,<7"]
 dev = ["pytest>=8.3,<10", "pytest-cov>=6,<8", "pyyaml>=6,<7", "ruff>=0.9,<1"]
 
 [tool.pytest.ini_options]
