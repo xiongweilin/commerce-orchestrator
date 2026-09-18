@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
 from agent_kernel.public_contracts.experience import (
     commit_historical_experience_use_contract,
     evaluate_experience_use_contract,
@@ -15,6 +14,7 @@ from agent_kernel.public_contracts.models import (
     HistoricalExperienceUseCommitV1,
 )
 from agent_kernel.records.knowledge import KnowledgeProjection
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
