@@ -4,6 +4,10 @@
 
 A personal full-stack sandbox for durable, governed cross-system commerce workflows. It uses simulated data, a Shopify development store and an Odoo 19 sandbox. There are no real users, no real orders and no production-promotion path; the stack is kept running for engineering experiments and iteration.
 
+## Architecture status
+
+**Legacy predecessor consumer.** This repository remains intentionally pinned to the retired `agent-kernel` contract line for historical/experimental continuity. It is **not** part of the current `world-runtime` / Runtime Protocol 4.0 mainline and must not be used as evidence that `agent-kernel` is an active platform dependency. Re-entry into the current Personal AI OS architecture requires an explicit Commerce migration to `world-runtime`; the predecessor contract must not be revived or extended for that purpose.
+
 ## What the project is now
 
 The repository started as a workflow control tower around candidate approval, idempotency, an effect ledger and reconciliation. The current code also contains an explicit **responsibility / authority plane** around durable execution.
