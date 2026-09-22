@@ -6,7 +6,7 @@ A personal full-stack sandbox for durable, governed cross-system commerce workfl
 
 ## Architecture status
 
-**Legacy predecessor consumer.** This repository remains intentionally pinned to the retired `agent-kernel` contract line for historical/experimental continuity. It is **not** part of the current `world-runtime` / Runtime Protocol 4.0 mainline and must not be used as evidence that `agent-kernel` is an active platform dependency. Re-entry into the current Personal AI OS architecture requires an explicit Commerce migration to `world-runtime`; the predecessor contract must not be revived or extended for that purpose.
+**Legacy predecessor consumer.** This repository remains intentionally pinned to the retired `agent-kernel` contract line for historical/experimental continuity. It is **not** part of the current `world-runtime` / Runtime Protocol 4.0 mainline and must not be used as evidence that `agent-kernel` is an active platform dependency. Re-entry into the current Personal AI OS architecture requires an explicit Commerce migration to `world-runtime`; the predecessor contract must not be revived or extended for that purpose.\n\nThe current GitHub workflow is therefore a **preservation CI**: it validates repository hygiene, the legacy-boundary marker, the standalone console build, and reports historical dependency findings. It intentionally does not checkout the physically retired `agent-kernel` or claim that the backend/Compose stack remains runnable. Runtime reactivation requires migration first.
 
 ## What the project is now
 
