@@ -1,4 +1,4 @@
-name: CI
+name: Legacy CI
 
 on:
   push:
@@ -10,10 +10,35 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: legacy-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  legacy-boundary:
+    name: legacy boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify predecessor-retirement marker
+        run: |
+          grep -q 'Legacy predecessor consumer' README.md
+          grep -q '^# Legacy predecessor compatibility record\.' docs/contracts/responsibility-compatibility.toml
+          python - <<'PY'
+          import tomllib
+          with open("docs/contracts/responsibility-compatibility.toml", "rb") as handle:
+              compatibility = tomllib.load(handle)
+          assert compatibility["portable_contract_catalog"] == "agent-kernel-contracts-v1"
+          assert compatibility["portable_contract_owner"] == "agent-kernel/contracts"
+          assert compatibility["agent_kernel_package"] == "agent-kernel"
+          PY
+      - name: Explain preserved runtime boundary
+        run: |
+          echo "Commerce is a frozen predecessor consumer."
+          echo "Backend/Compose runtime validation is intentionally not executed after physical retirement of xiongweilin/agent-kernel."
+          echo "Any return to the current architecture requires an explicit migration to world-runtime / Runtime Protocol 4.0."
+
   hygiene:
     name: hygiene
     runs-on: ubuntu-latest
@@ -34,75 +59,25 @@ jobs:
           "${RUNNER_TEMP}/gitleaks" git . --redact --no-banner --exit-code 1
 
   dependencies:
-    name: dependencies
+    name: dependencies (informational legacy scan)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      # 全仓库扫描：backend、console 与 services 下的所有 lockfile。
-      - name: OSV-Scanner (built surfaces)
+      - name: OSV-Scanner (historical lockfiles)
+        continue-on-error: true
         uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
         with:
           scan-args: |-
             --recursive
             ./
-  backend:
-    name: Backend (lint + tests)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: commerce-orchestrator/backend
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          path: commerce-orchestrator
-
-      - name: Read pinned agent-kernel revision
-        id: portable-pin
-        working-directory: commerce-orchestrator
-        shell: bash
+      - name: Legacy dependency policy
         run: |
-          set -euo pipefail
-          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["agent_kernel_revision"])')"
-          printf 'revision=%s\n' "$REV" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          repository: xiongweilin/agent-kernel
-          ref: ${{ steps.portable-pin.outputs.revision }}
-          path: agent-kernel
-          token: ${{ secrets.AGENT_KERNEL_TOKEN || github.token }}
-
-      - name: Verify agent-kernel checkout
-        shell: pwsh
-        working-directory: commerce-orchestrator
-        run: ./tools/Verify-AgentKernelRevision.ps1 -AgentKernelPath ../agent-kernel
-
-      - name: Install uv (pinned to uv.lock generation version)
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
-        with:
-          version: "0.12.3"
-
-      - name: Install locked dependencies (incl. dev extras)
-        run: uv sync --frozen --extra dev
-
-      - name: Install pinned agent-kernel runtime wheel
-        run: uv pip install --python .venv/bin/python --no-deps ../../agent-kernel
-
-      - name: Ruff lint
-        run: uv run ruff check app
-
-      - name: Ruff format check
-        run: uv run ruff format --check app
-
-      - name: Pytest
-        run: uv run pytest
+          echo "OSV findings remain visible but are not a deployability gate for this non-deployable predecessor snapshot."
 
   console:
-    name: Console (build)
+    name: Console (preservation build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -111,70 +86,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: console/package-lock.json
-
       - name: Install dependencies
         run: npm ci
-
       - name: Production build
         run: npm run build
-
-  compose:
-    name: Compose (config validation)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          path: commerce-orchestrator
-
-      - name: Read pinned agent-kernel revision
-        id: portable-pin
-        working-directory: commerce-orchestrator
-        shell: bash
-        run: |
-          set -euo pipefail
-          REV="$(python -c 'import tomllib; print(tomllib.load(open("docs/contracts/responsibility-compatibility.toml", "rb"))["agent_kernel_revision"])')"
-          printf 'revision=%s\n' "$REV" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-          repository: xiongweilin/agent-kernel
-          ref: ${{ steps.portable-pin.outputs.revision }}
-          path: agent-kernel
-          token: ${{ secrets.AGENT_KERNEL_TOKEN || github.token }}
-
-      - name: Verify agent-kernel checkout
-        shell: pwsh
-        working-directory: commerce-orchestrator
-        run: ./tools/Verify-AgentKernelRevision.ps1 -AgentKernelPath ../agent-kernel
-
-      - name: Build backend builder target
-        working-directory: commerce-orchestrator
-        run: docker build --target builder --build-context agent_kernel=../agent-kernel -t commerce-orchestrator-backend-builder:ci ./backend
-
-      # env_file: .env 要求文件存在；用模板生成（模板内只有占位符）
-      - name: Prepare .env from template
-        working-directory: commerce-orchestrator
-        run: |
-          cp .env.example .env
-          printf '\nAGENT_KERNEL_CONTEXT=../agent-kernel\n' >> .env
-
-      - name: Validate compose file
-        working-directory: commerce-orchestrator
-        run: docker compose config -q
-
-      - name: Assert required service topology
-        working-directory: commerce-orchestrator
-        run: |
-          set -euo pipefail
-          services="$(docker compose config --services)"
-          for s in postgres db-bootstrap migrate api worker console prometheus grafana alertmanager alert-receiver metabase; do
-            echo "$services" | grep -qxF "$s" || { echo "missing service: $s"; exit 1; }
-          done
