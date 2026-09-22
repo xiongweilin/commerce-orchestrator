@@ -1,3 +1,5 @@
+# Legacy predecessor compatibility record. Do not advance this agent-kernel pin as part of the current world-runtime mainline.
+# Any return to the current Personal AI OS architecture requires an explicit Commerce migration to Runtime Protocol 4.0.
 alignment_version = "commerce-responsibility-alignment-v1"
 portable_contract_catalog = "agent-kernel-contracts-v1"
 portable_contract_owner = "agent-kernel/contracts"
