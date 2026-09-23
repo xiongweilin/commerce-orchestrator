@@ -21,9 +21,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Verify predecessor-retirement marker
+      - name: Verify frozen predecessor boundary
         run: |
-          grep -q 'Legacy predecessor consumer' README.md
+          grep -Fq '**Status: frozen historical predecessor.**' README.md
           grep -q '^# Legacy predecessor compatibility record\.' docs/contracts/responsibility-compatibility.toml
           python - <<'PY'
           import tomllib
@@ -35,9 +35,9 @@ jobs:
           PY
       - name: Explain preserved runtime boundary
         run: |
-          echo "Commerce is a frozen predecessor consumer."
-          echo "Backend/Compose runtime validation is intentionally not executed after physical retirement of xiongweilin/agent-kernel."
-          echo "Any return to the current architecture requires an explicit migration to world-runtime / Runtime Protocol 4.0."
+          echo "Commerce is a frozen historical predecessor snapshot."
+          echo "Backend, console and Compose runtime acceptance are intentionally not executed."
+          echo "Any return to the active architecture requires an explicit migration to world-runtime."
 
   hygiene:
     name: hygiene
@@ -73,25 +73,4 @@ jobs:
             --recursive
             ./
       - name: Legacy dependency policy
-        run: |
-          echo "OSV findings remain visible but are not a deployability gate for this non-deployable predecessor snapshot."
-
-  console:
-    name: Console (preservation build)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: console
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: console/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Production build
-        run: npm run build
+        run: echo "Historical findings are visible but are not deployability claims for this frozen snapshot."
