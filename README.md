@@ -2,15 +2,15 @@
 
 [![CI](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
 
-A personal full-stack sandbox for durable, governed cross-system commerce workflows. It uses simulated data, a Shopify development store and an Odoo 19 sandbox. There are no real users, no real orders and no production-promotion path; the stack is kept running for engineering experiments and iteration.
+Frozen historical snapshot of a personal commerce-control experiment. The repository is retained for design/code history only; its backend runtime depends on the physically retired `agent-kernel` line and is not a supported runnable stack. There are no real users, no real orders and no production-promotion path.
 
 ## Architecture status
 
-**Legacy predecessor consumer.** This repository remains intentionally pinned to the retired `agent-kernel` contract line for historical/experimental continuity. It is **not** part of the current `world-runtime` / Runtime Protocol 4.0 mainline and must not be used as evidence that `agent-kernel` is an active platform dependency. Re-entry into the current Personal AI OS architecture requires an explicit Commerce migration to `world-runtime`; the predecessor contract must not be revived or extended for that purpose.\n\nThe current GitHub workflow is therefore a **preservation CI**: it validates repository hygiene, the legacy-boundary marker, the standalone console build, and reports historical dependency findings. It intentionally does not checkout the physically retired `agent-kernel` or claim that the backend/Compose stack remains runnable. Runtime reactivation requires migration first.
+**FROZEN — legacy predecessor consumer.** This repository remains intentionally pinned to the retired `agent-kernel` contract line solely as historical evidence. It is **not** part of the current `world-runtime` / Runtime Protocol 4.0 mainline and must not be used as evidence that `agent-kernel` is an active platform dependency. Re-entry into the current Personal AI OS architecture requires an explicit Commerce migration to `world-runtime`; the predecessor contract must not be revived or extended for that purpose.\n\nThe current GitHub workflow is therefore a **preservation CI**: it validates repository hygiene, the legacy-boundary marker, the standalone console build, and reports historical dependency findings. It intentionally does not checkout the physically retired `agent-kernel` or claim that the backend/Compose stack remains runnable. Runtime reactivation requires migration first.
 
 ## What the project is now
 
-The repository started as a workflow control tower around candidate approval, idempotency, an effect ledger and reconciliation. The current code also contains an explicit **responsibility / authority plane** around durable execution.
+The repository started as a workflow control tower around candidate approval, idempotency, an effect ledger and reconciliation. The frozen code also contains an explicit **responsibility / authority plane** around durable execution.
 
 The core chain is now:
 
@@ -61,7 +61,7 @@ DBOS
 = durable execution substrate used by this repository
 ```
 
-`agent-kernel` is a first-class Commerce backend runtime dependency, delivered as a wheel built from the exact revision pinned in `docs/contracts/responsibility-compatibility.toml`. It does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The portable compatibility pin advances only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
+In the frozen snapshot, `agent-kernel` was a first-class Commerce backend runtime dependency, delivered as a wheel built from the exact revision pinned in `docs/contracts/responsibility-compatibility.toml`. It does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The portable compatibility pin advances only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
 
 ### Backend image build dependency
 
