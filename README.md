@@ -1,295 +1,54 @@
-# Commerce Orchestrator — E-commerce Operations Control Tower
+# Commerce Orchestrator — frozen predecessor snapshot
 
-[![CI](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_commerce-orchestrator&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_commerce-orchestrator) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](backend/pyproject.toml) [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](console/package.json)
+[![Legacy CI](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A personal full-stack sandbox for durable, governed cross-system commerce workflows. It uses simulated data, a Shopify development store and an Odoo 19 sandbox. There are no real users, no real orders and no production-promotion path; the stack is kept running for engineering experiments and iteration.
-
-## Architecture status
+**Status: frozen historical predecessor.**
 
-**Legacy predecessor consumer.** This repository remains intentionally pinned to the retired `agent-kernel` contract line for historical/experimental continuity. It is **not** part of the current `world-runtime` / Runtime Protocol 4.0 mainline and must not be used as evidence that `agent-kernel` is an active platform dependency. Re-entry into the current Personal AI OS architecture requires an explicit Commerce migration to `world-runtime`; the predecessor contract must not be revived or extended for that purpose.\n\nThe current GitHub workflow is therefore a **preservation CI**: it validates repository hygiene, the legacy-boundary marker, the standalone console build, and reports historical dependency findings. It intentionally does not checkout the physically retired `agent-kernel` or claim that the backend/Compose stack remains runnable. Runtime reactivation requires migration first.
+This repository preserves the pre-`world-runtime` Commerce implementation and its historical design evidence. It is not part of the current Personal AI OS runtime, is not an active deployment target, and must not be used as evidence that `agent-kernel` remains an active dependency.
 
-## What the project is now
+## Boundary
 
-The repository started as a workflow control tower around candidate approval, idempotency, an effect ledger and reconciliation. The current code also contains an explicit **responsibility / authority plane** around durable execution.
+- Current durable agency owner: [xiongweilin/world-runtime](https://github.com/xiongweilin/world-runtime).
+- Current cross-domain semantic owner: [xiongweilin/semantic-language](https://github.com/xiongweilin/semantic-language).
+- This repository owns only historical Commerce implementation evidence from the retired predecessor line.
+- The pinned `agent-kernel` compatibility record is historical evidence only. It must not be advanced, revived, or extended.
+- Re-entry into the active architecture requires an explicit Commerce migration to Runtime Protocol 4.0 or its successor. That migration must create new current contracts rather than treating the predecessor snapshot as runnable.
 
-The core chain is now:
+## What is preserved
 
-```text
-Evidence / AI candidate
-        |
-        v
-Decision
-        |
-        v
-ExecutionAuthorization
-        |
-        v
-DBOS durable workflow
-        |
-        v
-Typed effect + Effect Ledger
-        |
-        v
-Shopify / Odoo
-        |
-        v
-Reality verification + canonical reconciliation
-        |
-        v
-ConfirmedOutcome where required
-        |
-        v
-Declared-scope bounded completion
-```
+The snapshot contains the former Commerce specialization, including:
 
-AI is still deliberately bounded: it may generate candidate suggestions, but it does not approve, mint execution authority, execute external effects or rewrite authoritative business facts.
+- candidate / Decision / execution-authority separation;
+- DBOS-based durable workflows;
+- effect ledger and reconciliation logic;
+- Shopify/Odoo adapters and reality read-back;
+- bounded completion and responsibility experiments;
+- historical ADRs, contracts, runbooks, console, backend and infrastructure.
 
-## Repository ownership boundary
+Those files are preserved for lineage and reference. Their package versions, external APIs, Compose configuration, dependency locks and runbooks are **not current operational instructions**.
 
-The repository consumes generic portable responsibility contracts but owns only its Commerce specialization and business/runtime boundary:
+## Do not
 
-```text
-agent-kernel/contracts
-= generic downstream portable product contracts consumed here
+Do not:
 
-commerce-orchestrator
-= Commerce specialization + business fact ownership mappings
-  + DBOS workflow/effect transaction boundary
-  + Shopify/Odoo adapters and reality verification
+- run the old Quick Start as a supported system;
+- treat backend/Compose buildability as maintained;
+- update the retired `agent-kernel` pin;
+- add new features or compatibility work to the predecessor line;
+- infer current Commerce, Runtime, authorization or deployment semantics from this snapshot.
 
-DBOS
-= durable execution substrate used by this repository
-```
+If a historical document says “current”, interpret it relative to the commit in which it was written, not relative to the current Personal AI OS.
 
-`agent-kernel` is a first-class Commerce backend runtime dependency, delivered as a wheel built from the exact revision pinned in `docs/contracts/responsibility-compatibility.toml`. It does not replace DBOS or re-own Shopify/Odoo facts. `ratio/责任拓扑` and `responsibility_topology` may provide upstream design/research lineage, but neither is a runtime dependency or Commerce fact owner. The portable compatibility pin advances only when required contracts change and compatibility is revalidated, not merely because upstream `main` has newer documentation or experiments.
+## Preservation CI
 
-### Backend image build dependency
+The GitHub workflow checks repository hygiene and the explicit frozen-boundary marker. Historical dependency findings may remain visible, but they are not deployability claims. No backend, console or Compose runtime acceptance is performed.
 
-The backend Compose services (`migrate`, `api`, and `worker`) share one image. Compose passes the pinned `agent-kernel` checkout as the `agent_kernel` additional build context; the Dockerfile builds a wheel from that context and installs it into the image's shared venv. The host source tree is never bind-mounted into the runtime container.
+## Historical documentation
 
-Before a local build, verify the checkout against the canonical pin and then build the backend image:
+The existing `docs/`, `backend/`, `console/`, `services/`, `infra/` and `compose.yaml` trees remain intentionally preserved. They are historical artifacts, not current runbooks.
 
-```powershell
-$env:AGENT_KERNEL_CONTEXT = 'D:/agent/agent-kernel-worktrees/b26487a'
-.\tools\Verify-AgentKernelRevision.ps1 -AgentKernelPath $env:AGENT_KERNEL_CONTEXT
-docker compose build migrate api worker
-```
+For active architecture and doctrine, use:
 
-Set `AGENT_KERNEL_CONTEXT` when the checkout is elsewhere (for example, CI uses `../agent-kernel`).
-
-## Current design invariants
-
-The implementation intentionally keeps these facts separate:
-
-- AI candidate != Decision
-- ExperienceUseAdmission.allowed != Decision
-- Decision != ExecutionAuthorization
-- PublicationQualification.qualified != Authorization
-- EffectLedger.succeeded != ConfirmedOutcome
-- reconciliation disposition != verified repair
-- WorkflowRun.completed != universal responsibility discharge
-- client/console inference != execution authority
-
-For the detailed semantic contract, see [`docs/contracts/responsibility-alignment.md`](docs/contracts/responsibility-alignment.md).
-
-## Runtime architecture
-
-```mermaid
-flowchart LR
-    CON["Next.js console\nBFF session · CSRF · Origin"] --> API["FastAPI API\ncommands · auth · webhooks · read APIs"]
-    API -->|workflow.accepted / decisions / recheck| PG[("PostgreSQL\nCommerce state + inbox/outbox + responsibility records")]
-    PG --> WRK["Worker\ninbox relay · DBOS v2 · typed effects · reconciliation"]
-    WRK <--> SH["Shopify dev store\nAdmin GraphQL 2026-07"]
-    WRK <--> OD["Odoo 19 sandbox\nJSON-2 · authoritative business ledger"]
-    WRK --> OBS["Prometheus / Grafana / Alertmanager"]
-    PG -.read only.-> MB["Metabase"]
-```
-
-The API and worker share the backend codebase but have separate responsibilities. API requests record/validate commands; the worker owns durable orchestration and external side effects.
-
-## Durable workflow mainline
-
-All new command/webhook flows use DBOS v2:
-
-```text
-API/webhook accept
-  -> workflow.accepted
-  -> inbox relay
-  -> DBOS workflow
-  -> durable approval wait when required
-  -> typed effect dispatch
-  -> external read-back / realization verification
-  -> canonical reconciliation
-  -> bounded completion assessment
-```
-
-Workflow state:
-
-```text
-accepted -> running -> awaiting_approval -> running
-         -> completed | needs_reconciliation | failed | cancelled
-```
-
-`needs_reconciliation` is not a failed terminal state. `outcome_unknown` is never blindly resent.
-
-## Decision vs execution authority
-
-Ordinary decisions use:
-
-```text
-POST /v1/work-items/{id}/decisions
-```
-
-If a work item requires execution authority, approve must use:
-
-```text
-POST /v1/work-items/{id}/authorized-decisions
-```
-
-The server records the Decision and mints a separate exact-scope `ExecutionAuthorization` in one transaction. Current authorization profiles are:
-
-| Profile | Target | Operations |
-| --- | --- | --- |
-| `listing-publication-v1` | Shopify | `shopify.product_publish` |
-| `return-credit-note-v1` | Odoo | `odoo.credit_note_create`, `odoo.credit_note_validate` |
-| `return-refund-v1` | Shopify | `shopify.refund_create` |
-
-Dispatch revalidates subject version/fingerprint, target, allowed operation, policy/environment and expiry/revocation. A historical approval or role membership is not inferred as current authority.
-
-## CURRENT vs HISTORICAL responsibility
-
-`GET /v1/workflows/{workflow_id}/responsibility` exposes a non-authoritative Responsibility Inspector.
-
-For listing publication:
-
-- `historical` records what Experience/knowledge state was actually relied on at the time;
-- `currentResponsibility` re-evaluates current authorization, publication qualification, Experience-use status and open obligations;
-- the same server explanation path is used by publication dispatch eligibility, reducing UI/enforcement drift.
-
-Discharged responsibility obligations remain in history; only the open subset appears under `openResponsibility`.
-
-## Execution, reality and completion
-
-An adapter success is not automatically a business outcome:
-
-```text
-EffectLedger.succeeded
-        !=
-EffectRealizationAssessment.VERIFIED
-        !=
-ConfirmedOutcome
-```
-
-A `ConfirmedOutcome` requires explicit verified realization evidence.
-
-Workflow completion is also deliberately bounded. `backend/app/services/workflow_completion.py` evaluates finite per-workflow requirements and reports the permanent coverage claim `declared-scope-only`. If completion is blocked on missing current evidence, an authorized user may request a durable reassessment through:
-
-```text
-POST /v1/workflows/{workflow_id}/completion-recheck
-```
-
-The recheck request does not invent evidence or directly mark the workflow complete.
-
-## Canonical reconciliation
-
-Canonical reconciliation covers:
-
-`listing` · `order` · `procurement` · `return` · `catalog` · `effect`
-
-Rules:
-
-- missing required reader => failure, not success;
-- zero diff requires checked rows or explicit proof of emptiness for each required domain;
-- reconciliation differences are never auto-smoothed;
-- manual resolution records a disposition, but subsequent external read-back/reconciliation is needed to prove repair.
-
-## Tech stack
-
-| Layer | Current choice |
-| --- | --- |
-| Backend | Python 3.12 / FastAPI / Pydantic v2 / SQLAlchemy 2 / Alembic / uv |
-| Durable workflow | DBOS OSS + PostgreSQL |
-| External systems | Shopify Admin GraphQL 2026-07 / Odoo 19 JSON-2 |
-| Frontend | Next.js 16 / React 19 / TypeScript |
-| Auth/session | FastAPI JWT/RBAC + Next.js same-origin BFF session |
-| Observability | OpenTelemetry / Prometheus / Grafana / Alertmanager |
-| Analytics | Metabase read-only projection |
-| Local orchestration | Docker Compose |
-
-The dependency lock is `backend/uv.lock`. The database migration chain currently extends through `0010_responsibility_workflow_refs.py`; do not assume `0001_initial.py` represents the whole current schema.
-
-## Repository layout
-
-```text
-commerce-orchestrator/
-├── backend/                  FastAPI + worker + DBOS workflows + models/services
-├── console/                  Next.js operations console and Responsibility Inspector
-├── services/                 feedback/catalog companion services
-├── infra/                    PostgreSQL/monitoring/Compose infrastructure
-├── docs/
-│   ├── current-implementation.md
-│   ├── architecture.md
-│   ├── architecture/responsibility-layering.md
-│   ├── contracts/
-│   ├── adr/
-│   └── runbooks/
-├── compose.yaml
-└── Makefile
-```
-
-## Quick start
-
-Full stack:
-
-```bash
-docker compose up -d
-```
-
-Odoo 19 sandbox profile:
-
-```bash
-docker compose --profile odoo up -d
-```
-
-Local backend:
-
-```bash
-cd backend
-uv sync
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
-```
-
-Worker:
-
-```bash
-cd backend
-uv run python -m app.worker
-```
-
-Console:
-
-```bash
-cd console
-npm install
-npm run dev
-```
-
-## Documentation map
-
-| Document | Purpose |
-| --- | --- |
-| [`docs/current-implementation.md`](docs/current-implementation.md) | Current code-oriented implementation snapshot |
-| [`docs/architecture.md`](docs/architecture.md) | Runtime architecture, trust boundaries and execution model |
-| [`docs/architecture/responsibility-layering.md`](docs/architecture/responsibility-layering.md) | Responsibility/authority layering |
-| [`docs/contracts/api-contract.md`](docs/contracts/api-contract.md) | HTTP behavior contract; exact JSON schema is FastAPI OpenAPI |
-| [`docs/contracts/event-contract.md`](docs/contracts/event-contract.md) | Event names and effect operation vocabulary |
-| [`docs/contracts/data-ownership.md`](docs/contracts/data-ownership.md) | Fact ownership and write boundaries |
-| [`docs/contracts/responsibility-alignment.md`](docs/contracts/responsibility-alignment.md) | Commerce responsibility semantics and negative invariants |
-| [`docs/contracts/responsibility-compatibility.toml`](docs/contracts/responsibility-compatibility.toml) | agent-kernel compatibility boundary |
-| [`docs/adr/`](docs/adr/) | Historical architecture decisions (0001–0015) |
-| [`docs/runbooks/`](docs/runbooks/) | Development/ops/reconciliation/privacy/worker runbooks |
-| [`backend/README.md`](backend/README.md) | Backend implementation/development notes |
-| [`console/README.md`](console/README.md) | Console/BFF/Responsibility Inspector notes |
-
-ADR-0015 remains the project-positioning authority: this is a continuously running personal sandbox, not a production rollout target.
+- https://github.com/xiongweilin/guide
+- https://github.com/xiongweilin/world-runtime
+- https://github.com/xiongweilin/semantic-language
