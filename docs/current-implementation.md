@@ -1,6 +1,6 @@
 # Current implementation snapshot
 
-This document is the implementation-oriented snapshot of `commerce-orchestrator` at `main` commit `3187a1c67677cf538e19d8db5a842f559cc675ac` (2026-08-27). It is intended to keep repository documentation aligned with the code that actually exists. Architecture decisions remain in `docs/adr/`; normative API/event/data-ownership contracts remain in `docs/contracts/`.
+> **Frozen historical document.** This describes the retired predecessor implementation and is not a current runnable or Personal AI OS contract. Any reactivation requires migration to `world-runtime` / Runtime Protocol 4.0.\n\nThis document is the implementation-oriented snapshot of `commerce-orchestrator` at `main` commit `3187a1c67677cf538e19d8db5a842f559cc675ac` (2026-08-27). It is intended to keep repository documentation aligned with the code that actually exists. Architecture decisions remain in `docs/adr/`; normative API/event/data-ownership contracts remain in `docs/contracts/`.
 
 ## Project boundary
 
