@@ -1,6 +1,6 @@
 # 总体架构与信任边界
 
-## 1. 目标与非目标
+> **Frozen historical document.** This describes the retired predecessor implementation and is not a current runnable or Personal AI OS contract. Any reactivation requires migration to `world-runtime` / Runtime Protocol 4.0.\n\n## 1. 目标与非目标
 
 目标：把跨系统 commerce 操作组织成 durable、auditable、reconcilable 的长流程，并在执行前后保留明确的 Decision、execution authority、effect、reality verification、reconciliation 与 bounded completion 语义。
 
