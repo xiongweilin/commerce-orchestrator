@@ -1,29 +1,16 @@
 # Contributing
 
-Thanks for your interest!
+This repository is a frozen reference snapshot.
 
-## Scope
-This repository is maintained primarily by @xiongweilin. Issues and pull requests are welcome.
+Accepted changes are limited to repository hygiene that does not change the preserved implementation,
+such as:
 
-## Workflow
-1. Open an issue to discuss major changes.
-2. Fork or create a branch from \main\.
-3. Run local checks before submitting:
-   - Follow existing style and \README\ instructions.
-   - Run tests/lints if present (\make\, \uff\, \pytest\, \
-pm run build\ as per repo).
-4. Submit a PR targeting \main\. Fill the PR template.
-5. CI must pass; maintainers will review.
+- fixing broken repository metadata or links;
+- correcting documentation that incorrectly describes the snapshot as current;
+- removing accidentally committed secrets or unsafe example data;
+- repairing preservation CI.
 
-## Commit Style
-- Small, focused commits; short imperative subject (e.g., "Add health check").
-- Do not commit secrets, \.env\ values, or PII. Use placeholders.
+Do not add features, update runtime dependencies for deployment, redesign the preserved architecture,
+or treat this repository as an active product line.
 
-## Local Validation
-If \.github/scripts/validate_structure.py\ exists, run it locally.
-
-## Code of Conduct
-Participation is governed by \CODE_OF_CONDUCT.md\.
-
-## License
-By contributing, you agree your contributions are licensed under the repository's \LICENSE\.
+Active AIOS work belongs in the current owning repository.
