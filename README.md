@@ -3,7 +3,7 @@
 [![Legacy CI](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongweilin/commerce-orchestrator/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Status: frozen. Not a current deployment target.**
+**Status: frozen historical predecessor.**
 
 This repository is retained as a reference snapshot for Commerce workflow design, effect reconciliation,
 Shopify/Odoo integration, DBOS orchestration, and domain-completion experiments.
