@@ -1,16 +1,17 @@
 # Security Policy
 
-## Supported Versions
-| Version | Supported |
-|---------|-----------|
-| main    | ✅        |
+This repository is a frozen reference snapshot and is not a supported runtime or deployment target.
 
-## Reporting a Vulnerability
-Please report vulnerabilities privately via [GitHub Security Advisories](https://github.com/xiongweilin/commerce-orchestrator/security/advisories/new) or a private issue.
-Do not disclose secrets, tokens, or exploit details in public issues.
+## Reporting a repository security issue
 
-We aim to acknowledge within 3 days and provide a fix or mitigation plan within 14 days.
+Use GitHub Security Advisories for issues that affect the repository artifact itself, such as:
 
-## Scope
-This policy covers the code in this repository only. Do not include real secrets, PII, or production data in examples.
+- accidentally committed secrets or sensitive data;
+- unsafe example data;
+- repository metadata that creates a concrete security exposure.
 
+Do not rely on this snapshot for supported dependency or runtime security maintenance.
+
+For current AIOS runtime security, use the active owning repository:
+
+- https://github.com/xiongweilin/aios
