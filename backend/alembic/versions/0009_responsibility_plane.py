@@ -196,9 +196,9 @@ def upgrade() -> None:
         ["recorded_by_user_id"],
     )
 
-    # Batch operations preserve PostgreSQL behavior while making the migration
-    # executable in SQLite-backed migration tests, where ALTER CONSTRAINT is not
-    # supported directly.
+    # Batch operation 保持 PostgreSQL 行为，同时让 migration
+    # 能在 SQLite-backed migration test 中执行；SQLite 不直接支持
+    # ALTER CONSTRAINT。
     with op.batch_alter_table("effect_ledger_entry") as batch_op:
         batch_op.add_column(sa.Column("workflow_ref", sa.Uuid(), nullable=True))
         batch_op.add_column(sa.Column("authorization_ref", sa.Uuid(), nullable=True))
