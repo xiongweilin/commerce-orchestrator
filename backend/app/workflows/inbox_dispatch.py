@@ -33,7 +33,7 @@ from app.services.workflow_completion import COMPLETION_RECHECK_TOPIC
 
 logger = get_logger("commerce.worker.relay")
 
-# Keys copied from the decision_recorded payload into the DBOS.send message.
+# 从 decision_recorded payload 复制到 DBOS.send message 的 key。
 DECISION_MESSAGE_KEYS = (
     "work_item_id",
     "decision_id",
@@ -48,7 +48,7 @@ DECISION_MESSAGE_KEYS = (
 class InboxAction:
     """A relay action for one inbox event (serializable plan)."""
 
-    kind: str  # "start" | "send"
+    kind: str  # "start" | "send"（启动或发送）
     workflow_type: str | None = None
     workflow_version: int | None = None
     workflow_id: str | None = None
