@@ -60,14 +60,14 @@ class WorkflowRun(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "workflow_run"
     __table_args__ = (
         Index("ix_workflow_run_status_updated_at", "status", "updated_at"),
-        # Optimistic-lock CAS lookup: WHERE id = ? AND version = ?.
+        # Optimistic-lock CAS 查询：WHERE id = ? AND version = ?。
         Index("ix_workflow_run_id_version", "id", "version"),
     )
 
     workflow_type: Mapped[str] = mapped_column(String(64), nullable=False)
     workflow_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    # All runs use the DBOS v2 engine; server default stays "legacy_inline"
-    # only as a historical migration artifact.
+    # 所有 run 都使用 DBOS v2 engine；server default 保留 "legacy_inline"
+    # 仅作为 historical migration artifact。
     orchestration_engine: Mapped[str] = mapped_column(String(32), nullable=False, default="dbos")
     dbos_workflow_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     initiated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
@@ -96,7 +96,7 @@ class WorkItem(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
     __table_args__ = (
         Index("ix_work_item_status_expires_at", "status", "expires_at"),
         Index("ix_work_item_workflow_id", "workflow_id"),
-        # Optimistic-lock CAS lookup: WHERE id = ? AND version = ?.
+        # Optimistic-lock CAS 查询：WHERE id = ? AND version = ?。
         Index("ix_work_item_id_version", "id", "version"),
     )
 
@@ -127,8 +127,8 @@ class WorkItemDecision(UUIDPkMixin, Base):
 
     __tablename__ = "work_item_decision"
     __table_args__ = (
-        # One work item can have only one final decision; concurrent approvals
-        # must race and lose (409) instead of writing a second row.
+        # 每个 work item 只能有一个 final decision；并发 approval
+        # 必须竞争并由失败方返回 409，而不是写入第二条 row。
         UniqueConstraint("work_item_id", name="uq_work_item_decision_work_item_id"),
     )
 
