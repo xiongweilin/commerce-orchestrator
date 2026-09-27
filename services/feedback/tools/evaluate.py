@@ -237,8 +237,8 @@ def structure_evaluation(
         "first_attempt_dependency_success_rate": (
             first_attempt_dependency_success / len(rows)
         ),
-        # Backward-compatible alias. This now measures validated contract output,
-        # while transport reliability is reported separately above.
+        # 向后兼容 alias。现在这里衡量的是已验证的 contract output，
+        # transport reliability 则在上方单独报告。
         "first_pass_schema_rate": schema_contract_valid / len(rows),
         "evidence_auto_location_rate": evidence_located / len(rows),
         "problem_type": confusion_payload(
