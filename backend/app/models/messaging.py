@@ -45,8 +45,8 @@ class IdempotencyRecord(Base):
     scope: Mapped[str] = mapped_column(String(64), nullable=False)
     key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    # Vocabulary fixed to processing | completed (legacy 'pending'/'done'
-    # values are normalized by migration 0004).
+    # Vocabulary 固定为 processing | completed（legacy 'pending'/'done'
+    # value 由 migration 0004 归一化）。
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="processing")
     result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -92,14 +92,14 @@ class InboxEvent(Base):
     __tablename__ = "inbox_event"
     __table_args__ = (
         UniqueConstraint("consumer", "event_id", name="uq_inbox_event_consumer_event_id"),
-        # Worker claim scan: consumer + actionable + retry/backoff ordering.
+        # Worker claim 扫描：按 consumer + actionable + retry/backoff 排序。
         Index(
             "ix_inbox_event_consumer_status_next_attempt_at",
             "consumer",
             "status",
             "next_attempt_at",
         ),
-        # Generic claim/backoff scan across consumers.
+        # 跨 consumer 的通用 claim/backoff 扫描。
         Index("ix_inbox_event_status_next_attempt_at", "status", "next_attempt_at"),
     )
 
