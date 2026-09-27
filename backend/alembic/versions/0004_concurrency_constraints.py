@@ -63,30 +63,30 @@ def upgrade() -> None:
             f"(work_item_id values: {', '.join(duplicate_ids)})"
         )
 
-    # SQLite cannot ALTER in place; batch mode recreates the table on SQLite
-    # and executes a plain ADD CONSTRAINT on PostgreSQL.
+    # SQLite 无法原地 ALTER；batch mode 会在 SQLite 上重建 table，
+    # 在 PostgreSQL 上则执行普通 ADD CONSTRAINT。
     with op.batch_alter_table("work_item_decision", recreate="auto") as batch_op:
         batch_op.create_unique_constraint(
             "uq_work_item_decision_work_item_id", ["work_item_id"]
         )
 
-    # Optimistic-lock CAS lookups: WHERE id = ? AND version = ?.
+    # Optimistic-lock CAS 查询：WHERE id = ? AND version = ?。
     op.create_index(
         "ix_workflow_run_id_version", "workflow_run", ["id", "version"]
     )
     op.create_index(
         "ix_work_item_id_version", "work_item", ["id", "version"]
     )
-    # Generic inbox claim/backoff scan (per-consumer claim index is in 0003).
+    # 通用 inbox claim/backoff scan（per-consumer claim index 位于 0003）。
     op.create_index(
         "ix_inbox_event_status_next_attempt_at",
         "inbox_event",
         ["status", "next_attempt_at"],
     )
 
-    # Idempotency record: additive updated_at + status vocabulary fix.
-    # Batch mode so SQLite (which rejects ADD COLUMN with a non-constant
-    # default) recreates the table; PostgreSQL applies a plain ADD COLUMN.
+    # Idempotency record：增加 updated_at，并修正 status vocabulary。
+    # 使用 batch mode，因为 SQLite 会拒绝带非常量
+    # default 的 ADD COLUMN；SQLite 会重建 table，PostgreSQL 则执行普通 ADD COLUMN。
     with op.batch_alter_table("idempotency_record", recreate="auto") as batch_op:
         batch_op.add_column(
             sa.Column(
