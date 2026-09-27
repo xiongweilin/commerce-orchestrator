@@ -52,15 +52,15 @@ logger = get_logger("commerce.commands")
 
 COMMAND_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {}
 
-# New commands are accepted as DBOS v2 workflows (orchestration_engine="dbos",
-# workflow_version=2).  The domain entries and next-step continuations below
-# are shared with the v2 driver (COMMAND_HANDLERS / register_next_step).
+# 新 command 统一按 DBOS v2 workflow 接收（orchestration_engine="dbos"，
+# workflow_version=2）。下面的 domain entry 与 next-step continuation
+# 与 v2 driver 共享（COMMAND_HANDLERS / register_next_step）。
 DBOS_WORKFLOW_VERSION = 2
 DBOS_ORCHESTRATION_ENGINE = "dbos"
 ACCEPTED_EVENT_CONSUMER = "worker"
 IDEMPOTENCY_SCOPE_COMMAND = "command"
 
-# Machine name -> entity status enum (status columns are StrEnum-backed).
+# Machine name -> entity status enum（status column 由 StrEnum 支撑）。
 _STATUS_ENUMS: dict[str, type] = {
     "CatalogRevision": CatalogRevisionStatus,
     "ListingPublication": ListingStatus,
@@ -70,7 +70,7 @@ _STATUS_ENUMS: dict[str, type] = {
     "EffectLedgerEntry": EffectStatus,
 }
 
-# Machine name -> event type emitted when the entity enters that state.
+# Machine name -> entity 进入该状态时发出的 event type。
 _EVENT_BY_STATE: dict[str, dict[str, str]] = {
     "CatalogRevision": {
         "draft": "catalog.revision_drafted",
@@ -128,7 +128,7 @@ _EVENT_BY_STATE: dict[str, dict[str, str]] = {
     },
 }
 
-# Machine name -> producer used for emitted domain events.
+# Machine name -> 发出 domain event 所使用的 producer。
 _PRODUCER_BY_MACHINE: dict[str, str] = {
     "CatalogRevision": "catalog",
     "ListingPublication": "listing",
@@ -239,7 +239,7 @@ def _complete_run(db, run: WorkflowRun, *, extras: dict[str, Any] | None = None)
 
 
 # ---------------------------------------------------------------------------
-# Domain entries (shared with the v2 driver via COMMAND_HANDLERS)
+# Domain entry（通过 COMMAND_HANDLERS 与 v2 driver 共享）
 # ---------------------------------------------------------------------------
 
 
@@ -625,8 +625,8 @@ COMMAND_HANDLERS.update(
         "listing-publication": listing_publication_entry,
         "procurement": procurement_entry,
         "return": return_entry,
-        # Webhook-driven workflow types: the domain entry runs from the v2
-        # definition (``_start_txn``) after the ``workflow.accepted`` relay.
+        # Webhook 驱动的 workflow type：domain entry 由 v2
+        # definition（``_start_txn``）在 ``workflow.accepted`` relay 后运行。
         "order-to-cash": order_to_cash_entry,
         "return-to-refund": return_to_refund_entry,
         "reconciliation": reconciliation_entry,
@@ -634,7 +634,7 @@ COMMAND_HANDLERS.update(
 )
 
 # ---------------------------------------------------------------------------
-# Approval continuations (run by approvals.submit_decision on approve)
+# Approval continuation（approve 时由 approvals.submit_decision 运行）
 # ---------------------------------------------------------------------------
 
 
@@ -654,8 +654,8 @@ def _approve_catalog_revision(db, run: WorkflowRun, item, user_id) -> dict[str, 
     revision.approved_by = _uuid(user_id)
     revision.approved_at = utc_now()
 
-    # Content approval is not publication qualification. The external
-    # effect is gated by a fresh, exact-context append-only assessment.
+    # Content approval 不等于 publication qualification。External
+    # effect 需要 fresh、exact-context、append-only assessment 才能放行。
     qualification_context = (run.input_json or {}).get("qualification_context")
     if not isinstance(qualification_context, dict):
         raise ValidationError("publication qualification context is required")
@@ -838,9 +838,9 @@ def _approve_procurement_bill(db, run: WorkflowRun, item, user_id) -> dict[str, 
     if order is None:
         raise NotFoundError("procurement order not found")
     # Bill posting is effect-gated (P7 整改第 2 点): the remote
-    # ``odoo.bill_create`` effect must succeed before ``bill_posted`` /
-    # ``in_payment`` are advanced -- that advancement happens in
-    # ``finalize_after_effect``, never here.
+    # ``odoo.bill_create`` effect 必须先成功，之后才能推进 ``bill_posted`` /
+    # ``in_payment``；推进动作发生在
+    # ``finalize_after_effect``，绝不在这里执行。
     record_effect(
         db,
         target_system="odoo",
@@ -992,10 +992,10 @@ def _approve_return_credit_note(db, run: WorkflowRun, item, user_id) -> dict[str
     if case is None:
         raise NotFoundError("return case not found")
     # Credit-note posting is effect-gated (P7 整改第 2 点): both
-    # ``odoo.credit_note_create`` and ``odoo.credit_note_validate`` must
-    # succeed before ``credit_note_posted`` is advanced (finalize_after_effect
-    # with the invoice-posted invariant), and ``credit_note_id`` is sourced
-    # from the effect's remote_reference -- never a synthetic CN-* number.
+    # ``odoo.credit_note_create`` 与 ``odoo.credit_note_validate`` 必须
+    # 先成功，之后才能推进 ``credit_note_posted``（由 finalize_after_effect
+    # 在 invoice-posted invariant 下执行）；``credit_note_id`` 来源于
+    # effect 的 remote_reference，绝不生成 synthetic CN-* 编号。
     for op in ("credit_note_create", "credit_note_validate"):
         record_effect(
             db,
@@ -1052,8 +1052,8 @@ def _approve_return_refund(db, run: WorkflowRun, item, user_id) -> dict[str, Any
 
 
 # ---------------------------------------------------------------------------
-# Order-to-cash continuations (registered via register_next_step; invoked by
-# the v2 driver inside app.workflows.definitions after a durable approval).
+# Order-to-cash continuation（通过 register_next_step 注册；由
+# app.workflows.definitions 中的 v2 driver 在 durable approval 后调用）。
 # ---------------------------------------------------------------------------
 
 
@@ -1308,8 +1308,8 @@ def accept_command(
         status=WorkflowRunStatus.ACCEPTED,
         initiated_by_user_id=_uuid(actor_user_id, field="actor_user_id"),
         correlation_id=correlation_id,
-        # Minimal domain input: the v2 definition runs the domain entry from
-        # here; no raw webhook / full body is copied into the event payload.
+        # 最小 domain input：v2 definition 从这里运行 domain entry；
+        # raw webhook / full body 不会复制到 event payload。
         input_json=payload,
     )
     db.add(run)
