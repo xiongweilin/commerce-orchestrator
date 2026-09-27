@@ -37,7 +37,7 @@ def test_drift_creates_manual_reconciliation_diff(db) -> None:
             {
                 "entity_type": "effect",
                 "entity_id": intent_id,
-                "state": "succeeded",  # remote says done, local says planned
+                "state": "succeeded",  # remote 表示 done，本地表示 planned
             }
         ]
 
@@ -56,7 +56,7 @@ def test_drift_creates_manual_reconciliation_diff(db) -> None:
     assert diff.domain == "effect"
     assert diff.entity_id == intent_id
     assert diff.difference == {"expected_state": "planned", "actual_state": "succeeded"}
-    # Diffs are OPEN then immediately escalated; never auto-resolved.
+    # Diff 先进入 OPEN，再立即升级；绝不自动 resolve。
     assert diff.status == ReconciliationDiffStatus.MANUAL_RECONCILIATION
 
 
