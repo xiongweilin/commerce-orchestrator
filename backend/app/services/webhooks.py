@@ -48,7 +48,7 @@ DBOS_WORKFLOW_VERSION = 2
 DBOS_ORCHESTRATION_ENGINE = "dbos"
 WORKFLOW_ACCEPTED_CONSUMER = "worker"
 
-# topic -> (event_type, aggregate_type, producer, workflow_type)
+# topic -> (event_type, aggregate_type, producer, workflow_type) 映射
 TOPIC_EVENT_MAP: dict[str, tuple[str, str, str, str | None]] = {
     "orders/create": ("order.received", "sales_order", "shopify_adapter", "order-to-cash"),
     "refunds/create": (
@@ -94,10 +94,10 @@ def _start_domain_entity(
     if topic == "orders/create":
         customer = payload.get("customer") if isinstance(payload.get("customer"), dict) else {}
         email = str(customer.get("email") or "") or None
-        # Plan 5.2 / data-ownership §5: never persist a plaintext email or
-        # shipping address in a business column. The customer ref column
-        # carries a pseudonymous HMAC marker; plaintext lives only in the
-        # encrypted sensitive-payload vault (30-day retention, tombstone).
+        # Plan 5.2 / data-ownership §5：绝不在业务字段中持久化明文邮箱或
+        # 配送地址。customer ref 字段
+        # 只保存 pseudonymous HMAC marker；明文只存在于
+        # 加密 sensitive-payload vault（30 天 retention，tombstone）中。
         customer_ref = hmac_ref(email) if email else None
         shipping = payload.get("shipping_address")
         if isinstance(shipping, dict) and shipping.get("address1"):
@@ -233,8 +233,8 @@ def ingest_shopify_webhook(
     with db.begin_nested():
         db.add(InboxEvent(consumer=SHOPIFY_WEBHOOK_CONSUMER, event_id=webhook_uuid))
 
-    # Raw webhook body -> unified vault (Fernet, 30-day retention; the same
-    # cleanup job that clears shipping/customer payloads covers it).
+    # Raw webhook body -> 统一 vault（Fernet，30 天 retention；
+    # 与 shipping/customer payload 共用同一 cleanup job）。
     vault = store_sensitive_payload(
         db,
         purpose=WEBHOOK_VAULT_PURPOSE,
@@ -259,8 +259,8 @@ def ingest_shopify_webhook(
     try:
         db.flush()
     except IntegrityError:
-        # Duplicate projection (already ingested): reuse the existing vault
-        # row (one encrypted copy per webhook) and update metadata in place.
+        # Duplicate projection（已 ingest）：复用已有 vault
+        # row（每个 webhook 只保留一份加密副本），并原地更新 metadata。
         row = db.execute(
             select(Projection).where(
                 Projection.owner == PROJECTION_OWNER,
@@ -303,8 +303,8 @@ def ingest_shopify_webhook(
     )
     aggregate_id = entity_id or _entity_id_for(topic, payload, webhook_id)
 
-    # Minimal domain event: stable refs + vault reference only (no raw body,
-    # no plaintext email/shipping/line items).
+    # 最小 domain event：只携带 stable ref + vault reference（不含 raw body，
+    # 不含明文邮箱/配送地址/line item）。
     event = emit_event(
         db,
         event_type=event_type,
