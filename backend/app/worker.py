@@ -264,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
         from app.responsibility.runtime import get_responsibility_kernel
         from app.workflows.bootstrap import start_worker
 
-        start_worker()  # raises on bootstrap / DBOS launch failure
+        start_worker()  # bootstrap / DBOS launch failure 时抛出异常
         responsibility_kernel = get_responsibility_kernel()
         responsibility = ensure_listing_integrity_responsibility(responsibility_kernel)
         logger.info(
