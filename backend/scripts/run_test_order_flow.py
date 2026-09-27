@@ -54,7 +54,7 @@ VARIANT_GID = "gid://shopify/ProductVariant/45805093945391"
 PUBLICATION_GID = "gid://shopify/Publication/208562651183"
 PRODUCT_SKU = "SKU-YIFU-01"
 
-# (next_step payload name, approver user key) for the O2C human gates.
+# O2C human gate 使用的（next_step payload name, approver user key）。
 O2C_GATES = (
     ("reserve", "inventory"),
     ("ship", "warehouse"),
@@ -62,7 +62,7 @@ O2C_GATES = (
     ("close", "accountant2"),
 )
 
-# user key -> (email, display name, roles)
+# user key ->（email, display name, roles）
 O2C_USERS = {
     "proposer": ("o2c.proposer@x.com", "O2C Proposer", ["commerce_lead"]),
     "inventory": ("o2c.inventory@x.com", "O2C Inventory Supervisor", ["inventory_supervisor"]),
@@ -197,8 +197,8 @@ def resolve_order_and_run(db, payload: dict[str, Any], webhook_id: str) -> tuple
             select(SalesOrder).where(SalesOrder.order_ref == str(payload.get("name")))
         ).scalar_one_or_none()
         if by_ref is not None:
-            # stale fixture with a different (synthetic) Shopify id: adopt the
-            # real order data in place so the unique order_ref is preserved.
+            # stale fixture 使用了不同的 synthetic Shopify id：应原地采用
+            # 真实 order data，从而保留唯一 order_ref。
             order = by_ref
             order.shopify_order_id = shopify_id
             order.total = Decimal(str(payload.get("total_price") or "0"))
@@ -432,7 +432,7 @@ def main() -> int:
         if not probe.get("ok"):
             raise RuntimeError(f"Shopify probe failed: {probe}")
 
-        # 1) product publish
+        # 1）发布商品
         publish_result = connector.publish_product(
             PRODUCT_GID,
             publication_id=PUBLICATION_GID,
@@ -452,14 +452,14 @@ def main() -> int:
             "published_at": (publish_status or {}).get("publishedAt"),
         }
 
-        # 2) webhook payload from live order data (fallback to known #1001)
+        # 2）从 live order data 构造 webhook payload（否则回退到已知 #1001）
         payload = fetch_shopify_order_payload(connector, args.shopify_order_id)
         if payload is None:
             print(f"live order {args.shopify_order_id} not found; using known #1001 payload")
             payload = build_fallback_payload(args.shopify_order_id)
         webhook_id = str(uuid.uuid4())
 
-        # 3-6) users, ingest/resolve (commit), v2 gate driving,
+        # 3–6）用户、ingest/resolve（commit）、v2 gate 驱动、
         #      inventory projection, reconciliation.
         db = SessionLocal()
         try:
@@ -470,8 +470,8 @@ def main() -> int:
                     f"expected DBOS v2 run, got engine={run.orchestration_engine!r} "
                     f"version={run.workflow_version!r}"
                 )
-            # Commit the webhook ingest so the worker can start the v2 workflow,
-            # then approve gates as the DBOS driver creates them.
+            # 提交 webhook ingest，让 worker 可以启动 v2 workflow，
+            # 再随着 DBOS driver 创建 gate 逐步 approve。
             db.commit()
             drive_gates_v2(db, run, users, timeout_s=300)
 
@@ -516,7 +516,7 @@ def main() -> int:
             )
             db.commit()
 
-            # 7) collect evidence
+            # 7）收集 evidence
             events = (
                 db.execute(
                     select(OutboxEvent)
