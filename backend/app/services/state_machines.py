@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# State vocabularies (exact strings)
+# 状态 vocabulary（精确字符串）
 # ---------------------------------------------------------------------------
 
 FEEDBACK_STATES = (
@@ -131,7 +131,7 @@ _STATES: dict[str, tuple[str, ...]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Legal transitions
+# 合法 transition
 # ---------------------------------------------------------------------------
 
 _TRANSITIONS: dict[str, dict[str, set[str]]] = {
@@ -206,11 +206,11 @@ _TRANSITIONS: dict[str, dict[str, set[str]]] = {
         "planned": {"dispatched"},
         "dispatched": {"succeeded", "failed", "outcome_unknown"},
         "succeeded": {"reconciled"},
-        # failed effects may be retried (dispatched) a limited number of times,
-        # otherwise they escalate to manual reconciliation.
+        # failed effect 可以有限次数地重试（dispatch），
+        # 否则升级为 manual reconciliation。
         "failed": {"dispatched", "manual_reconciliation"},
-        # outcome_unknown must go through the reconciliation path: it may never
-        # be blindly re-dispatched (no blind retry) or auto-resolved.
+        # outcome_unknown 必须进入 reconciliation path；绝不能
+        # 盲目重新 dispatch（禁止 blind retry）或自动 resolve。
         "outcome_unknown": {"reconciled", "manual_reconciliation"},
         "manual_reconciliation": {"reconciled"},
         "reconciled": set(),
@@ -225,7 +225,7 @@ _TRANSITIONS: dict[str, dict[str, set[str]]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Approval boundary matrix (state_machine, from_state, to_state) -> roles
+# Approval boundary matrix：（state_machine, from_state, to_state）-> roles
 # ---------------------------------------------------------------------------
 
 _APPROVAL_MATRIX: dict[tuple[str, str, str], tuple[str, ...]] = {
@@ -235,9 +235,9 @@ _APPROVAL_MATRIX: dict[tuple[str, str, str], tuple[str, ...]] = {
     ("ListingPublication", "pending_approval", "publishing"): ("catalog_owner",),
     ("ListingPublication", "active", "suspended"): ("catalog_owner",),
     ("ListingPublication", "suspended", "retired"): ("catalog_owner",),
-    # Price changes: commerce_lead approves; when the proposed price violates
-    # the gross-margin constraint finance_approver must also approve (enforced
-    # in can_transition via context["margin_ok"] / context["finance_approval"]).
+    # Price change：由 commerce_lead approve；当 proposed price 违反
+    # gross-margin constraint 时还需要 finance_approver approve（由
+    # can_transition 通过 context["margin_ok"] / context["finance_approval"] 强制）。
     ("PriceOffer", "pending_approval", "approved"): ("commerce_lead",),
     ("SalesOrder", "confirmed", "reserved"): ("inventory_supervisor",),
     ("SalesOrder", "reserved", "picking"): ("warehouse_staff",),
@@ -247,7 +247,7 @@ _APPROVAL_MATRIX: dict[tuple[str, str, str], tuple[str, ...]] = {
     ("SalesOrder", "in_payment", "reconciled"): ("accountant",),
     ("ProcurementOrder", "demand_detected", "rfq_draft"): ("procurement_lead",),
     ("ProcurementOrder", "rfq_draft", "pending_approval"): ("procurement_lead",),
-    # PO: procurement_lead proposes, budget_owner approves (four-eyes).
+    # PO：procurement_lead propose，budget_owner approve（four-eyes）。
     ("ProcurementOrder", "pending_approval", "po_confirmed"): ("budget_owner",),
     ("ProcurementOrder", "po_confirmed", "partially_received"): ("warehouse_staff",),
     ("ProcurementOrder", "po_confirmed", "received"): ("warehouse_staff",),
@@ -257,9 +257,9 @@ _APPROVAL_MATRIX: dict[tuple[str, str, str], tuple[str, ...]] = {
     ("ProcurementOrder", "in_payment", "reconciled"): ("accountant",),
     ("ReturnCase", "requested", "eligibility_review"): ("customer_service",),
     ("ReturnCase", "eligibility_review", "authorized"): ("customer_service",),
-    # Refund chain: customer_service proposes -> warehouse confirms physical
-    # goods -> finance_approver approves the amount (four-eyes) -> channel
-    # adapter executes.
+    # Refund chain：customer_service propose -> warehouse 确认 physical
+    # goods -> finance_approver approve amount（four-eyes）-> channel
+    # adapter 执行。
     ("ReturnCase", "authorized", "received"): ("warehouse_staff",),
     ("ReturnCase", "received", "inspected"): ("warehouse_staff",),
     ("ReturnCase", "inspected", "disposition_approved"): ("warehouse_staff",),
@@ -269,7 +269,7 @@ _APPROVAL_MATRIX: dict[tuple[str, str, str], tuple[str, ...]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Four-eyes areas per approval transition (refund / PO / inventory / accounting)
+# 各 approval transition 的 four-eyes 范围（refund / PO / inventory / accounting）
 # ---------------------------------------------------------------------------
 
 _FOUR_EYES_AREAS: dict[tuple[str, str, str], str] = {
@@ -285,7 +285,7 @@ _FOUR_EYES_AREAS: dict[tuple[str, str, str], str] = {
     ("ReturnCase", "credit_note_posted", "refund_pending"): "refund",
 }
 
-# Effect operations that touch money/inventory invariants.
+# 涉及资金/库存 invariant 的 effect operation。
 _CREDIT_NOTE_EFFECT_OPS = frozenset({"odoo.credit_note_create", "odoo.credit_note_validate"})
 _INVENTORY_EFFECT_OPS = frozenset(
     {"odoo.stock_move_create", "odoo.picking_validate", "odoo.receive_transfer"}
