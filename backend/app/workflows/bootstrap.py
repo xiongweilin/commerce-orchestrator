@@ -68,9 +68,9 @@ def start_worker() -> None:
 
     configure_logging()
     cfg = configure_dbos()["config"]
-    # Importing the modules registers the @DBOS.workflow/@DBOS.step/
-    # @DBOS.scheduled functions in the global registry before launch:
-    # definitions: the v2 single mainline (workflow_version=2).
+    # Import module 会注册 @DBOS.workflow/@DBOS.step/
+    # @DBOS.scheduled function，确保 launch 前进入 global registry：
+    # definitions：v2 单一主线（workflow_version=2）。
     from app.workflows import definitions  # noqa: F401
 
     DBOS(config=DBOSConfig(**cfg))
