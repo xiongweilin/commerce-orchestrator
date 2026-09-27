@@ -54,9 +54,9 @@ def test_command_initiate_matrix_matches_plan() -> None:
         "return": ("customer_service",),
         "reconciliation": ("accountant", "system_admin"),
     }
-    # Every command scope has a registered handler (the API cannot accept a
-    # command the domain does not implement).  The webhook-driven workflow
-    # types are domain entries without a user-initiated command scope.
+    # 每个 command scope 都必须有已注册 handler（API 不能接受
+    # domain 未实现的 command）。Webhook 驱动的 workflow
+    # type 是没有 user-initiated command scope 的 domain entry。
     assert set(COMMAND_HANDLERS) == set(COMMAND_INITIATE_ROLES) | {
         "order-to-cash",
         "return-to-refund",
@@ -81,7 +81,7 @@ def test_read_matrix_matches_plan() -> None:
     )
     assert DOMAIN_READ_ROLES["reconciliation"] == ("accountant", "compliance", "system_admin")
     assert DOMAIN_READ_ROLES["ops"] == ("system_admin",)
-    # workflows / work items: any valid business role.
+    # workflow / work item：任一有效 business role。
     assert set(DOMAIN_READ_ROLES["workflows"]) == set(ROLES)
     assert set(DOMAIN_READ_ROLES["work_items"]) == set(ROLES)
 
@@ -104,13 +104,13 @@ def test_has_role_and_ensure_roles(db, make_user) -> None:
     assert has_role(db, owner, "catalog_owner") is True
     assert has_role(db, owner, "system_admin") is False
     assert has_role(db, owner, "no_such_role") is False
-    ensure_roles(db, owner, ["catalog_owner", "system_admin"])  # one suffices
+    ensure_roles(db, owner, ["catalog_owner", "system_admin"])  # 一个即可
 
     from app.core.errors import PermissionDeniedError
 
     with pytest.raises(PermissionDeniedError):
         ensure_roles(db, owner, ["system_admin"])
-    ensure_roles(db, owner, [])  # empty roles always pass
+    ensure_roles(db, owner, [])  # role 为空时始终通过
 
 
 def test_inactive_user_cannot_submit_decision(
@@ -287,7 +287,7 @@ def test_odoo_state_transition_ops_precheck() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Adapter contract: every EFFECT_OPS has a production adapter method and an
+# Adapter contract：每个 EFFECT_OPS 都必须有 production adapter method 和
 # explicit test adapter; dispatch kwargs stay signature-compatible (计划 §二.4).
 # ---------------------------------------------------------------------------
 
@@ -425,9 +425,9 @@ def test_adapter_dispatch_kwargs_match_signature(operation: str) -> None:
         request_hash="h",
         correlation_id="c",
     )
-    # Raises ConnectorError on a signature mismatch — that would fail the test.
+    # signature 不匹配时抛出 ConnectorError，这会让测试失败。
     kwargs = _dispatch_kwargs(method, request)
-    assert kwargs  # at least the parameter fields are dispatched
+    assert kwargs  # 至少要 dispatch parameter field
 
 
 def _sample_params(operation: str) -> dict:
