@@ -46,8 +46,8 @@ class ProcurementOrder(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
         default=ProcurementStatus.DEMAND_DETECTED,
     )
     odoo_po_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Remote entity id produced by odoo.bill_create (account.move id); the
-    # bill lifecycle is only advanced after the effect succeeds.
+    # odoo.bill_create 产生的 remote entity id（account.move id）；
+    # 只有 effect 成功后才推进 bill lifecycle。
     odoo_bill_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     approved_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
