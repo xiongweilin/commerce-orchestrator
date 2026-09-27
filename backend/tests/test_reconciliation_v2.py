@@ -248,7 +248,7 @@ def test_effect_outcome_unknown_where_remote_exists_is_diff(db) -> None:
         status="outcome_unknown",
         error_detail="ambiguous transport failure",
     )
-    # Remote refund actually exists: the reconciliation must surface the drift.
+    # Remote refund 确实存在：reconciliation 必须显式暴露该 drift。
     run = run_reconciliation(
         db,
         run_type="daily",
