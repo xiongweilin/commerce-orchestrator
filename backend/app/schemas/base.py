@@ -71,7 +71,7 @@ class ErrorBody(BaseModel):
 
 
 class AcceptedResponse(BaseModel):
-    """Response for commands that are accepted asynchronously."""
+    """异步受理命令的响应。"""
 
     workflowId: UUID
     status: Literal["accepted"] = "accepted"
