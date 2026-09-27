@@ -60,9 +60,9 @@ def test_0008_does_not_backfill_historical_lifecycle_states(tmp_path, monkeypatc
     intent_id = uuid.uuid4()
     now = dt.datetime.now(dt.UTC)
 
-    # This fixture intentionally writes against the 0007 schema. Using the
-    # current EffectLedgerEntry ORM here would leak future 0009 columns into an
-    # insert that is specifically meant to represent a historical row.
+    # 该 fixture 刻意针对 0007 schema 写入。这里如果使用
+    # 当前 EffectLedgerEntry ORM，会把未来 0009 column 泄漏到
+    # 本应专门表示 historical row 的 insert 中。
     with engine.begin() as conn:
         conn.execute(
             sa.text(
