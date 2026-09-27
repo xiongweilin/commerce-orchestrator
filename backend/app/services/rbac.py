@@ -16,7 +16,7 @@ from app.core.errors import PermissionDeniedError
 from app.models.identity import RoleAssignment
 from app.schemas.events import ROLES
 
-# Workflow types that map one-to-one to their command scope.
+# 与 command scope 一一对应的 workflow type。
 COMMAND_INITIATE_ROLES: dict[str, tuple[str, ...]] = {
     "catalog-revision": ("catalog_owner",),
     "listing-publication": ("catalog_owner",),
@@ -27,7 +27,7 @@ COMMAND_INITIATE_ROLES: dict[str, tuple[str, ...]] = {
 
 # Read matrix (整改计划 §四.2): domain -> allowed roles.
 DOMAIN_READ_ROLES: dict[str, tuple[str, ...]] = {
-    # workflows / work items: any active user holding at least one role.
+    # workflow / work item：任一至少持有一个 role 的 active user。
     "workflows": tuple(ROLES),
     "work_items": tuple(ROLES),
     "sales_orders": (
@@ -55,10 +55,10 @@ DOMAIN_READ_ROLES: dict[str, tuple[str, ...]] = {
     "ops": ("system_admin",),
 }
 
-# Diff resolve is a reconciliation write: accountant / system_admin only.
+# Diff resolve 属于 reconciliation write：仅 accountant / system_admin。
 RECONCILIATION_RESOLVE_ROLES: tuple[str, ...] = ("accountant", "system_admin")
 
-# Failed inbox retry: system_admin only.
+# Failed inbox retry：仅 system_admin。
 OPS_RETRY_ROLES: tuple[str, ...] = ("system_admin",)
 
 
