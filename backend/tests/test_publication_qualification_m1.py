@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Final non-harness M1 full-suite CI gate anchor.
+# 最终的非 harness M1 full-suite CI gate anchor。
 import uuid
 from pathlib import Path
 
