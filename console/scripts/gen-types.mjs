@@ -13,7 +13,6 @@
  * 输出：console/lib/generated/openapi.ts（自动生成，禁止手改；schema 变更后重新运行本脚本）。
  */
 
-import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,8 +118,6 @@ try {
 }
 
 const schemas = spec?.components?.schemas ?? {};
-const specHash = createHash("sha256").update(JSON.stringify(spec)).digest("hex").slice(0, 16);
-
 const names = Object.keys(schemas).sort();
 const chunks = [];
 for (const name of names) {
@@ -134,7 +131,6 @@ const output = [
   "// 本文件由 scripts/gen-types.mjs 自动生成，禁止手改。",
   "// 运行：node scripts/gen-types.mjs（或 npm run gen:types）",
   `// 来源：${openapiUrl}`,
-  `// OpenAPI spec sha256（前 16 位）：${specHash}`,
   "",
   chunks.join("\n\n"),
   "",
@@ -142,4 +138,4 @@ const output = [
 
 await mkdir(path.dirname(OUT), { recursive: true });
 await writeFile(OUT, output, "utf8");
-console.log(`已生成 ${path.relative(ROOT, OUT)}（${names.length} 个 schema，hash=${specHash}）`);
+console.log(`已生成 ${path.relative(ROOT, OUT)}（${names.length} 个 schema）`);
