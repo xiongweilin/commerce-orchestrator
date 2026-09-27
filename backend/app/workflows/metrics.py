@@ -163,7 +163,7 @@ def start_metrics_server(port: int = 9101) -> None:
                 self.end_headers()
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-            del format, args  # keep the probe endpoint quiet
+            del format, args  # 保持 probe endpoint 安静
 
     server = ThreadingHTTPServer(("0.0.0.0", port), _WorkerHandler)
     thread = threading.Thread(target=server.serve_forever, name="worker-metrics", daemon=True)
