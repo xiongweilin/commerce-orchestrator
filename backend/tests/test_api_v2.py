@@ -35,7 +35,7 @@ def _assert_error_envelope(body: dict, code: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Health endpoints
+# Health endpoint
 # ---------------------------------------------------------------------------
 
 
@@ -58,10 +58,10 @@ def test_readyz_shape_not_ready_without_migrations(client: TestClient) -> None:
     assert body["status"] == "not_ready"
     checks = body["checks"]
     assert set(checks) == {"database", "alembic", "adapters", "worker"}
-    assert checks["database"]["status"] == "ok"  # sqlite answers SELECT 1
-    assert checks["alembic"]["status"] == "fail"  # no alembic_version table
-    assert checks["adapters"]["status"] == "ok"  # conftest sets adapter env
-    assert checks["worker"]["status"] == "fail"  # no worker heartbeat
+    assert checks["database"]["status"] == "ok"  # sqlite 可响应 SELECT 1
+    assert checks["alembic"]["status"] == "fail"  # 没有 alembic_version table
+    assert checks["adapters"]["status"] == "ok"  # conftest 设置 adapter 环境
+    assert checks["worker"]["status"] == "fail"  # 没有 worker heartbeat
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +77,8 @@ def test_me_requires_auth(client: TestClient) -> None:
 
 def test_me_returns_db_roles_not_jwt_claims(client: TestClient, make_user, auth_headers) -> None:
     user_id = make_user(["catalog_owner"])
-    # JWT role claims (system_admin) are informational: the DB assignment
-    # (catalog_owner) is authoritative.
+    # JWT role claim（system_admin）仅供参考；DB assignment
+    # （catalog_owner）才是 authoritative。
     response = client.get("/v1/me", headers=auth_headers(user_id, ["system_admin"]))
     assert response.status_code == 200
     body = response.json()
@@ -154,22 +154,22 @@ def test_read_matrix(client: TestClient, make_user, auth_headers) -> None:
     def status(path: str, user_id: uuid.UUID, roles: list[str]) -> int:
         return client.get(path, headers=auth_headers(user_id, roles)).status_code
 
-    # workflows: any business role reads, no-role user is denied.
+    # workflow：任一 business role 可读；无 role user 被拒绝。
     any_role = make_user(["customer_service"])
     no_role = make_user([])
     assert status("/v1/workflows", any_role, ["customer_service"]) == 200
     assert status("/v1/workflows", no_role, []) == 403
-    # sales-orders / return-cases: customer_service in, procurement_lead out.
+    # sales-orders / return-cases：允许 customer_service，拒绝 procurement_lead。
     cs = make_user(["customer_service"])
     pl = make_user(["procurement_lead"])
     assert status("/v1/sales-orders", cs, ["customer_service"]) == 200
     assert status("/v1/sales-orders", pl, ["procurement_lead"]) == 403
     assert status("/v1/return-cases", cs, ["customer_service"]) == 200
     assert status("/v1/return-cases", pl, ["procurement_lead"]) == 403
-    # procurements: procurement_lead in, customer_service out.
+    # procurements：允许 procurement_lead，拒绝 customer_service。
     assert status("/v1/procurements", pl, ["procurement_lead"]) == 200
     assert status("/v1/procurements", cs, ["customer_service"]) == 403
-    # reconciliation reads: accountant / compliance / system_admin in.
+    # reconciliation read：允许 accountant / compliance / system_admin。
     warehouse = make_user(["warehouse_staff"])
     for role_name in ("accountant", "compliance", "system_admin"):
         role_user = make_user([role_name])
@@ -178,7 +178,7 @@ def test_read_matrix(client: TestClient, make_user, auth_headers) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Decision permissions: no implicit system_admin approval, compliance veto
+# Decision 权限：system_admin 不隐式获得 approval；compliance 可 veto
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +223,7 @@ def test_compliance_can_reject_but_not_approve(
     compliance = make_user(["compliance"])
     headers = auth_headers(compliance, ["compliance"])
 
-    # approve is denied (compliance only vetoes).
+    # approve 被拒绝（compliance 只能 veto）。
     owner = make_user(["catalog_owner"])
     auth = auth_headers(owner, ["catalog_owner"])
     workflow_id = _seed_catalog_revision(db, owner, "SKU-C1")
@@ -236,7 +236,7 @@ def test_compliance_can_reject_but_not_approve(
     )
     assert denied.status_code == 403
 
-    # reject (veto) is allowed and cancels the run.
+    # 允许 reject（veto），并取消 run。
     workflow_id2 = _seed_catalog_revision(db, owner, "SKU-C2")
     detail2 = client.get(f"/v1/workflows/{workflow_id2}", headers=auth).json()
     item2 = detail2["workItems"][0]
@@ -254,7 +254,7 @@ def test_compliance_can_reject_but_not_approve(
 
 
 # ---------------------------------------------------------------------------
-# Decision Idempotency-Key semantics
+# Decision Idempotency-Key 语义
 # ---------------------------------------------------------------------------
 
 
@@ -350,7 +350,7 @@ def test_decision_in_progress_is_409_with_retry_after(
 
 
 # ---------------------------------------------------------------------------
-# Ops endpoints (system_admin only)
+# Ops endpoint（仅 system_admin）
 # ---------------------------------------------------------------------------
 
 
@@ -443,7 +443,7 @@ def test_ops_runtime_shape(client: TestClient, make_user, auth_headers) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Reconciliation diff resolve: RBAC + Idempotency-Key
+# Reconciliation diff resolve：RBAC + Idempotency-Key
 # ---------------------------------------------------------------------------
 
 
@@ -512,8 +512,8 @@ def test_workflow_detail_normalized_fields(client: TestClient, make_user, auth_h
     assert item["workflowId"] == workflow_id
     assert item["createdAt"]
     assert item["expectedWorkflowVersion"] == 1
-    # Effect normalization fields are present whenever effects exist; assert
-    # the shape on an approval that records an effect.
+    # 只要存在 effect 就必须存在 normalization field；在包含 effect 的
+    # approval 上断言其 shape。
     approver = make_user(["catalog_owner", "budget_owner"])
     approved = client.post(
         f"/v1/work-items/{item['workItemId']}/decisions",
@@ -521,9 +521,9 @@ def test_workflow_detail_normalized_fields(client: TestClient, make_user, auth_h
         headers={**auth_headers(approver, ["catalog_owner"]), "Idempotency-Key": "norm-approve-1"},
     )
     assert approved.status_code == 200
-    # v2: the worker applies the continuation after DBOS.recv; simulate that
-    # step (mirrors app.workflows.definitions._apply_decision_txn) so the
-    # effect normalization shape can be asserted without a live runtime.
+    # v2：worker 在 DBOS.recv 后应用 continuation；这里模拟该
+    # step（对应 app.workflows.definitions._apply_decision_txn），从而
+    # 无需 live runtime 即可断言 effect normalization shape。
     from app.models.workflow import WorkflowRun, WorkItem
     from app.services.approvals import apply_domain_continuation
 
@@ -570,7 +570,7 @@ def test_workflow_detail_normalized_fields(client: TestClient, make_user, auth_h
 
 
 # ---------------------------------------------------------------------------
-# Audit on RBAC denials (no token / body / PII)
+# 审计 RBAC deny（不记录 token / body / PII）
 # ---------------------------------------------------------------------------
 
 
