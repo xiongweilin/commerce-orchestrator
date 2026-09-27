@@ -58,8 +58,8 @@ def main()-> None:  # noqa: S3776 (tool script - acceptable complexity)
                 existing.created_at = payload.created_at
                 existing.current_status = payload.current_status
                 existing.input_hash = expected_hash
-                # This command processes refreshes synchronously. Mark the job as processing
-                # before commit so the long-running worker cannot race the same ticket.
+                # 该 command 同步处理 refresh。先把 job 标记为 processing，
+                # 再 commit，避免长时间运行的 worker 竞争同一个 ticket。
                 job = AnalysisJob(ticket_id=existing.id, status="processing")
                 db.add(job)
                 db.commit()
