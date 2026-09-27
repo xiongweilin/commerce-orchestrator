@@ -46,7 +46,7 @@ def test_emit_event_writes_pending_outbox(clean_outbox_registries, db) -> None:
     event = _emit(db, event_type="order.received")
     assert event.status == OutboxStatus.PENDING
     assert _count(db, OutboxEvent) == 1
-    assert _count(db, InboxEvent) == 0  # no consumers registered yet
+    assert _count(db, InboxEvent) == 0  # 尚未注册 consumer
 
 
 def test_process_outbox_delivers_once_per_consumer(clean_outbox_registries, db) -> None:
@@ -63,20 +63,20 @@ def test_process_outbox_delivers_once_per_consumer(clean_outbox_registries, db) 
 
     rows = db.execute(select(InboxEvent)).scalars().all()
     assert all(row.status == InboxStatus.PROCESSED for row in rows)
-    # A second pass has nothing left to deliver.
+    # 第二次执行时已经没有待投递内容。
     assert process_outbox(db, consumer="consumer-a") == 0
     assert process_outbox(db, consumer="consumer-b") == 0
 
 
 def test_replaying_same_event_id_to_same_consumer_deduplicates(clean_outbox_registries, db) -> None:
     event_id = uuid.uuid4()
-    # Emitted without routing so the outbox copy is pending for delivery.
+    # 发出时不做 routing，因此 outbox 副本保持 pending 等待投递。
     _emit(db, event_id=event_id)
     assert deliver_outbox(db, consumers=["consumer-c"]) == 1
     assert _count(db, InboxEvent, InboxEvent.consumer == "consumer-c") == 1
 
-    # Simulate at-least-once redelivery: the same outbox row is delivered
-    # again; the (consumer, event_id) unique constraint must skip the copy.
+    # 模拟 at-least-once 重投：同一个 outbox row 再次投递；
+    # (consumer, event_id) 唯一约束必须跳过重复副本。
     event = db.get(OutboxEvent, event_id)
     event.status = OutboxStatus.PENDING
     assert deliver_outbox(db, consumers=["consumer-c"]) == 0
@@ -94,7 +94,7 @@ def test_handler_failure_marks_inbox_failed_without_crash(clean_outbox_registrie
     assert processed == 1
     row = db.execute(select(InboxEvent)).scalar_one()
     assert row.status == InboxStatus.FAILED
-    # Processing continues; a second run finds nothing pending.
+    # Processing 继续；第二次运行时找不到 pending 内容。
     assert process_outbox(db, consumer="consumer-fail") == 0
 
 
@@ -129,7 +129,7 @@ def test_unknown_event_type_and_producer_rejected(db) -> None:
     with pytest.raises(ValidationError):
         _emit(db, event_type="order.received", producer="not-a-producer")
     with pytest.raises(ValidationError):
-        # Producer may not emit events from a foreign domain.
+        # Producer 不能发出其他 domain 的 event。
         _emit(db, event_type="catalog.revision_drafted", producer="order")
 
 
