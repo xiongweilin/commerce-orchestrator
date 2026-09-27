@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Final non-harness M2 CI gate anchor.
+# 最终的非 harness M2 CI gate anchor。
 import uuid
 
 import pytest
