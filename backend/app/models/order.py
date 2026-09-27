@@ -38,9 +38,9 @@ class SalesOrder(UUIDPkMixin, TimestampMixin, VersionMixin, Base):
         default=SalesOrderStatus.RECEIVED,
     )
     odoo_sale_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Remote entity ids for the O2C effect chain: created by
-    # odoo.picking_create / odoo.invoice_create and consumed by the matching
-    # validate effects (stock.picking.id / account.move.id respectively).
+    # O2C effect chain 的 remote entity id：由
+    # odoo.picking_create / odoo.invoice_create 创建，并由匹配的
+    # validate effect 消费（分别对应 stock.picking.id / account.move.id）。
     odoo_picking_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     odoo_invoice_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     currency: Mapped[str] = mapped_column(CHAR(3), nullable=False)
