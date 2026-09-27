@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_sensitive_payload"),
     )
-    # Retention cleanup scans by expiry; tombstone rows keep deleted_at set.
+    # Retention cleanup 按 expiry 扫描；tombstone row 保留 deleted_at。
     op.create_index(
         "ix_sensitive_payload_expires_at", "sensitive_payload", ["expires_at"]
     )
