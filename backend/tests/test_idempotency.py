@@ -39,8 +39,8 @@ def test_same_key_and_body_is_replayed_exactly_once(db) -> None:
         assert result.workflow_id == results[0].workflow_id
         assert result.status_url == results[0].status_url
 
-    # Exactly one run and one idempotency record; accept-only creates no
-    # domain entity and no effect-ledger side effect.
+    # 只能有一个 run 和一个 idempotency record；accept-only 不创建
+    # domain entity，也不产生 effect-ledger side effect。
     assert _count(db, WorkflowRun) == 1
     assert _count(db, IdempotencyRecord) == 1
     assert _count(db, CatalogRevision) == 0
