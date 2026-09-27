@@ -26,7 +26,7 @@ class PublicationQualificationContext(BaseModel):
 
 
 class CatalogRevisionCreate(BaseModel):
-    """Create a draft catalog revision for a SKU."""
+    """为 SKU 创建草稿 catalog revision。"""
 
     sku: str = Field(min_length=1, max_length=64)
     title: str | None = Field(default=None, max_length=255)
@@ -40,7 +40,7 @@ class CatalogRevisionCreate(BaseModel):
 
 
 class ListingPublicationCreate(BaseModel):
-    """Request publication of a SKU on a sales channel."""
+    """请求在销售渠道发布 SKU。"""
 
     sku: str = Field(min_length=1, max_length=64)
     channel: str = Field(default="shopify", max_length=32)
@@ -50,7 +50,7 @@ class ListingPublicationCreate(BaseModel):
 
 
 class ProcurementCreate(BaseModel):
-    """Create a procurement order (demand_detected)."""
+    """创建采购订单（demand_detected）。"""
 
     sku: str = Field(min_length=1, max_length=64)
     qty: Money
@@ -61,7 +61,7 @@ class ProcurementCreate(BaseModel):
 
 
 class ReturnCreate(BaseModel):
-    """Register a customer return case."""
+    """登记客户退货 case。"""
 
     return_ref: str | None = Field(default=None, max_length=64)
     shopify_order_id: str | None = Field(default=None, max_length=64)
@@ -71,7 +71,7 @@ class ReturnCreate(BaseModel):
 
 
 class ReconciliationCreate(BaseModel):
-    """Trigger a reconciliation run."""
+    """触发 reconciliation run。"""
 
     run_type: str = Field(min_length=1, max_length=32)
     domains: list[str] = Field(default_factory=lambda: ["effect"], max_length=16)
@@ -79,7 +79,7 @@ class ReconciliationCreate(BaseModel):
 
 
 class WorkItemDecisionSubmit(BaseModel):
-    """Submit a decision on a pending work item."""
+    """对 pending work item 提交 decision。"""
 
     decision: Literal["approve", "reject", "confirm", "cancel"]
     reason: str | None = Field(default=None, max_length=2000)
