@@ -115,7 +115,7 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
         db.flush()
         assert outcome["workflowId"] == str(run_id)
 
-    # The bill approval only records the remote effect: the domain state must
+    # bill approval 只记录 remote effect：domain state 必须
     # NOT advance until the effect succeeds (P7 整改第 2 点).
     from app.models.effect import EffectLedgerEntry
     from app.models.procurement import ProcurementOrder
@@ -148,7 +148,7 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
     assert order.status.value == "in_payment"
     assert order.odoo_bill_id == "4201"
 
-    # The close gate (created with the bill gate) now completes the run.
+    # close gate（与 bill gate 一起创建）此时完成 run。
     close_item = _work_items(db, run_id)[-1]
     outcome = apply_v2_decision(
         db,
@@ -162,12 +162,12 @@ def test_full_procurement_approval_chain_completes_run(db, make_user) -> None:
     assert outcome["workflowId"] == str(run_id)
 
     run = db.get(WorkflowRun, run_id)
-    # Terminal normalization belongs to the DBOS driver (_complete_txn); the
-    # shared continuation records the result and closes the domain entity.
+    # Terminal normalization 归 DBOS driver（_complete_txn）持有；
+    # shared continuation 记录结果并关闭 domain entity。
     assert run.result_json is not None
     db.refresh(order)
     assert order.status.value == "closed"
-    # Every gate decision was audited.
+    # 每个 gate decision 都必须被审计。
     decisions = db.execute(select(func.count()).select_from(WorkItemDecision)).scalar_one()
     assert decisions == 4
 
@@ -223,8 +223,8 @@ def test_return_credit_note_chain_is_effect_gated(db, make_user) -> None:
         db.flush()
 
     case = db.execute(select(ReturnCase)).scalars().one()
-    # The accountant approved the credit-note gate: effects are planned but
-    # the domain state must not advance and no synthetic number is assigned.
+    # accountant 已 approve credit-note gate：effect 已 planned，但
+    # domain state 不能推进，也不能分配 synthetic number。
     assert case.status.value == "disposition_approved"
     assert case.credit_note_id is None
     assert case.odoo_credit_note_id is None
@@ -265,8 +265,8 @@ def test_return_credit_note_chain_is_effect_gated(db, make_user) -> None:
     assert case.credit_note_id == "501"
     assert case.odoo_credit_note_id == "501"
 
-    # The finance approver then approves the refund amount; the Shopify
-    # refund effect is planned.
+    # finance approver 随后 approve refund amount；Shopify
+    # refund effect 被 planned。
     refund_gate = _work_items(db, run_id)[-1]
     apply_v2_decision(
         db,
@@ -378,7 +378,7 @@ def test_compliance_can_veto_but_not_approve(db, make_user) -> None:
     item = items[0]
     assert (item.payload_json or {}).get("compliance_vetoable") is True
 
-    # Compliance may reject (veto), which cancels the run.
+    # Compliance 可以 reject（veto），从而取消 run。
     apply_v2_decision(
         db,
         work_item_id=item.id,
