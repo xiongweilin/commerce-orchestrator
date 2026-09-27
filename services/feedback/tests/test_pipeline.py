@@ -12,7 +12,7 @@ from feedback_app.pipeline import (
 )
 
 # ---------------------------------------------------------------------------
-# _resolve_blocking_groups
+# _resolve_blocking_groups 测试
 # ---------------------------------------------------------------------------
 
 def test_resolve_blocking_groups_disabled_returns_product_areas():
@@ -33,7 +33,7 @@ def test_resolve_blocking_groups_enabled_combines_with_pipe():
 
 
 # ---------------------------------------------------------------------------
-# _group_indices_by_label
+# _group_indices_by_label 测试
 # ---------------------------------------------------------------------------
 
 def test_group_indices_by_label_groups_by_value():
@@ -52,7 +52,7 @@ def test_group_indices_by_label_single_label():
 
 
 # ---------------------------------------------------------------------------
-# _extract_cluster_features
+# _extract_cluster_features 测试
 # ---------------------------------------------------------------------------
 
 def test_extract_cluster_features_extracts_texts_and_areas():
@@ -89,7 +89,7 @@ def test_extract_cluster_features_falls_back_to_summary():
     texts, summaries, _, _ = _extract_cluster_features([(ticket, analysis)])
     assert summaries == ["app crashes"]
 # ---------------------------------------------------------------------------
-# DB-backed tests using in-memory SQLite
+# 使用 in-memory SQLite 的 DB-backed 测试
 # ---------------------------------------------------------------------------
 
 
