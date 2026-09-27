@@ -58,9 +58,9 @@ DEPRECATED_DOMAINS = {"shopify": ("listing", "order", "return")}
 """Legacy domain names expanded to canonical domains (with a warning)."""
 
 # Domain comparison fields (plan 二.5). Status strings that use different
-# vocabularies across systems (e.g. local pipeline states vs Shopify
-# displayFinancialStatus) are deliberately NOT compared; they stay in
-# ``facts`` as informational context for manual review.
+# 不同系统的 vocabulary（例如本地 pipeline state 与 Shopify
+# displayFinancialStatus）刻意不做直接比较；它们保留在
+# ``facts`` 中，作为 manual review 的信息上下文。
 COMPARE_FIELDS: dict[str, tuple[str, ...]] = {
     "listing": ("sku", "shopify_product_gid", "published", "content_hash"),
     "order": ("currency", "total", "shopify_order_id", "odoo_sale_order_id"),
@@ -70,7 +70,7 @@ COMPARE_FIELDS: dict[str, tuple[str, ...]] = {
     "effect": ("operation", "intent_id", "remote_reference", "remote_present"),
 }
 
-# Fields used to pair an expected state with remote actual states (join keys).
+# 用于把 expected state 与 remote actual state 配对的字段（join key）。
 _LINK_FIELDS = (
     "shopify_order_id",
     "odoo_sale_order_id",
@@ -203,12 +203,12 @@ def _local_rows(db, domain: str) -> list[dict[str, Any]]:
             for row in rows
         ]
     if domain == "shopify":
-        # Shopify-side view of local state: every mirrored sales order,
-        # keyed by its Shopify order name so it pairs with the connector's
-        # ``orders.name`` rows.  The state vocabulary is the local O2C
-        # pipeline state; Shopify's ``displayFinancialStatus`` (e.g. PAID)
-        # is compared as-is, so the semantic difference surfaces as a
-        # MANUAL_RECONCILIATION diff rather than being auto-smoothed.
+        # Shopify 侧的本地状态视图：包含每个 mirrored sales order，
+        # 使用 Shopify order name 作为 key，以便与 connector 的
+        # ``orders.name`` row 配对。本地 O2C
+        # pipeline state 与 Shopify ``displayFinancialStatus``（例如 PAID）
+        # 按原值比较，因此 semantic difference 会显式表现为
+        # MANUAL_RECONCILIATION diff，而不是被自动抹平。
         rows = db.execute(select(SalesOrder).order_by(SalesOrder.order_ref)).scalars()
         return [
             {
@@ -386,7 +386,7 @@ def _local_canonical_facts(db, domain: str) -> list[CanonicalExternalState]:
                     "intent_id": str(row.intent_id),
                     "remote_reference": row.remote_reference,
                     "status": row.status.value,
-                    # A succeeded effect expects the remote entity to exist.
+                    # effect 成功后预期 remote entity 必须存在。
                     "remote_present": bool(
                         row.remote_reference and row.status.value == "succeeded"
                     ),
@@ -470,7 +470,7 @@ def _compare_domain(
             status=ReconciliationDiffStatus.OPEN,
         )
         db.add(diff)
-        # Escalate for manual handling; never auto-resolve.
+        # 升级为人工处理；绝不自动 resolve。
         diff.status = ReconciliationDiffStatus.MANUAL_RECONCILIATION
 
     for exp_state in expected:
@@ -515,7 +515,7 @@ def _compare_domain(
 
 
 # ---------------------------------------------------------------------------
-# Reconciliation readers
+# Reconciliation reader
 # ---------------------------------------------------------------------------
 
 
@@ -1112,7 +1112,7 @@ def _run_legacy(
                 status=ReconciliationDiffStatus.OPEN,
             )
             db.add(diff)
-            # Escalate for manual handling; never auto-resolve.
+            # 升级为人工处理；绝不自动 resolve。
             diff.status = ReconciliationDiffStatus.MANUAL_RECONCILIATION
             diffs += 1
         total_checked += checked
@@ -1183,8 +1183,8 @@ def _run_canonical(
         expected = _local_canonical_facts(db, domain)
         domain_scope = dict(scope or {})
         if domain in {"effect", "return"}:
-            # Read-back domains need the expected entities to know what to
-            # re-read on the external side.
+            # Read-back domain 需要 expected entity 才能知道
+            # 应在 external side 重新读取什么。
             domain_scope["expected_states"] = expected
         try:
             actual = list(reader.read_actual(domain, domain_scope))
@@ -1217,7 +1217,7 @@ def _run_canonical(
         }
 
     if scheduled and skipped_domains:
-        # Scheduled reconciliation must never skip: escalate to failed.
+        # Scheduled reconciliation 绝不能跳过；应升级为 failed。
         failed_domains.extend(skipped_domains)
         skipped_domains = []
 
