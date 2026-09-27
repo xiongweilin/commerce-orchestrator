@@ -104,7 +104,7 @@ def definition_names() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# DBOS transactions / steps
+# DBOS transaction / step
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +116,7 @@ def _start_txn(workflow_id: str) -> None:
     if run is None:
         raise ValueError(f"workflow run {workflow_id} not found")
     if run.status != WorkflowRunStatus.ACCEPTED:
-        return  # already started (recovery replay)
+        return  # 已启动（recovery replay）
     run.status = WorkflowRunStatus.RUNNING
     run.started_at = utc_now()
     run.version += 1
@@ -124,8 +124,8 @@ def _start_txn(workflow_id: str) -> None:
     handler = COMMAND_HANDLERS.get(run.workflow_type)
     if handler is None:
         raise ValueError(f"no domain entry for workflow type {run.workflow_type!r}")
-    # The domain entry creates the first work item with
-    # expected_version=run.version (post-bump) and sets awaiting_approval.
+    # Domain entry 会创建第一个 work item，并使用
+    # expected_version=run.version（bump 后），同时设置 awaiting_approval。
     handler(db, run, run.input_json or {}, run.initiated_by_user_id, run.correlation_id)
 
 
@@ -167,10 +167,10 @@ def _snapshot_txn(workflow_id: str) -> dict[str, Any]:
         .scalars()
         .all()
     )
-    # Delay terminal normalisation until planned effects have been executed.
-    # Domain continuations may record a completion result while effects remain
-    # planned, but ``commands._complete_run`` does not terminalize the run;
-    # terminal completion is owned only by the gated ``_complete_txn`` seam.
+    # 在 planned effect 执行完之前延迟 terminal normalization。
+    # Domain continuation 可能在 effect 仍为
+    # planned 时记录 completion result，但 ``commands._complete_run`` 不会 terminalize run；
+    # terminal completion 只由 gated ``_complete_txn`` seam 持有。
     if not effects:
         _normalize_terminal(db, run)
     return {
@@ -203,8 +203,8 @@ def _apply_decision_txn(workflow_id: str, decision_payload: dict[str, Any]) -> N
     decision = str(decision_payload["decision"])
     actor = uuid.UUID(str(decision_payload["actor_user_id"]))
     reason = decision_payload.get("reason")
-    # Bump before the continuation so the next work item snapshots the new
-    # version (CAS: expectedWorkflowVersion == run.version at decision time).
+    # 在 continuation 前先 bump，使下一个 work item snapshot 新的
+    # version（CAS：decision 时 expectedWorkflowVersion == run.version）。
     run.version += 1
     apply_domain_continuation(
         db,
@@ -227,7 +227,7 @@ def _dispatch_effect_txn(workflow_id: str, effect: dict[str, Any]) -> dict[str, 
     if run is None:
         raise ValueError(f"workflow run {workflow_id} not found")
     operation = str(effect["operation"])
-    # Fail-closed: a request that cannot be built raises before any dispatch.
+    # Fail-closed：无法构建的 request 必须在任何 dispatch 前抛出异常。
     request = build_effect_execution_request(db, run, effect)
     mark_dispatched(
         db,
@@ -287,9 +287,9 @@ def _complete_txn(workflow_id: str) -> dict[str, Any]:
     assessment_json = assessment.model_dump(mode="json")
     result = dict(run.result_json or {})
     if not completion_satisfied(assessment):
-        # Insufficient/unknown proof is neither failure nor reconciliation.
-        # Keep the workflow non-terminal; the DBOS driver waits durably for
-        # an explicit completion-recheck signal before assessing again.
+        # 不充分/unknown proof 既不是 failure，也不是 reconciliation。
+        # 保持 workflow 非终态；DBOS driver durable 等待
+        # explicit completion-recheck signal 后再重新 assessment。
         if run.status is not WorkflowRunStatus.RUNNING:
             run.status = WorkflowRunStatus.RUNNING
             run.version += 1
@@ -419,7 +419,7 @@ def _drive_effects(
             status = normalized["status"]
             record_effect_attempt(target_system=target_system, operation=op, status=status)
             if status == "failed" and normalized["retryable"] and attempts < max_retries:
-                # Ledger: dispatched -> failed (attempt recorded), then re-dispatch.
+                # Ledger：dispatched -> failed（attempt 已记录），然后重新 dispatch。
                 from app.schemas.effects import EffectFailed
 
                 _mark_failed_retry_txn(
@@ -482,10 +482,10 @@ def _drive_v2(
     for _ in range(max_gates):
         state = _snapshot_txn(workflow_id)
         status = state["status"]
-        # Effects take priority over a terminal status: a v1 continuation may
-        # have recorded planned effects and marked the run completed in the
-        # same decision transaction (e.g. the closing gate). Execute them
-        # before honouring the terminal state so an effect never stays
+        # Effect 优先于 terminal status：v1 continuation 可能
+        # 在同一个 decision transaction 中记录 planned effect 并把 run 标为
+        # completed（例如 closing gate）。必须先执行这些 effect，
+        # 再接受 terminal state，避免 effect 永久停留在
         # ``planned`` in a completed run (plan 二.4 execution order).
         if state["planned_effects"]:
             outcome = _drive_effects(
@@ -512,9 +512,9 @@ def _drive_v2(
         if completion.get("completed"):
             return _final_result(workflow_id, "completed")
 
-        # A blocked completion is a durable wait, not a returned RUNNING result.
-        # Timeouts only renew the wait; they do not manufacture failure. Each
-        # explicit recheck signal causes the same bounded assessment to run again.
+        # Blocked completion 是 durable wait，不是返回的 RUNNING result。
+        # Timeout 只会续期等待，不会凭空制造 failure。每个
+        # explicit recheck signal 都会再次运行同一个 bounded assessment。
         while True:
             recheck = DBOS.recv(
                 topic=COMPLETION_RECHECK_TOPIC,
@@ -544,7 +544,7 @@ def _run_definition(workflow_id: str, workflow_type: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# DBOS v2 definitions (registered under (workflow_type, 2))
+# DBOS v2 definition（注册到 (workflow_type, 2)）
 # ---------------------------------------------------------------------------
 
 
