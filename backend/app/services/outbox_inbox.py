@@ -26,7 +26,7 @@ from app.schemas.events import EVENT_TYPES
 
 logger = get_logger("commerce.outbox")
 
-# Reserved payload keys that carry W3C trace context on the wire envelope.
+# 保留 payload key，用于在 wire envelope 中携带 W3C trace context。
 TRACE_PARENT_KEY = "traceparent"
 TRACE_STATE_KEY = "tracestate"
 
@@ -51,7 +51,7 @@ PRODUCERS = frozenset(
     )
 )
 
-# producer -> event-domain prefixes it is allowed to emit (empty = any domain).
+# producer -> 允许发出的 event-domain prefix（空表示任意 domain）。
 _PRODUCER_DOMAINS: dict[str, frozenset[str]] = {
     "feedback_intelligence": frozenset({"feedback"}),
     "operating_policy": frozenset(),
@@ -66,10 +66,10 @@ _PRODUCER_DOMAINS: dict[str, frozenset[str]] = {
     "odoo_adapter": frozenset({"order", "procurement", "catalog", "listing"}),
 }
 
-# event_type (or "*") -> local consumers that receive a copy in the inbox.
+# event_type（或 "*"）-> 会在 inbox 收到副本的 local consumer。
 _LOCAL_CONSUMER_ROUTING: dict[str, list[str]] = {}
 
-# consumer -> handler invoked by process_outbox (optional).
+# consumer -> process_outbox 调用的 handler（可选）。
 CONSUMER_HANDLERS: dict[str, Callable[[OutboxEvent], None]] = {}
 
 
@@ -139,8 +139,8 @@ def emit_event(
     event_id = event_id or uuid7()
     occurred_at = occurred_at or utc_now()
     event_payload = dict(payload or {})
-    # Trace context rides inside the stored payload (no dedicated columns yet)
-    # and is hoisted onto the wire envelope by :func:`envelope_for`.
+    # Trace context 保存在 payload 内（暂时没有 dedicated column）
+    # 并由 :func:`envelope_for` 提升到 wire envelope。
     if traceparent is not None:
         event_payload[TRACE_PARENT_KEY] = traceparent
     if tracestate is not None:
@@ -304,8 +304,8 @@ def claim_inbox_batch(
         )
         .order_by(InboxEvent.received_at, InboxEvent.id)
         .limit(batch)
-        # SQLAlchemy compiles this away on SQLite (no-op) and emits
-        # ``FOR UPDATE SKIP LOCKED`` on PostgreSQL.
+        # SQLAlchemy 在 SQLite 上将其编译为空操作，在 PostgreSQL 上生成
+        # ``FOR UPDATE SKIP LOCKED``。
         .with_for_update(skip_locked=True)
     )
     rows = list(db.execute(stmt).scalars().all())
@@ -426,7 +426,7 @@ def relay_inbox_batch(
     for row in rows:
         event = db.get(OutboxEvent, row.event_id)
         if event is None:
-            # No outbox payload (already garbage-collected): nothing to run.
+            # 没有 outbox payload（已被 garbage-collected）：无需执行。
             mark_inbox_processed(db, event_id=row.id)
             stats.processed += 1
             continue
