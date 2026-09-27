@@ -18,7 +18,7 @@ router = APIRouter(prefix="/v1", tags=["webhooks"])
 
 
 class WebhookReceipt(BaseModel):
-    """返回给 webhook sender 的快速确认响应。"""
+    """Fast acknowledgement returned to the webhook sender."""
 
     received: bool
     deduplicated: bool = False
