@@ -17,7 +17,7 @@ def test_import_app_worker_and_configure_dbos_without_launch() -> None:
     cfg = configure_dbos()
     assert cfg["config"]["name"] == "commerce-orchestrator"
     assert cfg["config"]["application_database_url"] == TEST_DB_URL
-    # Importing the worker must not start the DBOS runtime.
+    # Import worker 时不能启动 DBOS runtime。
     assert "dbos" not in sys.modules
 
 
