@@ -75,9 +75,9 @@ def _make_order(db, run: WorkflowRun, *, shopify_id: str = "SO-1") -> SalesOrder
 
 
 def _effect(db, run: WorkflowRun, operation: str) -> EffectLedgerEntry:
-    # This module tests adapter parameter/remote-id chains, not C18 authority.
-    # Its pre-C18 return-to-refund fixtures are represented as already-existing
-    # unbound ledger rows so the new planning gate is not bypassed for new writes.
+    # 本 module 测试 adapter parameter / remote-id chain，而不是 C18 authority。
+    # pre-C18 的 return-to-refund fixture 被表示为已存在的
+    # unbound ledger row，从而不会让新 write 绕过新的 planning gate。
     if run.workflow_type == "return-to-refund" and operation.startswith("credit_note_"):
         entry = EffectLedgerEntry(
             intent_id=uuid.uuid4(),
@@ -123,7 +123,7 @@ def _request(db, run: WorkflowRun, operation: str):
 
 
 # ---------------------------------------------------------------------------
-# picking / invoice validate read the remote entity id, not the sale order id
+# picking / invoice validate 读取 remote entity id，而不是 sale order id
 # ---------------------------------------------------------------------------
 
 
@@ -131,7 +131,7 @@ def test_picking_validate_reads_odoo_picking_id(db) -> None:
     run = _run_with_item(db)
     order = _make_order(db, run)
     order.odoo_picking_id = "77"
-    order.odoo_sale_order_id = "66"  # must not be used for stock.picking
+    order.odoo_sale_order_id = "66"  # 不能用于 stock.picking
     db.flush()
 
     request = _request(db, run, "odoo.picking_validate")
@@ -146,7 +146,7 @@ def test_picking_validate_falls_back_to_ledger_remote_reference(db) -> None:
 
     request = _request(db, run, "odoo.picking_validate")
     assert request.parameters.odoo_id == 88
-    assert order.odoo_picking_id is None  # column not yet written back
+    assert order.odoo_picking_id is None  # column 尚未回写
 
 
 def test_picking_validate_fails_closed_without_picking_id(db) -> None:
@@ -160,7 +160,7 @@ def test_invoice_validate_reads_odoo_invoice_id(db) -> None:
     run = _run_with_item(db)
     order = _make_order(db, run)
     order.odoo_invoice_id = "99"
-    order.odoo_sale_order_id = "66"  # must not be used for account.move
+    order.odoo_sale_order_id = "66"  # 不能用于 account.move
     db.flush()
 
     request = _request(db, run, "odoo.invoice_validate")
@@ -185,7 +185,7 @@ def test_invoice_validate_fails_closed_without_invoice_id(db) -> None:
 
 
 # ---------------------------------------------------------------------------
-# finalize writes back remote entity ids
+# finalize 会回写 remote entity id
 # ---------------------------------------------------------------------------
 
 
@@ -249,7 +249,7 @@ def test_bill_create_builds_po_values_and_finalize_advances_after_success(db) ->
     assert request.parameters.values["sku"] == "SKU-1"
     assert request.parameters.values["supplier"] == "ACME"
 
-    # A failed remote effect must not advance bill_posted / in_payment.
+    # remote effect 失败时不能推进 bill_posted / in_payment。
     finalize_after_effect(
         db,
         run,
@@ -311,7 +311,7 @@ def test_credit_note_create_finalize_advances_and_sources_number(db) -> None:
     )
     db.refresh(case)
     assert case.status.value == "credit_note_posted"
-    assert case.credit_note_id == "502"  # remote reference, not CN-<uuid>
+    assert case.credit_note_id == "502"  # 使用 remote reference，而不是 CN-<uuid>
     assert case.odoo_credit_note_id == "502"
 
 
@@ -369,7 +369,7 @@ def test_credit_note_validate_fails_closed_without_remote_id(db) -> None:
 
 
 # ---------------------------------------------------------------------------
-# product create/update parameter construction (no pending-WP5 branch)
+# product create/update parameter 构造（没有 pending-WP5 branch）
 # ---------------------------------------------------------------------------
 
 
@@ -430,10 +430,10 @@ def test_product_update_fails_closed_without_remote_id(db) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Parameter construction matrix: every EFFECT_OPS builds a typed request from
+# Parameter 构造 matrix：每个 EFFECT_OPS 都从
 # real domain rows (P7 整改 §六.1).  Validate-class operations must consume the
-# create effect's ``remote_reference`` recorded on the ledger (or its domain
-# write-back) rather than a synthetic id.
+# ledger 记录的 create effect ``remote_reference``（或其 domain
+# write-back）构建 typed request，而不是使用 synthetic id。
 # ---------------------------------------------------------------------------
 
 _CATALOG_MATRIX_OPS = {
@@ -542,10 +542,10 @@ def _seed_matrix_domain(db, operation: str) -> WorkflowRun:
             payload={"po_id": str(po.id)},
         )
         if operation in {"odoo.po_confirm", "odoo.receive_transfer"}:
-            # These builders read the domain column written back by
-            # finalize_after_effect when odoo.po_create succeeds; record the
-            # ledger row and mirror its remote reference on the PO so the
-            # assertion proves the odoo id comes from the create effect.
+            # 这些 builder 读取由
+            # odoo.po_create 成功后 finalize_after_effect 回写的 domain column；记录
+            # ledger row，并把 remote reference 镜像到 PO，从而
+            # 证明 odoo id 确实来自 create effect。
             entry = _effect(db, run, "po_create")
             _succeed(db, entry, remote="704", operation="odoo.po_create")
             po.odoo_po_id = "704"
@@ -611,7 +611,7 @@ def test_effect_parameter_matrix_builds_typed_request(db, operation) -> None:
         assert request.parameters.values["default_code"] == "SKU-M"
         assert request.parameters.values["name"] == "Matrix Widget"
     elif operation == "odoo.product_update":
-        assert request.parameters.odoo_id == 777  # create effect's remote ref
+        assert request.parameters.odoo_id == 777  # create effect 的 remote ref
         assert request.parameters.values == {
             "title": "Matrix Widget v2",
             "price": "9.90",
@@ -622,29 +622,29 @@ def test_effect_parameter_matrix_builds_typed_request(db, operation) -> None:
         assert request.parameters.values["total"] == "100.00"
         assert request.parameters.values["partner_name"] == "Shopify Customer"
     elif operation == "odoo.sale_order_confirm":
-        assert request.parameters.odoo_id == 701  # create effect's remote ref
+        assert request.parameters.odoo_id == 701  # create effect 的 remote ref
     elif operation == "odoo.stock_move_create":
         assert request.parameters.values == {"source": "commerce-orchestrator"}
     elif operation == "odoo.picking_create":
         assert request.parameters.values == {"sale_order_id": 701}
     elif operation == "odoo.picking_validate":
-        assert request.parameters.odoo_id == 702  # create effect's remote ref
+        assert request.parameters.odoo_id == 702  # create effect 的 remote ref
     elif operation == "odoo.invoice_create":
         assert request.parameters.values == {"sale_order_id": 701, "order_ref": "ORD-SO-M"}
     elif operation == "odoo.invoice_validate":
-        assert request.parameters.odoo_id == 703  # create effect's remote ref
+        assert request.parameters.odoo_id == 703  # create effect 的 remote ref
     elif operation == "odoo.credit_note_create":
         assert request.parameters.values["invoice_origin"] == "ORD-M"
         assert request.parameters.values["currency"] == "CNY"
         assert request.parameters.values["amount"] == "7.50"
     elif operation == "odoo.credit_note_validate":
-        assert request.parameters.odoo_id == 705  # create effect's remote ref
+        assert request.parameters.odoo_id == 705  # create effect 的 remote ref
     elif operation == "odoo.po_create":
         assert request.parameters.values["sku"] == "SKU-P"
         assert request.parameters.values["supplier"] == "ACME"
         assert request.parameters.values["qty"] == "3.00"
     elif operation in {"odoo.po_confirm", "odoo.receive_transfer"}:
-        assert request.parameters.odoo_id == 704  # create effect's remote ref
+        assert request.parameters.odoo_id == 704  # create effect 的 remote ref
     elif operation == "odoo.bill_create":
         assert request.parameters.values["sku"] == "SKU-P"
         assert request.parameters.values["currency"] == "CNY"
