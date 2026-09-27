@@ -39,7 +39,7 @@ OWNER_ACTIONS = {
 
 
 # ---------------------------------------------------------------------------
-# Cluster rebuilding pipeline
+# Cluster 重建 pipeline
 # ---------------------------------------------------------------------------
 
 def rebuild_clusters(
@@ -243,7 +243,7 @@ def _build_single_cluster(db, rows, vectors, indexes, settings):
 
 
 # ---------------------------------------------------------------------------
-# Weekly report pipeline
+# Weekly report pipeline（周报流程）
 # ---------------------------------------------------------------------------
 
 def rebuild_weekly_report(
