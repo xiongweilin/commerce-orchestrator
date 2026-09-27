@@ -7,9 +7,9 @@ from pathlib import Path
 from feedback_app.routing import derive_severity, needs_escalation, route_owner
 from feedback_app.schemas import ImpactSignals, ProblemType, ProductArea
 
-# Unicode literals used below — avoid f-string backslash escapes for Python 3.10 compat
-_COMMA = "\uff0c"          # fullwidth comma
-_PERIOD = "\u3002"         # CJK full stop
+# 下方使用 Unicode literal；为兼容 Python 3.10，避免 f-string 反斜杠转义
+_COMMA = "\uff0c"          # 全角逗号
+_PERIOD = "\u3002"         # CJK 句号
 _TEAM_MESSAGE = "\u8be5\u95ee\u9898\u5f71\u54cd\u6574\u4e2a\u56e2\u961f"  # 该问题影响整个团队
 _REPEAT_MESSAGE = "\u5df2\u7ecf\u8054\u7cfb\u5ba2\u670d\u4e24\u6b21"      # 已经联系客服两次
 
