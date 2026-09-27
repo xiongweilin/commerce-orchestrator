@@ -184,39 +184,39 @@ def test_unknown_machine_and_states_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Approval boundary matrix
+# Approval boundary matrix（审批边界矩阵）
 # ---------------------------------------------------------------------------
 
 APPROVAL_MATRIX: list[tuple[str, str, str, list[str]]] = [
-    # Catalog content approval -> catalog_owner.
+    # Catalog content approval -> catalog_owner。
     ("CatalogRevision", "pending_approval", "approved", ["catalog_owner"]),
-    # Listing gates -> catalog_owner.
+    # Listing gate -> catalog_owner。
     ("ListingPublication", "pending_approval", "publishing", ["catalog_owner"]),
     ("ListingPublication", "active", "suspended", ["catalog_owner"]),
     ("ListingPublication", "suspended", "retired", ["catalog_owner"]),
-    # Pricing -> commerce_lead (finance_approver is conditional on margin).
+    # Pricing -> commerce_lead（是否需要 finance_approver 取决于 margin）。
     ("PriceOffer", "pending_approval", "approved", ["commerce_lead"]),
-    # PO: procurement_lead proposes, budget_owner approves.
+    # PO：procurement_lead 提议，budget_owner 审批。
     ("ProcurementOrder", "demand_detected", "rfq_draft", ["procurement_lead"]),
     ("ProcurementOrder", "rfq_draft", "pending_approval", ["procurement_lead"]),
     ("ProcurementOrder", "pending_approval", "po_confirmed", ["budget_owner"]),
-    # Warehouse confirmations -> warehouse_staff.
+    # Warehouse confirmation -> warehouse_staff。
     ("ProcurementOrder", "po_confirmed", "partially_received", ["warehouse_staff"]),
     ("ProcurementOrder", "po_confirmed", "received", ["warehouse_staff"]),
     ("ProcurementOrder", "partially_received", "received", ["warehouse_staff"]),
     ("SalesOrder", "reserved", "picking", ["warehouse_staff"]),
     ("SalesOrder", "picking", "shipped", ["warehouse_staff"]),
-    # Inventory reservation -> inventory_supervisor.
+    # Inventory reservation -> inventory_supervisor。
     ("SalesOrder", "confirmed", "reserved", ["inventory_supervisor"]),
-    # Invoices -> accountant.
+    # Invoice -> accountant。
     ("SalesOrder", "shipped", "invoiced", ["accountant"]),
     ("SalesOrder", "invoiced", "in_payment", ["accountant"]),
     ("SalesOrder", "in_payment", "reconciled", ["accountant"]),
     ("ProcurementOrder", "received", "bill_posted", ["accountant"]),
     ("ProcurementOrder", "bill_posted", "in_payment", ["accountant"]),
     ("ProcurementOrder", "in_payment", "reconciled", ["accountant"]),
-    # Refund chain: customer_service -> warehouse_staff -> accountant ->
-    # finance_approver.
+    # Refund chain：customer_service -> warehouse_staff -> accountant ->
+    # finance_approver。
     ("ReturnCase", "requested", "eligibility_review", ["customer_service"]),
     ("ReturnCase", "eligibility_review", "authorized", ["customer_service"]),
     ("ReturnCase", "authorized", "received", ["warehouse_staff"]),
@@ -225,7 +225,7 @@ APPROVAL_MATRIX: list[tuple[str, str, str, list[str]]] = [
     ("ReturnCase", "disposition_approved", "credit_note_posted", ["accountant"]),
     ("ReturnCase", "credit_note_posted", "refund_pending", ["finance_approver"]),
     ("ReturnCase", "refund_succeeded", "reconciled", ["finance_approver"]),
-    # Feedback promotion decisions.
+    # Feedback promotion decision。
     ("Feedback", "reviewed", "promoted_to_sop", ["commerce_lead"]),
     ("Feedback", "reviewed", "promoted_to_catalog_change", ["catalog_owner"]),
 ]
@@ -245,7 +245,7 @@ def test_no_approval_roles_for_plain_transitions() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Price offer margin constraint
+# Price offer margin constraint（毛利约束）
 # ---------------------------------------------------------------------------
 
 
@@ -264,19 +264,19 @@ def test_price_offer_margin_requires_finance_approval() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Money / inventory invariants and no-auto-approval
+# 资金 / 库存 invariant 与禁止自动审批
 # ---------------------------------------------------------------------------
 
 
 def test_credit_note_only_after_posted_invoice() -> None:
-    # ReturnCase gate.
+    # ReturnCase gate。
     ok, reason = can_transition("ReturnCase", "disposition_approved", "credit_note_posted")
     assert ok is False and "credit notes" in reason
     ok, reason = can_transition(
         "ReturnCase", "disposition_approved", "credit_note_posted", {"invoice_posted": True}
     )
     assert ok is True
-    # Effect ledger credit-note operations.
+    # Effect ledger 的 credit-note operation。
     for op in ("odoo.credit_note_create", "odoo.credit_note_validate"):
         ok, reason = check_money_invariants(
             "EffectLedgerEntry", "planned", "dispatched", {"operation": op}
@@ -333,8 +333,8 @@ def test_sales_order_reservation_needs_inventory_source() -> None:
 def test_no_auto_approval_of_human_gates(
     machine: str, from_state: str, to_state: str, _roles: list[str]
 ) -> None:
-    # Provide the money/inventory guards so the auto-approval guard is the
-    # single reason for rejection.
+    # 提供资金/库存 guard，使 auto-approval guard 成为
+    # 唯一的 rejection 原因。
     context: dict[str, object] = {"auto": True}
     if machine == "SalesOrder" and to_state == "reserved":
         context["reservation_source"] = "stock_move"
@@ -355,7 +355,7 @@ def test_catalog_official_requires_listing_published() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Effect ledger retry / reconciliation guards
+# Effect ledger retry / reconciliation guard
 # ---------------------------------------------------------------------------
 
 
@@ -393,7 +393,7 @@ def test_failed_effect_retry_is_bounded() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Four-eyes areas
+# Four-eyes 区域
 # ---------------------------------------------------------------------------
 
 FOUR_EYES_EXPECTED: list[tuple[str, str, str, str]] = [
