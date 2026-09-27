@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Load modules (shadowbot is now a real package)
+# 加载 module（shadowbot 现在是正式 package）
 # ---------------------------------------------------------------------------
 
 def _load_module(name, filename):
@@ -20,7 +20,7 @@ ODOO = _load_module('odoo_adapter', 'odoo_adapter.py')
 PB = _load_module('product_builder', 'product_builder.py')
 
 # ---------------------------------------------------------------------------
-# catalog_odoo_rpa tests
+# catalog_odoo_rpa 测试
 # ---------------------------------------------------------------------------
 
 def test_operation_key_is_stable_and_separates_recovery_from_failure():
@@ -47,7 +47,7 @@ def test_shadowbot_entrypoint_has_no_python_defaults():
     )
 
 # ---------------------------------------------------------------------------
-# odoo_adapter tests
+# odoo_adapter 测试
 # ---------------------------------------------------------------------------
 
 def test_parse_odoo_login_url_extracts_origin_and_database():
@@ -66,7 +66,7 @@ def test_parse_odoo_login_url_requires_database():
         raise AssertionError('database-less Odoo URL should be rejected')
 
 # ---------------------------------------------------------------------------
-# product_builder tests
+# product_builder 测试
 # ---------------------------------------------------------------------------
 
 def test_parse_price_accepts_currency_text_and_blank_values():
@@ -140,7 +140,7 @@ def test_build_product_values_uses_discovered_writable_fields():
     assert values['sale_ok'] is True
     assert 'purchase_ok' not in values
 # ---------------------------------------------------------------------------
-# odoo_adapter: _compact_fault
+# odoo_adapter：_compact_fault
 # ---------------------------------------------------------------------------
 
 def test_compact_fault_extracts_fault_string():
@@ -156,7 +156,7 @@ def test_compact_fault_falls_back_to_str():
     assert "plain error" in result
 
 # ---------------------------------------------------------------------------
-# odoo_adapter: selection_keys (static method)
+# odoo_adapter：selection_keys（static method）
 # ---------------------------------------------------------------------------
 
 def test_selection_keys_extracts_choice_keys():
@@ -167,7 +167,7 @@ def test_selection_keys_missing_key_returns_empty():
     assert ODOO.OdooClient.selection_keys({}) == []
 
 # ---------------------------------------------------------------------------
-# product_builder: _item_value
+# product_builder：_item_value
 # ---------------------------------------------------------------------------
 
 def test_item_value_returns_stripped_string():
@@ -183,7 +183,7 @@ def test_item_value_custom_default():
     assert PB._item_value({}, "missing", "fallback") == "fallback"
 
 # ---------------------------------------------------------------------------
-# product_builder: build_note
+# product_builder：build_note
 # ---------------------------------------------------------------------------
 
 def test_build_note_includes_all_fields():
@@ -201,7 +201,7 @@ def test_build_note_includes_all_fields():
     assert "fast" in note
 
 # ---------------------------------------------------------------------------
-# product_builder: _set_if_writable
+# product_builder：_set_if_writable
 # ---------------------------------------------------------------------------
 
 def test_set_if_writable_sets_when_field_is_writable():
@@ -218,7 +218,7 @@ def test_set_if_writable_sets_when_field_is_writable():
     assert values == {"writable_field": "hello"}
 
 # ---------------------------------------------------------------------------
-# product_builder: _enrich_full_mode_values
+# product_builder：_enrich_full_mode_values
 # ---------------------------------------------------------------------------
 
 def test_enrich_full_mode_values_adds_type_and_descriptions():
@@ -249,7 +249,7 @@ def test_enrich_full_mode_values_adds_type_and_descriptions():
     assert "purchase_ok" not in values
 
 # ---------------------------------------------------------------------------
-# product_builder: write_template_values
+# product_builder：write_template_values
 # ---------------------------------------------------------------------------
 
 def test_write_template_values_calls_odoo_execute():
@@ -270,7 +270,7 @@ def test_write_template_values_empty_returns_false():
     assert PB.write_template_values(FakeOdoo(), 1, {}) is False
 
 # ---------------------------------------------------------------------------
-# product_builder: write_variant_sku
+# product_builder：write_variant_sku
 # ---------------------------------------------------------------------------
 
 def test_write_variant_sku_updates_variant_code():
@@ -299,7 +299,7 @@ def test_write_variant_sku_readonly_field_returns_false():
     assert PB.write_variant_sku(FakeOdoo(), 1, "SKU") is False
 
 # ---------------------------------------------------------------------------
-# product_builder: after_create_update_optional_fields
+# product_builder：after_create_update_optional_fields
 # ---------------------------------------------------------------------------
 
 def test_after_create_calls_write_with_optional_fields():
@@ -332,7 +332,7 @@ def test_after_create_calls_write_with_optional_fields():
     assert len(odoo.write_calls) >= 1
 
 # ---------------------------------------------------------------------------
-# product_builder: create_template_with_fallback
+# product_builder：create_template_with_fallback
 # ---------------------------------------------------------------------------
 
 def test_create_with_fallback_succeeds_on_first_attempt():
@@ -380,7 +380,7 @@ def test_create_with_fallback_tries_multiple_attempts():
     assert odoo.creates == 3
 
 # ---------------------------------------------------------------------------
-# product_builder: create_product
+# product_builder：create_product
 # ---------------------------------------------------------------------------
 
 def test_create_product_returns_existing_id_when_found():
@@ -406,9 +406,9 @@ def test_create_product_creates_new_when_not_found():
             return True
 
     result = PB.create_product(FakeOdoo(), {"sku": "NEW", "listing_title": "t", "price": "10", "category": "c", "stock": "1", "selling_points": "s", "keywords": "k", "item_id": "i"})
-    assert result == "odoo-product-33"  # create_product returns odoo-product-{id} for new products
+    assert result == "odoo-product-33"  # create_product 对新商品返回 odoo-product-{id}
 # ---------------------------------------------------------------------------
-# catalog_odoo_rpa: HTTP helpers
+# catalog_odoo_rpa：HTTP helper
 # ---------------------------------------------------------------------------
 
 
@@ -434,7 +434,7 @@ def test_approved_items_parses_response():
     mock_response.read.return_value = b'item_id,approved\na,true\nb,false\nc,true\n'
     with patch("urllib.request.urlopen", return_value=mock_response):
         items = RPA._approved_items("http://base", "r1", "token")
-    # CSV DictReader converts bool strings and strips whitespace
+    # CSV DictReader 会转换 bool 字符串并去除空白
     assert items == [
         {"item_id": "a", "approved": "true"},
         {"item_id": "b", "approved": "false"},
@@ -447,7 +447,7 @@ def test_approved_items_skips_non_list():
     mock_response.read.return_value = b'{"error": "not found"}'
     with patch("urllib.request.urlopen", return_value=mock_response):
         items = RPA._approved_items("http://base", "r1", "token")
-    # CSV DictReader converts bool strings and strips whitespace
+    # CSV DictReader 会转换 bool 字符串并去除空白
     assert items == []
 
 def test_callback_posts_json():
@@ -458,12 +458,12 @@ def test_callback_posts_json():
         RPA._callback("http://base", "r1", "token", {"item_id": "1"}, "written", record_id=42)
 
 # ---------------------------------------------------------------------------
-# catalog_odoo_rpa: main() orchestrator test
+# catalog_odoo_rpa：main() orchestrator 测试
 # ---------------------------------------------------------------------------
 
 
 def test_main_dry_run_returns_approved_count():
-    # Dry run mode skips Odoo
+    # Dry run 模式跳过 Odoo
     mock_response = MagicMock()
     mock_response.__enter__.return_value = mock_response
     mock_response.read.return_value = b"item_id,approved\nitem-1,true\nitem-2,false\nitem-3,true\n"
