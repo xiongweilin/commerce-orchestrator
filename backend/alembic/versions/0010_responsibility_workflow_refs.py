@@ -18,9 +18,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Alembic revision identities are durable. This revision is 33 characters
-    # long, so keep the version table permanently wide enough for it and for
-    # future identifiers; downgrade intentionally does not shrink the column.
+    # Alembic revision identity 是 durable 的。本 revision 长 33 个字符，
+    # 因此 version table 永久保持足够宽，以容纳它和
+    # 后续 identifier；downgrade 刻意不缩小该 column。
     with op.batch_alter_table("alembic_version") as batch_op:
         batch_op.alter_column(
             "version_num",
