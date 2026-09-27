@@ -131,8 +131,8 @@ def require_roles(*roles: str) -> Callable[..., bool]:
                 changes={"required_roles": sorted(roles)},
                 correlation_id=get_correlation_id(),
             )
-            # The request-scoped session rolls back when this dependency
-            # raises, so commit the audit row before surfacing the denial.
+            # 当此 dependency 抛出异常时，request-scoped session 会 rollback，
+            # 因此在向外暴露 denial 前先提交 audit row。
             db.commit()
             raise PermissionDeniedError(f"Missing required role(s): {', '.join(roles)}")
         return True
