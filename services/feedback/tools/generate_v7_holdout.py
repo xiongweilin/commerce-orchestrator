@@ -9,8 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "v7-evaluation"
 
-# V7 families are disjoint from V5/V6. Adjacent families deliberately share
-# type/area vocabulary so labels alone cannot solve clustering.
+# V7 family 与 V5/V6 不重叠。相邻 family 刻意共享
+# type/area vocabulary，避免仅凭 label 就能完成 clustering。
 FAMILIES = [
     ("REST 游标重复分页", "integration", "open_api", "technical_support", "REST API 翻页后游标没有前进并重复返回上一页记录", "开放接口使用 next_cursor 请求下一页时仍拿到相同数据"),
     ("Webhook 签名校验不一致", "integration", "open_api", "technical_support", "Webhook 请求头签名按文档计算后始终校验失败", "回调负载使用平台密钥验签时结果与签名头不一致"),
