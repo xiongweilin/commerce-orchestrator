@@ -142,16 +142,16 @@ def dbos_env(request: pytest.FixtureRequest) -> Iterator[dict]:
             dbos_system_schema="dbos",
         )
     )
-    # Importing the module registers the v2 definitions (lazy: only here).
+    # Import 该 module 会注册 v2 definition（lazy，仅在这里发生）。
     from app.workflows import definitions  # noqa: F401
 
     DBOS.launch()
 
     # Default isolation (P7 测试隔离整改): the DBOS worker must never touch
-    # the real Shopify/Odoo adapters during the full test run.  Install
-    # scripted fakes into the connector registry; individual tests override
-    # them with their own scripted adapter when they shape specific
-    # outcomes (e.g. ``_drive_catalog_to_effect`` with ``_ScriptedShopify``).
+    # 完整测试运行期间不要使用真实 Shopify/Odoo adapter。安装
+    # scripted fake 到 connector registry；具体测试可用自己的 scripted adapter
+    # 覆盖，以塑造特定
+    # outcome（例如 ``_drive_catalog_to_effect`` 配合 ``_ScriptedShopify``）。
     from app.connectors import registry
 
     previous_singletons = {
@@ -174,8 +174,8 @@ def dbos_env(request: pytest.FixtureRequest) -> Iterator[dict]:
         }
     finally:
         DBOS.destroy()
-        # Restore whatever the registry held before the fixture installed the
-        # fakes so no other test module observes test adapters.
+        # fixture 安装 fake 之前 registry 中原有的内容需要恢复，
+        # 避免其他 test module 观察到测试 adapter。
         for name, prior in previous_singletons.items():
             if prior is None:
                 registry._SINGLETONS.pop(name, None)
@@ -184,8 +184,8 @@ def dbos_env(request: pytest.FixtureRequest) -> Iterator[dict]:
         app_engine.dispose()
         _drop_database(app_db)
         _drop_database(sys_db)
-        # DBOS executor threads stay blocked in recv after destroy; tell the
-        # sessionfinish hook to exit cleanly after the summary is printed.
+        # destroy 后 DBOS executor thread 仍可能阻塞在 recv；通知
+        # sessionfinish hook 在打印 summary 后干净退出。
         request.config._dbos_force_exit = True
 
 
@@ -358,7 +358,7 @@ def _ingest_webhook(
 
 
 # ---------------------------------------------------------------------------
-# v2 mainline
+# v2 主线
 # ---------------------------------------------------------------------------
 
 
@@ -387,10 +387,10 @@ def test_v2_accept_start_reaches_awaiting_approval(dbos_env) -> None:
     assert items[0].required_roles == ["catalog_owner"]
     with factory() as db:
         run = db.get(WorkflowRun, run_id)
-        assert run.version >= 2  # accepted -> running bumps the CAS version
+        assert run.version >= 2  # accepted -> running 会 bump CAS version
         assert items[0].expected_version == run.version
 
-    # The DBOS system records one execution for the deterministic id.
+    # DBOS system 对 deterministic id 只记录一次 execution。
     from dbos import DBOS
 
     status = DBOS.get_workflow_status(str(run_id))
@@ -422,12 +422,12 @@ def test_webhook_order_starts_v2_definition_and_intakes_to_odoo(dbos_env) -> Non
         assert run.workflow_type == "order-to-cash"
         assert run.workflow_version == 2
         assert run.orchestration_engine == "dbos"
-        # Minimal input: no raw payload expansion (no email / line items).
+        # 最小 input：不展开 raw payload（不含 email / line item）。
         blob = str(run.input_json)
         assert "buyer@example.com" not in blob
         assert "line_items" not in blob
 
-    # workflow.accepted is relayed: the v2 definition starts exactly once.
+    # workflow.accepted 被 relay 后，v2 definition 只启动一次。
     assert _relay_all(factory) == 1
     assert _wait_for(
         lambda: len(_items_for(factory, uuid.UUID(run_id))) == 1,
@@ -437,22 +437,22 @@ def test_webhook_order_starts_v2_definition_and_intakes_to_odoo(dbos_env) -> Non
     order = None
     with factory() as db:
         order = db.execute(select(SalesOrder)).scalars().one()
-        # Intake effects succeed against the fake Odoo; the order reaches
-        # confirmed only after sale_order_confirm succeeded (not before).
+        # Intake effect 在 fake Odoo 上成功；order 只有在
+        # sale_order_confirm 成功后才到达 confirmed。
         assert order.status == SalesOrderStatus.CONFIRMED
         assert order.odoo_sale_order_id is not None
 
-    # The first human gate is the inventory-reservation approval.
+    # 第一个 human gate 是 inventory-reservation approval。
     items = _items_for(factory, uuid.UUID(run_id))
     assert items[0].required_roles == ["inventory_supervisor"]
     assert items[0].payload_json["next_step"] == "reserve"
     assert _run_status(factory, uuid.UUID(run_id)) == "awaiting_approval"
 
-    # Ledger: sale_order_create + sale_order_confirm both succeeded with
-    # remote references consistent with the domain column.
+    # Ledger：sale_order_create + sale_order_confirm 均成功，并且
+    # remote reference 与 domain column 一致。
     ops = _ledger_succeeded_ops(factory, uuid.UUID(run_id))
     assert ops == {"sale_order_create", "sale_order_confirm"}
-    assert order.odoo_sale_order_id  # written back by finalize_after_effect
+    assert order.odoo_sale_order_id  # 由 finalize_after_effect 回写
 
 
 def test_accepted_replay_starts_single_workflow(dbos_env) -> None:
@@ -460,9 +460,9 @@ def test_accepted_replay_starts_single_workflow(dbos_env) -> None:
     actor = _make_user(factory, ["catalog_owner"])
     run_id, item = _start_catalog_run(factory, actor, sku="SKU-DBOS-2", key="dbos-key-2")
 
-    # Replay the same workflow.accepted event 9 more times (at-least-once
-    # redelivery / lease-expiry re-dispatch): SetWorkflowID determinism must
-    # return the original execution instead of starting a second workflow.
+    # 再 replay 同一个 workflow.accepted event 9 次（at-least-once
+    # redelivery / lease-expiry re-dispatch）：SetWorkflowID 的 determinism 必须
+    # 返回原 execution，而不是启动第二个 workflow。
     with factory() as db:
         event = (
             db.execute(
@@ -478,7 +478,7 @@ def test_accepted_replay_starts_single_workflow(dbos_env) -> None:
             execute_inbox_action(plan_inbox_action(event))
         db.commit()
 
-    # Still one run, one work item, still waiting at the approval gate.
+    # 仍然只有一个 run、一个 work item，并继续等待 approval gate。
     assert _wait_for(lambda: _run_status(factory, run_id) == "awaiting_approval")
     with factory() as db:
         runs = db.execute(select(func.count()).select_from(WorkflowRun)).scalar_one()
@@ -530,9 +530,9 @@ def test_decision_relay_advances_workflow(dbos_env) -> None:
     assert items[1].required_roles == ["warehouse_staff"]
     assert _run_status(factory, run_id) == "awaiting_approval"
 
-    # The planned Odoo effects recorded by the PO approval were executed
-    # through the injected fake adapter: po_create + po_confirm both
-    # succeeded, and the create effect's remote reference was written back to
+    # PO approval 记录的 planned Odoo effect 已通过
+    # 注入的 fake adapter 执行：po_create + po_confirm 均
+    # 成功，并把 create effect 的 remote reference 回写到
     # the purchase order (P7 整改第 3 点 remote id chain).
     assert _wait_for(
         lambda: {"po_create", "po_confirm"} <= _ledger_succeeded_ops(factory, run_id),
@@ -621,9 +621,9 @@ class _ScriptedOdoo:
             return outcome
         odoo_id = kwargs.get("odoo_id")
         if odoo_id is not None:
-            # The real connector reports the same record id back for
-            # confirm/validate/write-by-id operations; echo it so finalize's
-            # write-back of the domain column stays idempotent.
+            # 真实 connector 会为
+            # confirm/validate/write-by-id operation 返回同一个 record id；这里回显它，确保 finalize
+            # 对 domain column 的回写保持 idempotent。
             return EffectResult.succeeded(
                 str(odoo_id), f"hash:{method}:{self.calls[method]}"
             )
@@ -730,7 +730,7 @@ def test_outcome_unknown_settles_needs_reconciliation_no_retry(dbos_env) -> None
         lambda: _run_status(factory, run_id) == "needs_reconciliation",
         timeout=40,
     ), "run did not settle into needs_reconciliation"
-    assert stub.calls == 1  # outcome_unknown is never blind-retried
+    assert stub.calls == 1  # outcome_unknown 绝不 blind retry
     with factory() as db:
         entry = db.execute(select(EffectLedgerEntry)).scalar_one()
         assert entry.status == EffectStatus.OUTCOME_UNKNOWN
@@ -742,7 +742,7 @@ def test_retryable_effect_bounded_to_three_attempts(dbos_env) -> None:
     factory = dbos_env["factory"]
     actor = _make_user(factory, ["catalog_owner"])
 
-    # Two transient failures then success: the third attempt applies.
+    # 两次 transient failure 后成功：第三次 attempt 生效。
     stub_ok = _ScriptedShopify(
         [
             RetryableEffectError("rate limited 1"),
@@ -753,9 +753,9 @@ def test_retryable_effect_bounded_to_three_attempts(dbos_env) -> None:
     run_id = _drive_catalog_to_effect(
         factory, actor=actor, sku="SKU-DBOS-R", key="dbos-retry-ok", stub=stub_ok
     )
-    # The effect succeeds on the third attempt. The M3 completion gate may
-    # keep the run in a durable ``running``/blocked state until its explicit
-    # recheck evidence is supplied; retry semantics are proven independently.
+    # effect 在第三次 attempt 成功。M3 completion gate 可能
+    # 让 run 保持 durable ``running``/blocked，直到收到显式
+    # recheck evidence；retry semantics 独立验证。
     assert _wait_for(
         lambda: _ledger_succeeded_ops(factory, run_id) == {"product_publish"},
         timeout=60,
@@ -766,7 +766,7 @@ def test_retryable_effect_bounded_to_three_attempts(dbos_env) -> None:
         assert entry.status == EffectStatus.SUCCEEDED
         assert entry.attempt == 3
 
-    # Persistent transient failures exhaust the 3-attempt budget -> failed.
+    # 持续 transient failure 耗尽 3 次 attempt budget -> failed。
     stub_fail = _ScriptedShopify([RetryableEffectError("rate limited")])
     run_id2 = _drive_catalog_to_effect(
         factory, actor=actor, sku="SKU-DBOS-F", key="dbos-retry-fail", stub=stub_fail
@@ -806,7 +806,7 @@ def test_worker_kill_recovery_resumes_pending_workflow(dbos_env) -> None:
     assert _wait_for(lambda: len(_items_for(factory, run_id)) == 1)
     item = _items_for(factory, run_id)[0]
 
-    # Record the decision (durable) but kill the worker before relaying it.
+    # 先记录 durable decision，但在 relay 前终止 worker。
     with factory() as db:
         submit_decision(
             db,
@@ -821,7 +821,7 @@ def test_worker_kill_recovery_resumes_pending_workflow(dbos_env) -> None:
 
     from dbos import DBOS
 
-    DBOS.destroy()  # worker killed: runtime gone, system DB keeps the run
+    DBOS.destroy()  # worker 被终止：runtime 消失，但 system DB 保留 run
 
     from dbos import DBOSConfig
 
@@ -836,7 +836,7 @@ def test_worker_kill_recovery_resumes_pending_workflow(dbos_env) -> None:
     )
     DBOS.launch()
 
-    # Relay the durable decision, then recover the pending workflow.
+    # Relay durable decision，然后恢复 pending workflow。
     assert _relay_all(factory) == 1
     handles = DBOS.resume_workflows([str(run_id)])
     assert len(handles) == 1
@@ -851,12 +851,12 @@ def test_worker_kill_recovery_resumes_pending_workflow(dbos_env) -> None:
         run = db.get(WorkflowRun, run_id)
         assert run.status == WorkflowRunStatus.AWAITING_APPROVAL
         assert run.version >= 3
-        assert decision_rows >= 2  # accepted + decision_recorded events
+        assert decision_rows >= 2  # accepted + decision_recorded event
 
-    # The recovered workflow executed the planned Odoo effects through the
-    # injected fake adapter (same isolation as the decision-relay test), so
-    # the run stays awaiting_approval at the receipt gate instead of
-    # settling into needs_reconciliation.
+    # 恢复后的 workflow 通过
+    # 注入的 fake adapter 执行 planned Odoo effect（与 decision-relay test 使用相同隔离），因此
+    # run 在 receipt gate 保持 awaiting_approval，而不是
+    # 落入 needs_reconciliation。
     assert _wait_for(
         lambda: {"po_create", "po_confirm"} <= _ledger_succeeded_ops(factory, run_id),
         timeout=60,
