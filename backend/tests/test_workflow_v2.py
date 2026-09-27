@@ -78,7 +78,7 @@ def _accept(
 
 
 # ---------------------------------------------------------------------------
-# accept_command
+# accept_command（接收命令）
 # ---------------------------------------------------------------------------
 
 
@@ -100,7 +100,7 @@ def test_accept_command_creates_dbos_v2_run_and_worker_event(db, make_user) -> N
     assert run.correlation_id == "corr-v2"
     assert run.input_json == {"sku": "SKU-A", "proposed": {"title": "T"}}
 
-    # The workflow.accepted event is routed to the worker inbox (minimal payload).
+    # workflow.accepted event 被路由到 worker inbox（最小 payload）。
     outbox = db.execute(select(OutboxEvent)).scalars().one()
     assert outbox.event_type == "workflow.accepted"
     assert outbox.payload == {
@@ -115,11 +115,11 @@ def test_accept_command_creates_dbos_v2_run_and_worker_event(db, make_user) -> N
     assert inbox.status == InboxStatus.PENDING
     assert inbox.event_id == outbox.event_id
 
-    # Accept only: no domain entity, no effect, no continuation.
+    # 只做 accept：不创建 domain entity、不产生 effect、不执行 continuation。
     assert _count(db, CatalogRevision) == 0
     assert _count(db, EffectLedgerEntry) == 0
     assert _count(db, WorkItem) == 0
-    # Idempotency record uses the fixed "completed" vocabulary.
+    # Idempotency record 使用固定的 "completed" vocabulary。
     idem = db.execute(select(IdempotencyRecord)).scalar_one()
     assert idem.status == "completed"
     assert accepted.as_dict()["statusUrl"] == f"/v1/workflows/{run.id}"
@@ -161,7 +161,7 @@ def test_accept_command_validation(db, make_user) -> None:
 
 
 # ---------------------------------------------------------------------------
-# (workflow_type, workflow_version) definition registry
+# (workflow_type, workflow_version) definition registry（定义注册表）
 # ---------------------------------------------------------------------------
 
 
@@ -214,7 +214,7 @@ print(",".join(sorted(definition_names())))
 
 
 # ---------------------------------------------------------------------------
-# Inbox relay
+# Inbox relay（收件箱中继）
 # ---------------------------------------------------------------------------
 
 
@@ -240,7 +240,7 @@ def test_claim_inbox_batch_marks_processing_with_lease(
     assert all(row.status == InboxStatus.PROCESSING for row in claimed)
     assert all(row.lease_until is not None for row in claimed)
     assert _count(db, InboxEvent, InboxEvent.status == InboxStatus.PROCESSING) == 2
-    # The third row stays pending (batch limit).
+    # 第三个 row 保持 pending（受 batch limit 限制）。
     assert _count(db, InboxEvent, InboxEvent.status == InboxStatus.PENDING) == 1
 
 
@@ -313,8 +313,8 @@ def test_relay_batch_processed_retried_and_dead_lettered(
     ok_id = _emit("00000000-0000-0000-0000-000000000001")
     retry_id = _emit("00000000-0000-0000-0000-000000000002")
     dead_id = _emit("00000000-0000-0000-0000-000000000003")
-    # Simulate one previous failure so the next failure dead-letters at
-    # max_attempts=2.
+    # 模拟一次先前 failure，使下一次 failure 在
+    # max_attempts=2 时进入 dead-letter。
     dead_row = db.execute(
         select(InboxEvent).where(InboxEvent.event_id == dead_id)
     ).scalar_one()
@@ -363,7 +363,7 @@ def test_exponential_backoff_seconds() -> None:
     assert exponential_backoff_seconds(1) == 1.0
     assert exponential_backoff_seconds(2) == 2.0
     assert exponential_backoff_seconds(3) == 4.0
-    assert exponential_backoff_seconds(10) == 60.0  # capped
+    assert exponential_backoff_seconds(10) == 60.0  # 已封顶
     assert exponential_backoff_seconds(0) == 0.0
 
 
@@ -388,7 +388,7 @@ def test_emit_event_carries_trace_fields(clean_outbox_registries, db) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Durable approval (v2 engine)
+# Durable approval（v2 engine）
 # ---------------------------------------------------------------------------
 
 
@@ -443,9 +443,9 @@ def test_submit_decision_v2_records_and_emits_decision_recorded(db, make_user) -
     db.refresh(item)
     assert item.status == WorkItemStatus.APPROVED
     assert item.decided_by_user_id == approver
-    assert item.version == 2  # item state changed once
+    assert item.version == 2  # item state 只改变一次
 
-    # v2: the run version is bumped by the workflow continuation, not here.
+    # v2：run version 由 workflow continuation bump，不在这里处理。
     run = db.get(WorkflowRun, run_id)
     assert run.status == WorkflowRunStatus.ACCEPTED
     assert run.version == 1
@@ -456,7 +456,7 @@ def test_submit_decision_v2_records_and_emits_decision_recorded(db, make_user) -
     assert decision.decision.value == "approve"
     assert decision.submitted_version == item.expected_version
 
-    # decision_recorded inbox row for the worker (durable message relay).
+    # 给 worker 的 decision_recorded inbox row（durable message relay）。
     inbox = db.execute(
         select(InboxEvent).where(InboxEvent.consumer == "worker")
     ).scalars().all()
@@ -502,7 +502,7 @@ def test_submit_decision_v2_replay_and_conflict(db, make_user) -> None:
     with pytest.raises(IdempotencyConflictError):
         submit_decision(db, idempotency_key="dk-replay", **{**kwargs, "reason": "different"})
 
-    # A second concurrent-style submission on the same item loses.
+    # 同一 item 上第二个并发式提交必须失败。
     with pytest.raises(ConflictError):
         submit_decision(db, idempotency_key="dk-new", **kwargs)
 
@@ -523,7 +523,7 @@ def test_submit_decision_v2_version_conflict(db, make_user) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Inbox dispatch planning (worker relay)
+# Inbox dispatch planning（worker relay）
 # ---------------------------------------------------------------------------
 
 
@@ -620,8 +620,8 @@ def test_execute_inbox_action_send_uses_topic_and_idempotency_key(
     from app.workflows.inbox_dispatch import InboxAction, execute_inbox_action
 
     sent: list[dict] = []
-    # Inject a fake dbos module so the lazy import inside execute_inbox_action
-    # resolves without pulling the real DBOS runtime into this process.
+    # 注入 fake dbos module，使 execute_inbox_action 内部的 lazy import
+    # 能完成解析，而不会把真实 DBOS runtime 拉入当前 process。
     fake_dbos = types.ModuleType("dbos")
     fake_dbos.DBOS = type(
         "DBOS",
@@ -649,7 +649,7 @@ def test_execute_inbox_action_send_uses_topic_and_idempotency_key(
 
 
 # ---------------------------------------------------------------------------
-# Privacy jobs
+# 隐私 job
 # ---------------------------------------------------------------------------
 
 
@@ -706,10 +706,10 @@ def test_backfill_customer_refs_encrypts_and_is_idempotent(db, monkeypatch) -> N
     assert len(vault) == 3
     assert all(row.ciphertext for row in vault)
     assert all(row.expires_at is not None for row in vault)
-    # Ciphertext is not plaintext.
+    # Ciphertext 不是 plaintext。
     assert all("alice@example.com" not in row.ciphertext for row in vault)
 
-    # Second pass is a no-op.
+    # 第二次执行为空操作。
     again = privacy.backfill_customer_refs(db)
     assert again.total == 0
 
