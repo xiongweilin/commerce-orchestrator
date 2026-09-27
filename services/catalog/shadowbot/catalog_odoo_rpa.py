@@ -29,7 +29,7 @@ from shadowbot.odoo_adapter import OdooClient
 from shadowbot.product_builder import create_product
 
 # -----------------------------------------------------------------------
-# argument helpers
+# 参数 helper
 # -----------------------------------------------------------------------
 
 def _required(args, name):
@@ -43,7 +43,7 @@ def _item_value(item, name, default=""):
     return str(item.get(name, default) or "").strip()
 
 # -----------------------------------------------------------------------
-# HTTP helpers
+# HTTP helper
 # -----------------------------------------------------------------------
 
 def _request_bytes(url, rpa_token, timeout=30):
@@ -92,7 +92,7 @@ def _approved_items(api_base_url, run_id, rpa_token):
     return list(csv.DictReader(io.StringIO(content)))
 
 # -----------------------------------------------------------------------
-# callback helpers
+# callback helper
 # -----------------------------------------------------------------------
 
 def _operation_key(run_id, item_id, result, detail=""):
@@ -125,7 +125,7 @@ def _callback(api_base_url, run_id, rpa_token, item, result, record_id=None, mes
     return _request_json(url, rpa_token, payload)
 
 # -----------------------------------------------------------------------
-# main orchestrator
+# 主 orchestrator
 # -----------------------------------------------------------------------
 
 def main(args):
