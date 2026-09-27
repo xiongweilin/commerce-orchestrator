@@ -25,13 +25,13 @@ router = APIRouter(prefix="/v1", tags=["reconciliations"])
 
 
 class DiffResolveRequest(BaseModel):
-    """reconciliation diff 的人工处理说明。"""
+    """Manual resolution note for a reconciliation diff."""
 
     note: str
 
 
 class DiffResolveResponse(BaseModel):
-    """reconciliation diff 的处理结果。"""
+    """Result of resolving a reconciliation diff."""
 
     diffId: uuid.UUID
     status: str
