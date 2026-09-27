@@ -243,8 +243,8 @@ def build_effect_execution_request(
             amount=float(case.refund_amount) if case.refund_amount is not None else 0.0,
             note=f"refund for {case.return_ref}",
             # Fail-closed rail (plan 二.4): refunds never move real money
-            # unless the deployment explicitly opts in via
-            # COMMERCE_ALLOW_DEV_REFUND=true (dev store / sandbox only).
+            # 除非 deployment 通过以下配置显式 opt in：
+            # COMMERCE_ALLOW_DEV_REFUND=true（仅 dev store / sandbox）。
             allow_real_money=get_settings().allow_dev_refund,
         )
     elif operation == "shopify.fulfillment_create":
@@ -308,9 +308,9 @@ def build_effect_execution_request(
         order = _resolve_sales_order(db, run)
         odoo_id = None
         if order is not None:
-            # The connector requires the stock.picking id, not the sale order
-            # id: prefer the domain column written back from picking_create,
-            # fall back to the create effect's ledger remote_reference.
+            # connector 需要 stock.picking id，而不是 sale order
+            # id：优先使用 picking_create 回写的 domain column，
+            # 否则回退到 create effect ledger 的 remote_reference。
             odoo_id = order.odoo_picking_id or _prior_effect_remote_reference(
                 db, run, "picking_create"
             )
@@ -324,7 +324,7 @@ def build_effect_execution_request(
         order = _resolve_sales_order(db, run)
         odoo_id = None
         if order is not None:
-            # account.move id, not the sale order id.
+            # 需要 account.move id，而不是 sale order id。
             odoo_id = order.odoo_invoice_id or _prior_effect_remote_reference(
                 db, run, "invoice_create"
             )
@@ -538,7 +538,7 @@ def finalize_after_effect(
         if order is not None:
             order.odoo_bill_id = remote or order.odoo_bill_id
             # P7 整改第 2 点: bill posting only advances after the remote
-            # effect succeeded (never simulated at approval time).
+            # effect 成功后才推进（绝不在 approval 时模拟）。
             if order.status == ProcurementStatus.RECEIVED:
                 advance_entity(
                     db,
@@ -566,8 +566,8 @@ def finalize_after_effect(
                 operation == "odoo.sale_order_confirm"
                 and order.status == SalesOrderStatus.ODO_DRAFTED
             ):
-                # The intake completes only once the remote sale order is
-                # created AND confirmed (mirrors the v1 slice's ordering).
+                # 只有 remote sale order
+                # 已创建且已确认后，intake 才完成（保持 v1 slice 的顺序）。
                 advance_entity(
                     db,
                     order,
@@ -591,14 +591,14 @@ def finalize_after_effect(
         case = db.get(ReturnCase, uuid.UUID(refs["case_id"])) if refs.get("case_id") else None
         if case is not None:
             if remote:
-                # The business credit-note number comes from the remote
-                # effect (never a synthetic CN-* value).
+                # 业务 credit-note 编号来自 remote
+                # effect（绝不使用 synthetic CN-* value）。
                 case.odoo_credit_note_id = remote
                 case.credit_note_id = remote
             if case.status == ReturnStatus.DISPOSITION_APPROVED:
-                # Credit notes are only posted against a posted invoice
-                # (state machine invariant; effect_transition_context passes
-                # the same ``invoice_posted`` attestation to the ledger).
+                # Credit note 只能针对已 posted 的 invoice
+                # （state machine invariant；effect_transition_context 会传递
+                # 同一个 ``invoice_posted`` attestation 给 ledger）。
                 advance_entity(
                     db,
                     case,
