@@ -48,7 +48,7 @@ DECISION_MESSAGE_KEYS = (
 class InboxAction:
     """A relay action for one inbox event (serializable plan)."""
 
-    kind: str  # "start" | "send"（启动或发送）
+    kind: str  # "start" | "send"（动作类型）（启动或发送）
     workflow_type: str | None = None
     workflow_version: int | None = None
     workflow_id: str | None = None
