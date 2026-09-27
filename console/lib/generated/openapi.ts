@@ -1,9 +1,8 @@
 // 本文件由 scripts/gen-types.mjs 自动生成，禁止手改。
 // 运行：node scripts/gen-types.mjs（或 npm run gen:types）
 // 来源：http://127.0.0.1:8000/openapi.json
-// OpenAPI spec sha256（前 16 位）：0c7243bbd348ed22
 
-/** Response for commands that are accepted asynchronously. */
+/** 异步受理命令的响应。 */
 export interface AcceptedResponse {
   "status"?: "accepted";
   "statusUrl": string;
@@ -11,7 +10,7 @@ export interface AcceptedResponse {
   [key: string]: unknown;
 }
 
-/** Create a draft catalog revision for a SKU. */
+/** 为 SKU 创建草稿 catalog revision。 */
 export interface CatalogRevisionCreate {
   "category"?: string | null;
   "description"?: string | null;
@@ -30,13 +29,13 @@ export interface CatalogRevisionCreate {
   [key: string]: unknown;
 }
 
-/** Manual resolution note for a reconciliation diff. */
+/** reconciliation diff 的人工处理说明。 */
 export interface DiffResolveRequest {
   "note": string;
   [key: string]: unknown;
 }
 
-/** Result of resolving a reconciliation diff. */
+/** reconciliation diff 的处理结果。 */
 export interface DiffResolveResponse {
   "diffId": string;
   "resolvedAt"?: string | null;
@@ -49,7 +48,7 @@ export interface HTTPValidationError {
   [key: string]: unknown;
 }
 
-/** Request publication of a SKU on a sales channel. */
+/** 请求在销售渠道发布 SKU。 */
 export interface ListingPublicationCreate {
   "channel"?: string;
   "payload"?:   {
@@ -59,7 +58,7 @@ export interface ListingPublicationCreate {
   [key: string]: unknown;
 }
 
-/** Create a procurement order (demand_detected). */
+/** 创建采购订单（demand_detected）。 */
 export interface ProcurementCreate {
   "currency"?: string;
   "qty": number | string;
@@ -70,7 +69,7 @@ export interface ProcurementCreate {
   [key: string]: unknown;
 }
 
-/** Trigger a reconciliation run. */
+/** 触发 reconciliation run。 */
 export interface ReconciliationCreate {
   "domains"?: string[];
   "run_type": string;
@@ -80,7 +79,7 @@ export interface ReconciliationCreate {
   [key: string]: unknown;
 }
 
-/** Register a customer return case. */
+/** 登记客户退货 case。 */
 export interface ReturnCreate {
   "customer_ref": string;
   "order_ref"?: string | null;
@@ -101,14 +100,14 @@ export interface ValidationError {
   [key: string]: unknown;
 }
 
-/** Fast acknowledgement returned to the webhook sender. */
+/** 返回给 webhook sender 的快速确认响应。 */
 export interface WebhookReceipt {
   "deduplicated"?: boolean;
   "received": boolean;
   [key: string]: unknown;
 }
 
-/** Result of a submitted work item decision. */
+/** 已提交 work item decision 的结果。 */
 export interface WorkItemDecisionResponse {
   "status": string;
   "workItemId": string;
@@ -116,7 +115,7 @@ export interface WorkItemDecisionResponse {
   [key: string]: unknown;
 }
 
-/** Submit a decision on a pending work item. */
+/** 对 pending work item 提交 decision。 */
 export interface WorkItemDecisionSubmit {
   "decision": "approve" | "reject" | "confirm" | "cancel";
   "expectedWorkflowVersion"?: number | null;
