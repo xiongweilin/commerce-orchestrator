@@ -21,14 +21,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-# Make the backend package importable when pytest is run from the repo root
-# (``uv run pytest`` does not place the backend directory on sys.path).
+# 当从 repo root 运行 pytest 时，让 backend package 可被 import
+# （``uv run pytest`` 不会把 backend directory 放入 sys.path）。
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 # ---------------------------------------------------------------------------
-# Test environment (must precede any app import)
+# 测试环境（必须先于任何 app import）
 # ---------------------------------------------------------------------------
 
 TEST_DB_FILENAME = f"test_{secrets.token_hex(4)}.db"
@@ -44,12 +44,12 @@ os.environ["COMMERCE_LOG_LEVEL"] = "WARNING"
 os.environ["COMMERCE_SHOPIFY_WEBHOOK_SECRET"] = "test-webhook-secret"
 os.environ["COMMERCE_SHOPIFY_SHOP_NAME"] = "test-shop"
 os.environ["COMMERCE_SHOPIFY_ACCESS_TOKEN"] = "shpat_test_token"
-# Test isolation: never let a real root `.env` inject client credentials.
-# pydantic-settings prefers env vars over the `.env` file, so these empty
-# values keep every Settings instance free of real Shopify OAuth credentials
-# regardless of the pytest working directory.  Without this, running the
-# suite from the repo root reads COMMERCE_SHOPIFY_CLIENT_ID/SECRET from the
-# real `.env` and triggers a client-credentials token exchange (network).
+# 测试隔离：绝不能让真实 root `.env` 注入 client credential。
+# pydantic-settings 优先使用环境变量而不是 `.env` 文件，因此这些空
+# 值可确保每个 Settings instance 都不会带入真实 Shopify OAuth credential，
+# 与 pytest working directory 无关。否则从 repo root 运行
+# suite 时会从真实 `.env` 读取 Shopify client credential，
+# 并触发 client-credentials token exchange（网络调用）。
 os.environ["COMMERCE_SHOPIFY_CLIENT_ID"] = ""
 os.environ["COMMERCE_SHOPIFY_CLIENT_SECRET"] = ""
 os.environ["COMMERCE_ODOO_BASE_URL"] = "http://odoo.test"
