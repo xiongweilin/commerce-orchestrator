@@ -63,7 +63,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 ALEMBIC_INI = str(BACKEND_ROOT / "alembic.ini")
 ALEMBIC_SCRIPT = str(BACKEND_ROOT / "alembic")
 
-# Documented local dev credentials (infra/postgres/init.sql + config defaults).
+# 文档化的本地开发凭据（infra/postgres/init.sql + config default）。
 PG_ADMIN_URL = "postgresql://commerce:commerce@localhost:5432/postgres"
 
 
@@ -169,7 +169,7 @@ def _make_user(factory: Callable[[], Session], roles: list[str]) -> uuid.UUID:
 
 
 # ---------------------------------------------------------------------------
-# Alembic migrations
+# Alembic migration
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +223,7 @@ def test_0002_fixture_data_upgrades_through_head() -> None:
         with psycopg.connect(
             f"postgresql://commerce:commerce@localhost:5432/{db_name}"
         ) as conn, conn.cursor() as cur:
-            # 0002-era workflow_run (0001 schema, no new columns).
+            # 0002 时期的 workflow_run（0001 schema，没有新 column）。
             cur.execute(
                 """
                     INSERT INTO workflow_run
@@ -290,8 +290,8 @@ def test_0002_fixture_data_upgrades_through_head() -> None:
                     now,
                 ),
             )
-            # 0004 normalizes the legacy idempotency vocabulary
-            # (done -> completed, pending -> processing).
+            # 0004 会归一化 legacy idempotency vocabulary
+            # （done -> completed，pending -> processing）。
             cur.execute(
                 """
                     INSERT INTO idempotency_record
@@ -324,12 +324,12 @@ def test_0002_fixture_data_upgrades_through_head() -> None:
                 ).scalars()
             )
         engine.dispose()
-        # Row preserved; 0003 backfilled the engine to legacy_inline.
+        # Row 保留；0003 把 engine backfill 为 legacy_inline。
         assert run.workflow_type == "procurement"
         assert run.orchestration_engine == "legacy_inline"
         assert run.status == "awaiting_approval"
         assert decision_count == 1
-        # 0004 normalized the legacy idempotency vocabulary.
+        # 0004 已归一化 legacy idempotency vocabulary。
         assert "done" not in idem_values
         assert "pending" not in idem_values
     finally:
@@ -375,10 +375,10 @@ def test_concurrent_20_same_command_creates_one_workflow(pg_factory) -> None:
         t.join(timeout=60)
 
     ok_ids = {r[1] for r in results if r[0] == "ok"}
-    # Once the first acceptance commits, every later thread replays the same
+    # 第一个 acceptance commit 后，后续 thread 都应 replay 同一个
     # original result (同 body、已完成：返回原结果); a thread that races the
-    # insert instead sees the unique-constraint IntegrityError.  Either way
-    # only one workflow may exist.
+    # insert；否则会命中 unique-constraint IntegrityError。无论哪种情况，
+    # 都只能存在一个 workflow。
     assert len(ok_ids) <= 1, f"expected one workflow id, got {results}"
     with pg_factory() as db:
         runs = db.execute(select(func.count()).select_from(WorkflowRun)).scalar_one()
@@ -498,7 +498,7 @@ def test_two_users_concurrent_approval_only_one_succeeds(pg_factory) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Inbox relay on PostgreSQL (SKIP LOCKED, lease, backoff, dead-letter)
+# PostgreSQL 上的 Inbox relay（SKIP LOCKED、lease、backoff、dead-letter）
 # ---------------------------------------------------------------------------
 
 
@@ -521,8 +521,8 @@ def test_inbox_skip_locked_claims_disjoint_batches(pg_factory) -> None:
         first_ids = {row.event_id for row in first}
         db.commit()
     with pg_factory() as db:
-        # The first claim's rows are locked (SKIP LOCKED): the second claim
-        # must skip them even though they are still processing.
+        # 第一次 claim 的 row 已被锁定（SKIP LOCKED）：第二次 claim
+        # 即使这些 row 仍在 processing，也必须跳过。
         second = claim_inbox_batch(db, consumer="worker", batch=3, lease_seconds=30)
         second_ids = {row.event_id for row in second}
         db.commit()
@@ -555,13 +555,13 @@ def test_inbox_lease_expiry_recovery_and_backoff_dead_letter(pg_factory) -> None
         db.refresh(lease_row)
         assert lease_row.status == InboxStatus.PENDING
         assert lease_row.lease_until is None
-        # Retire the recovered row so the backoff scenario below only claims
-        # its own event.
+        # 先 retire 已恢复的 row，使下面的 backoff 场景只 claim
+        # 自己的 event。
         lease_row.status = InboxStatus.PROCESSED
         db.commit()
 
-    # Backoff + dead-letter: a dispatch that always fails retries with
-    # exponential backoff and dead-letters at max_attempts.
+    # Backoff + dead-letter：持续失败的 dispatch 使用
+    # exponential backoff 重试，并在 max_attempts 时进入 dead-letter。
     with pg_factory() as db:
         emit_event(
             db,
@@ -599,7 +599,7 @@ def test_inbox_lease_expiry_recovery_and_backoff_dead_letter(pg_factory) -> None
         assert row.attempts == 1
         assert row.next_attempt_at is not None
         assert row.next_attempt_at > utc_now()
-        # The backoff window has elapsed: make the row claimable again.
+        # backoff window 已结束：让 row 再次可被 claim。
         row.next_attempt_at = utc_now() - timedelta(seconds=1)
         db.commit()
 
@@ -660,7 +660,7 @@ def test_cleanup_expiry_and_marker_referential_integrity(pg_factory, monkeypatch
         assert privacy.is_pseudonymous(order.customer_ref)
         marker_id = order.shipping["sensitivePayloadId"]
 
-        # One payload expires immediately, the fresh ones stay.
+        # 一个 payload 立即过期，fresh payload 保留。
         expired = store_sensitive_payload(
             db,
             purpose="customer_ref",
@@ -683,8 +683,8 @@ def test_cleanup_expiry_and_marker_referential_integrity(pg_factory, monkeypatch
 
         vault = db.execute(select(SensitivePayload)).scalars().all()
         assert len(vault) == 3
-        # Marker referential integrity: the business row still references an
-        # existing (tombstoned or live) vault row.
+        # Marker referential integrity：business row 仍引用一个
+        # 存在的 vault row（tombstoned 或 live）。
         assert any(str(row.id) == marker_id for row in vault)
         assert all(row.ciphertext or row.deleted_at is not None for row in vault)
 
