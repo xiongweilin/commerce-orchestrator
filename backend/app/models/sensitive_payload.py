@@ -20,7 +20,7 @@ class SensitivePayload(UUIDPkMixin, Base):
 
     __tablename__ = "sensitive_payload"
     __table_args__ = (
-        # Retention cleanup scans by expiry.
+        # Retention cleanup 按 expiry 扫描。
         Index("ix_sensitive_payload_expires_at", "expires_at"),
     )
 
