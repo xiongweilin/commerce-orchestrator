@@ -80,7 +80,7 @@ class DifyConnector:
         self._owns_client = client is None
 
     # ------------------------------------------------------------------ #
-    # Configuration and HTTP plumbing
+    # 配置与 HTTP 基础连接
     # ------------------------------------------------------------------ #
 
     def _require_configured(self) -> None:
@@ -114,7 +114,7 @@ class DifyConnector:
             self._client = None
 
     # ------------------------------------------------------------------ #
-    # Operations
+    # 操作
     # ------------------------------------------------------------------ #
 
     def generate_catalog_suggestion(
