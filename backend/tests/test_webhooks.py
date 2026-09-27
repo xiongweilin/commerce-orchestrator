@@ -64,7 +64,7 @@ def test_orders_create_emits_order_received_and_creates_order(db) -> None:
     assert [e.event_type for e in events] == ["order.received", "workflow.accepted"]
     assert events[0].aggregate_type == "sales_order"
     assert events[0].producer == "shopify_adapter"
-    # The domain event carries stable refs only -- never raw webhook PII.
+    # Domain event 只携带 stable ref，绝不携带 raw webhook PII。
     assert set(events[0].payload) == {
         "webhook_id",
         "topic",
@@ -82,7 +82,7 @@ def test_orders_create_emits_order_received_and_creates_order(db) -> None:
     assert order.status.value == "received"
     assert str(order.total) == "25.00"
 
-    # DBOS v2 run with a minimal input (no raw payload expansion).
+    # DBOS v2 使用最小 input 运行（不展开 raw payload）。
     run = _accepted_run(db)
     assert run.workflow_type == "order-to-cash"
     assert run.workflow_version == 2
@@ -145,8 +145,8 @@ def test_same_webhook_id_is_deduplicated(db) -> None:
     assert second["deduplicated"] is True
     assert second["event_type"] is None
 
-    # One domain event + one workflow.accepted event; a single v2 run and a
-    # single vault copy of the raw body.
+    # 一个 domain event + 一个 workflow.accepted event；只有一个 v2 run 和
+    # 一份 raw body 的 vault 副本。
     outbox_count = db.execute(select(func.count()).select_from(OutboxEvent)).scalar_one()
     assert outbox_count == 2
     inbox_count = db.execute(
@@ -173,19 +173,19 @@ def test_raw_body_stored_in_vault_not_projection(db) -> None:
     projection = db.execute(select(Projection)).scalar_one()
     assert projection.owner == "shopify_webhook"
     assert projection.external_id == webhook_id
-    # Projection keeps only a vault reference + metadata (docs/architecture.md
-    # 6.1); the encrypted body lives in the unified sensitive-payload vault.
+    # Projection 只保留 vault reference + metadata（docs/architecture.md
+    # 6.1）；加密 body 存放在统一 sensitive-payload vault 中。
     assert "enc" not in projection.payload
 
     vault = db.execute(select(SensitivePayload)).scalar_one()
     assert vault.purpose == "shopify_webhook"
     assert vault.source_id == webhook_id
-    assert vault.expires_at is not None  # default 30-day retention
+    assert vault.expires_at is not None  # 默认 30 天 retention
     assert decrypt_payload(vault.ciphertext.encode("ascii")) == raw
     assert projection.payload["vaultId"] == str(vault.id)
 
-    # The plaintext must not be recoverable from projection metadata or the
-    # ciphertext column.
+    # 明文绝不能从 projection metadata 或
+    # ciphertext column 中恢复。
     stored = json.dumps(projection.payload)
     assert raw.decode("utf-8") not in stored
     assert "buyer@example.com" not in stored
@@ -218,7 +218,7 @@ def test_webhook_pii_never_in_events_or_run_input(db) -> None:
     )
 
     order = db.execute(select(SalesOrder)).scalar_one()
-    # Email -> HMAC pseudonymous marker; shipping address -> vault reference.
+    # Email -> HMAC pseudonymous marker；shipping address -> vault reference。
     assert order.customer_ref.startswith("pii:")
     assert "sensitivePayloadId" in order.shipping
     assert "Secret St" not in json.dumps(order.shipping)
@@ -270,5 +270,5 @@ def test_unmapped_topic_is_received_without_event(db) -> None:
     assert result["received"] is True
     assert result["event_type"] is None
     assert result["note"]
-    # Even unmapped raw bodies are retained in the vault.
+    # 即使 raw body 无法映射，也保留在 vault 中。
     assert len(db.execute(select(SensitivePayload)).scalars().all()) == 1
