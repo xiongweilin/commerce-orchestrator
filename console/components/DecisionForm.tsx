@@ -39,7 +39,7 @@ export default function DecisionForm({
   workItemId: string;
   expectedWorkflowVersion: number;
   authorizationProfile?: AuthorizationProfile | null;
-  /** Transitional compatibility for the listing workflow detail page. */
+  /** listing workflow detail page 的过渡期兼容逻辑。 */
   requiresExecutionAuthorization?: boolean;
 }) {
   const router = useRouter();
