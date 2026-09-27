@@ -19,8 +19,8 @@ def _shopify_settings(**overrides) -> Settings:
         "encryption_key": "x",
         "shopify_shop_name": "test-shop",
         "shopify_access_token": "shpat_abc123",
-        # Explicitly empty: a real root `.env` must never inject client
-        # credentials and trigger a client-credentials token exchange.
+        # 显式设为空：真实 root `.env` 绝不能注入 client
+        # credential 并触发 client-credentials token exchange。
         "shopify_client_id": "",
         "shopify_client_secret": "",
         "shopify_api_version": "2026-07",
@@ -225,7 +225,7 @@ def test_odoo_create_product_success() -> None:
     assert result.ok is True
     assert result.remote_reference == "42"
     assert len(requests) == 1
-    # Odoo 19 JSON-2 create signature: vals_list (verified in ADR-0008 P0 gate)
+    # Odoo 19 JSON-2 create 签名：vals_list（已由 ADR-0008 P0 gate 验证）
     assert b'"vals_list"' in requests[0].content
 
 
