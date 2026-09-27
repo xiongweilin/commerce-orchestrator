@@ -41,7 +41,7 @@ JSONB = postgresql.JSONB
 
 
 def upgrade() -> None:
-    # WorkflowRun: orchestration metadata (all additive).
+    # WorkflowRun：orchestration metadata（全部为 additive 变更）。
     op.add_column(
         "workflow_run",
         sa.Column(
@@ -67,20 +67,20 @@ def upgrade() -> None:
         "workflow_run",
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
     )
-    # Explicit backfill so every pre-existing row is legacy_inline, matching
-    # the plan's compatibility rule for in-flight v1 workflows.
+    # 显式 backfill，让所有既有 row 都是 legacy_inline，从而符合
+    # 对进行中的 v1 workflow 的 compatibility rule。
     op.execute(
         "UPDATE workflow_run SET orchestration_engine = 'legacy_inline' "
         "WHERE orchestration_engine IS NULL"
     )
 
-    # WorkItem: explicit proposer, no longer inferred from payload JSON.
+    # WorkItem：显式记录 proposer，不再从 payload JSON 推断。
     op.add_column(
         "work_item",
         sa.Column("proposed_by_user_id", UUID, nullable=True),
     )
 
-    # InboxEvent: lease/retry fields (additive) + claim index.
+    # InboxEvent：lease/retry field（additive）+ claim index。
     op.add_column(
         "inbox_event",
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
@@ -107,7 +107,7 @@ def upgrade() -> None:
         ["consumer", "status", "next_attempt_at"],
     )
 
-    # RuntimeHeartbeat: worker/API process liveness, one row per instance.
+    # RuntimeHeartbeat：worker/API process liveness；每个 instance 一条 row。
     op.create_table(
         "runtime_heartbeat",
         sa.Column("id", UUID, nullable=False),
