@@ -266,7 +266,7 @@ def test_decision_is_not_authorization_and_dispatch_revalidates(db, make_user):
     )
     assert effect.workflow_ref == run.id
     assert effect.authorization_ref == authorization.id
-    assert effect.approval_ref == run.id  # legacy provenance only
+    assert effect.approval_ref == run.id  # 仅 legacy provenance
 
     authorization.revoked_at = authorization.issued_at
     db.flush()
