@@ -29,9 +29,9 @@ ERROR_IDEMPOTENCY_IN_PROGRESS = "idempotency_in_progress"
 ERROR_IDEMPOTENCY_CONFLICT = "idempotency_key_conflict"
 """Error code for a same-key request with a different body."""
 
-# Idempotency record scopes used by the WP6 write facades.  These follow the
-# plan's "scope = endpoint-level command domain" rule and are shared with the
-# WP4 services once they take over the idempotency machinery.
+# WP6 write facade 使用的 idempotency record scope。它们遵循
+# 计划中的“scope = endpoint-level command domain”规则，并与
+# 后续接管 idempotency machinery 的 WP4 service 共享。
 IDEMPOTENCY_SCOPE_DECISION = "work-item-decision"
 IDEMPOTENCY_SCOPE_DIFF_RESOLVE = "reconciliation-diff-resolve"
 IDEMPOTENCY_SCOPE_INBOX_RETRY = "inbox-retry"
