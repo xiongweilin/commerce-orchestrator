@@ -163,7 +163,7 @@ def test_credit_note_and_refund_use_distinct_exact_authorities(db, make_user) ->
     assert credit_auth.scope["currency"] == "CNY"
     assert "client_must_not_control" not in credit_auth.scope
 
-    # A credit-note authority cannot be rebound to the refund work item.
+    # credit-note authority 不能重新绑定到 refund work item。
     refund_item.payload_json = {
         **(refund_item.payload_json or {}),
         "authorization_ref": str(credit_auth.id),
@@ -252,8 +252,8 @@ def test_credit_note_chained_outputs_do_not_self_invalidate_authority(db, make_u
         context=effect_transition_context("odoo.credit_note_create"),
     )
 
-    # These are execution outputs/lifecycle facts and are intentionally absent
-    # from the authority fingerprint.
+    # 这些属于 execution output / lifecycle fact，因此刻意不纳入
+    # authority fingerprint。
     case.odoo_credit_note_id = "42001"
     case.credit_note_id = "CN-42001"
     case.status = ReturnStatus.CREDIT_NOTE_POSTED
