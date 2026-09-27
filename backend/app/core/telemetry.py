@@ -9,8 +9,8 @@ from app.config import get_settings
 
 TRACER_NAME = "commerce-orchestrator"
 
-# Default registry; the API layer can expose it at /metrics via
-# generate_latest(METRICS_REGISTRY).
+# 默认 registry；API layer 可以通过
+# generate_latest(METRICS_REGISTRY) 在 /metrics 暴露。
 METRICS_REGISTRY = REGISTRY
 
 HTTP_REQUESTS = Counter(
