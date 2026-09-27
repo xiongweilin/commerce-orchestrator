@@ -23,8 +23,8 @@ from .schemas import TicketInput
 
 
 def input_hash(message: str, workflow_version: str) -> str:
-    # Evidence offsets are tied to the exact persisted text. Cache only byte-for-byte
-    # equivalent sanitized messages so reused offsets cannot point at the wrong span.
+    # Evidence offset 绑定到精确持久化文本。只有在 byte-for-byte
+    # 完全等价的 sanitized message 之间才能复用 cache，避免 offset 指向错误 span。
     return hashlib.sha256(f"{workflow_version}\0{message}".encode()).hexdigest()
 
 
