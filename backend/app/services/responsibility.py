@@ -280,7 +280,7 @@ def discharge_responsibility_obligation(
         raise NotFoundError("responsibility obligation not found")
     if obligation.status == ResponsibilityObligationStatus.DISCHARGED:
         return obligation
-    _ = actor_user_id  # actor is authenticated/auditable at the API boundary
+    _ = actor_user_id  # actor 在 API boundary 已完成 authentication，并可审计
     obligation.status = ResponsibilityObligationStatus.DISCHARGED
     obligation.discharged_at = utc_now()
     db.flush()
