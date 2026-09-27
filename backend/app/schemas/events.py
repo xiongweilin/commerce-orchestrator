@@ -183,8 +183,8 @@ class EventEnvelope(BaseModel):
     producer: str
     schemaVersion: str = "1.0"
     payload: dict[str, Any] = Field(default_factory=dict)
-    # Optional W3C trace context propagated through the outbox/inbox pipeline
-    # (P7 observability; the worker extracts these when creating spans).
+    # 可选 W3C trace context，会通过 outbox/inbox pipeline 传播
+    # （P7 observability；worker 创建 span 时提取这些字段）。
     traceparent: str | None = None
     tracestate: str | None = None
 
