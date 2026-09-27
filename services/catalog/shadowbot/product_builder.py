@@ -9,7 +9,7 @@ import re
 
 from shadowbot.odoo_adapter import OdooClient
 # -----------------------------------------------------------------------
-# Model name constants (avoid string-literal duplication)
+# Model name 常量（避免重复 string literal）
 # -----------------------------------------------------------------------
 
 MODEL_PRODUCT_TEMPLATE = "product.template"
@@ -19,7 +19,7 @@ MODEL_PRODUCT_PRODUCT = "product.product"
 
 
 # -----------------------------------------------------------------------
-# Item helpers
+# Item helper
 # -----------------------------------------------------------------------
 
 def _item_value(item: dict, name: str, default: str = "") -> str:
@@ -27,7 +27,7 @@ def _item_value(item: dict, name: str, default: str = "") -> str:
 
 
 # -----------------------------------------------------------------------
-# Price parsing
+# 价格解析
 # -----------------------------------------------------------------------
 
 def parse_price(value) -> float:
@@ -57,7 +57,7 @@ def build_note(item: dict) -> str:
 
 
 # -----------------------------------------------------------------------
-# Product type detection
+# 商品类型检测
 # -----------------------------------------------------------------------
 
 def pick_product_type_value(odoo: OdooClient):
@@ -82,7 +82,7 @@ def pick_product_type_value(odoo: OdooClient):
 
 
 # -----------------------------------------------------------------------
-# Product values builder
+# 商品 values builder
 # -----------------------------------------------------------------------
 
 def build_product_values(odoo: OdooClient, item: dict, mode: str) -> dict:
@@ -131,7 +131,7 @@ def _enrich_full_mode_values(odoo: OdooClient, values: dict, note: str) -> None:
 
 
 # -----------------------------------------------------------------------
-# Write helpers
+# 写入 helper
 # -----------------------------------------------------------------------
 
 def write_template_values(odoo: OdooClient, product_id: int, values: dict) -> bool:
@@ -162,7 +162,7 @@ def write_variant_sku(odoo: OdooClient, product_id: int, sku: str) -> bool:
 
 
 # -----------------------------------------------------------------------
-# Post-create optional field update
+# 创建后的 optional field 更新
 # -----------------------------------------------------------------------
 
 def after_create_update_optional_fields(odoo: OdooClient, product_id: int, item: dict):
@@ -200,7 +200,7 @@ def after_create_update_optional_fields(odoo: OdooClient, product_id: int, item:
 
 
 # -----------------------------------------------------------------------
-# Product creation orchestrator
+# 商品创建 orchestrator
 # -----------------------------------------------------------------------
 
 def create_template_with_fallback(odoo: OdooClient, item: dict) -> int:
