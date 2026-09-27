@@ -10,7 +10,7 @@ import xmlrpc.client
 from urllib.parse import parse_qs, urlsplit
 
 # -----------------------------------------------------------------------
-# Model name constants (avoid string-literal duplication)
+# Model name 常量（避免重复 string literal）
 # -----------------------------------------------------------------------
 
 MODEL_PRODUCT_TEMPLATE = "product.template"
@@ -76,7 +76,7 @@ class OdooClient:
                 keys.append(str(item))
         return keys
 
-    # -- product lookup helpers -------------------------------------------
+    # -- 商品查询 helper --------------------------------------------------
 
     def search_template_by_sku(self, sku: str) -> int | None:
         if not self.field_exists(MODEL_PRODUCT_TEMPLATE, "default_code"):
@@ -113,7 +113,7 @@ class OdooClient:
             return product_id
         return self.search_variant_template_id(sku)
 
-    # -- internals --------------------------------------------------------
+    # -- 内部实现 ---------------------------------------------------------
 
     @staticmethod
     def _authenticate(base_url, db, username, password):
@@ -127,8 +127,8 @@ class OdooClient:
 
 
 # -----------------------------------------------------------------------
-# helpers (module-level utilities kept here so this module stays
-# self-contained)
+# helper（保留为 module-level utility，使本 module 保持
+# self-contained）
 # -----------------------------------------------------------------------
 
 def _parse_odoo_login_url(odoo_login_url: str) -> tuple[str, str]:
