@@ -7,26 +7,26 @@ from feedback_app import models  # noqa: F401
 from feedback_app.config import get_settings
 from feedback_app.database import Base
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# 这是 Alembic Config object，用于提供
+# 当前 .ini 文件中的配置值。
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# 解析配置文件以设置 Python logging。
+# 这一行用于初始化 logger。
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
+# 在这里添加 model 的 MetaData object
+# 以支持 'autogenerate'
+# 示例：from myapp import mymodel
+# 示例：target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+# env.py 所需的其他配置值
+# 可以这样读取：
+# 示例：my_important_option = config.get_main_option("my_important_option")
+# ……等。
 
 
 def run_migrations_offline() -> None:
