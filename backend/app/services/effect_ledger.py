@@ -299,7 +299,7 @@ def apply_outcome(
             error_detail=outcome.detail,
             context=context,
         )
-    # EffectOutcomeUnknown — never auto-re-dispatched.
+    # EffectOutcomeUnknown：绝不自动重新 dispatch。
     if current == "outcome_unknown":
         return entry
     if current in {"succeeded", "failed"}:
