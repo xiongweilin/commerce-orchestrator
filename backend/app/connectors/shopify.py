@@ -65,7 +65,7 @@ with suppress(Exception):  # pragma: no cover - Windows 以外平台无系统库
     _SSL_CONTEXT.load_default_certs(ssl.Purpose.SERVER_AUTH)
 
 _TOKEN_EXCHANGE_MAX_ATTEMPTS = 5
-_TOKEN_EXCHANGE_BACKOFF = 1.0  # seconds; sleeps 1s, 2s, 3s, 4s between attempts
+_TOKEN_EXCHANGE_BACKOFF = 1.0  # 秒；各次尝试之间依次等待 1s、2s、3s、4s
 
 _CONFLICT_MARKERS = (
     "has already been taken",
@@ -132,7 +132,7 @@ class ShopifyConnector:
         self._token_expires_at: float | None = None
 
     # ------------------------------------------------------------------ #
-    # Configuration and HTTP plumbing
+    # 配置与 HTTP 基础连接
     # ------------------------------------------------------------------ #
 
     @property
@@ -241,7 +241,7 @@ class ShopifyConnector:
                 return self._cached_token
             token = self.exchange_client_credentials_token()
             self._cached_token = token
-            # expires_in is 86399s; refresh an hour early.
+            # expires_in 为 86399 秒；提前一小时刷新。
             self._token_expires_at = now + (86399 - 3600)
             logger.info("shopify_client_credentials_token_exchanged")
             return token
@@ -337,9 +337,9 @@ class ShopifyConnector:
         if status == 404:
             raise ExternalSystemError(f"Shopify {operation} not found (HTTP 404): {body}")
         if status == 429:
-            # 429 is returned before the mutation is processed: the effect was
-            # definitively NOT applied, so retrying the same intent is safe
-            # (maps to EffectFailed(retryable=True), max 3 attempts).
+            # 429 表示 mutation 在处理前被拒绝：可以确定 effect
+            # 没有应用，因此重试同一 intent 是安全的
+            # （映射为 EffectFailed(retryable=True)，最多 3 次尝试）。
             raise RetryableEffectError(
                 f"Shopify {operation} rate limited (HTTP 429) before processing; "
                 f"the effect was not applied — retry is safe: {body}"
@@ -399,7 +399,7 @@ class ShopifyConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Connectivity / auth probe (read-only)
+    # 连通性 / 认证探测（只读）
     # ------------------------------------------------------------------ #
 
     def probe(self) -> dict[str, Any]:
@@ -432,7 +432,7 @@ class ShopifyConnector:
         }
 
     # ------------------------------------------------------------------ #
-    # Product operations
+    # 商品操作
     # ------------------------------------------------------------------ #
 
     def create_product(
@@ -594,7 +594,7 @@ class ShopifyConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Fulfillment and refunds
+    # 履约与退款
     # ------------------------------------------------------------------ #
 
     def create_fulfillment(
@@ -827,7 +827,7 @@ class ShopifyConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Read queries (reconciliation and inventory projections)
+    # Read query（用于 reconciliation 和库存 projection）
     # ------------------------------------------------------------------ #
 
     def list_orders(
