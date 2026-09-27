@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from app.schemas.events import EFFECT_OPS
 
 # ---------------------------------------------------------------------------
-# Stable error codes (never inferred from message text)
+# 稳定 error code（绝不从 message text 推断）
 # ---------------------------------------------------------------------------
 
 ERROR_OUTCOME_UNKNOWN = "outcome_unknown"
@@ -66,7 +66,7 @@ class EffectParameters(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Shopify parameter models
+# Shopify 参数模型
 # ---------------------------------------------------------------------------
 
 
@@ -81,7 +81,7 @@ class ShopifyRefundCreateParams(EffectParameters):
     refund_line_items: list[dict[str, Any]] | None = None
     parent_transaction_id: str | None = None
     gateway: str = "manual"
-    # Fail-closed: refunds never move real money unless explicitly allowed.
+    # Fail-closed：除非明确允许，否则该 sandbox 操作绝不产生真实资金影响。
     allow_real_money: bool = False
 
 
@@ -114,7 +114,7 @@ class ShopifyFulfillmentCreateParams(EffectParameters):
 
 
 # ---------------------------------------------------------------------------
-# Odoo parameter models
+# Odoo 参数模型
 # ---------------------------------------------------------------------------
 
 
@@ -308,7 +308,7 @@ class EffectExecutionRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Typed outcomes (discriminated union)
+# Typed outcome（discriminated union）
 # ---------------------------------------------------------------------------
 
 
