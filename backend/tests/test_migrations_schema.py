@@ -34,8 +34,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------
-# SQLite compilation patches for PG-only types used by the migrations.
-# Production (PostgreSQL) compilation is untouched.
+# 为 migration 中仅 PostgreSQL 支持的 type 提供 SQLite compilation patch。
+# Production（PostgreSQL）compilation 保持不变。
 # ---------------------------------------------------------------------------
 @compiles(postgresql.UUID, "sqlite")
 def _compile_uuid_sqlite(type_, compiler, **kw):  # noqa: ARG001
@@ -60,7 +60,7 @@ def _make_config() -> Config:
 
 @pytest.fixture
 def migrate_url(tmp_path: Path) -> str:
-    # Forward slashes are required for Windows sqlite URLs.
+    # Windows sqlite URL 必须使用正斜杠。
     return f"sqlite:///{(tmp_path / 'migrate.db').as_posix()}"
 
 
@@ -131,7 +131,7 @@ def _columns_compatible(model_type, db_type) -> bool:
     if isinstance(model_type, sa.Uuid):
         return _type_category(db_type) == "text" and getattr(db_type, "length", 0) >= 32
     if isinstance(model_type, sa.Enum):
-        # native_enum=False -> VARCHAR storage; the python_type is the enum class.
+        # native_enum=False -> 使用 VARCHAR 存储；python_type 仍为 enum class。
         return _type_category(db_type) == "text"
     return _type_category(model_type) == _type_category(db_type)
 
