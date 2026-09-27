@@ -269,7 +269,7 @@ def test_parameter_mismatch_raises_connector_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Retry policy
+# Retry policy（重试策略）
 # ---------------------------------------------------------------------------
 
 
@@ -286,7 +286,7 @@ def test_can_retry_only_retryable_failed_bounded_to_three() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Real connector classification (exception-type, not "timeout" strings)
+# 真实 connector 分类（按 exception type，而不是 "timeout" 字符串）
 # ---------------------------------------------------------------------------
 
 
@@ -296,9 +296,9 @@ def _shopify_settings() -> Settings:
         encryption_key="x",
         shopify_shop_name="test-shop",
         shopify_access_token="shpat_abc123",
-        # Empty client credentials: a real root `.env` must never trigger a
-        # client-credentials token exchange while running tests from the repo
-        # root (same isolation fix as test_connectors.py).
+        # 空 client credential：真实 root `.env` 绝不能在从 repo root
+        # 运行测试时触发 client-credentials token exchange
+        # （与 test_connectors.py 使用相同隔离修复）。
         shopify_client_id="",
         shopify_client_secret="",
         shopify_api_version="2026-07",
@@ -343,7 +343,7 @@ def test_http_429_maps_to_retryable_failed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Odoo read-before-create idempotency through the seam
+# 通过 seam 验证 Odoo read-before-create idempotency
 # ---------------------------------------------------------------------------
 
 
@@ -385,13 +385,13 @@ def test_odoo_create_sale_order_replayed_via_marker() -> None:
     assert outcome.remote_reference == "77"
     assert outcome.replayed is True
     assert all("create" not in r.url.path for r in requests)
-    # The marker must be sent on the read side too.
+    # read side 也必须发送 marker。
     search_body = json.loads(requests[0].content)
     assert marker in json.dumps(search_body)
 
 
 # ---------------------------------------------------------------------------
-# Ledger integration: mark_dispatched / apply_outcome / retry rules
+# Ledger integration：mark_dispatched / apply_outcome / retry rule
 # ---------------------------------------------------------------------------
 
 
