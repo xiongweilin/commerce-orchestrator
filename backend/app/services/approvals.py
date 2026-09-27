@@ -65,8 +65,8 @@ FOUR_EYES_AREAS = frozenset(("refund", "po", "inventory", "accounting"))
 DECISION_RECORDED_CONSUMER = "worker"
 DECISION_IDEMPOTENCY_SCOPE_PREFIX = "work-item-decision:"
 
-# workflow_type -> step_name -> next-step callback.
-# Step callbacks have signature: (db, run, work_item, actor_user_id) -> dict.
+# workflow_type -> step_name -> 下一步 callback。
+# Step callback 签名：(db, run, work_item, actor_user_id) -> dict。
 _STEP_REGISTRY: dict[str, dict[str, Callable[..., dict]]] = {}
 
 
@@ -181,7 +181,7 @@ def _check_four_eyes(item: WorkItem, user_id: uuid.UUID) -> None:
     area = payload.get("four_eyes_area")
     if area not in FOUR_EYES_AREAS:
         return
-    # Explicit WP1 column is authoritative; fall back to the legacy payload.
+    # 显式 WP1 column 是 authoritative；否则回退到 legacy payload。
     proposer = item.proposed_by_user_id
     if proposer is None and payload.get("proposed_by_user_id"):
         proposer = _uuid(payload.get("proposed_by_user_id"), field="proposed_by_user_id")
@@ -257,7 +257,7 @@ def apply_domain_continuation(
         else:
             _cancel_run(db, run, reason)
         item.status = WorkItemStatus.REJECTED
-    else:  # cancel
+    else:  # 取消
         _cancel_run(db, run, reason)
         item.status = WorkItemStatus.CANCELLED
     return step_result
@@ -412,7 +412,7 @@ def submit_decision(
     item = get_work_item(db, work_item_id)
 
     # Plan 二.3: the deciding user must exist and be active (defense in depth;
-    # the API layer already rejects inactive users in get_current_user).
+    # API layer 已在 get_current_user 中拒绝 inactive user）。
     actor = db.get(User, user_id)
     if actor is None or not actor.is_active:
         raise PermissionDeniedError("user is not active")
@@ -433,7 +433,7 @@ def submit_decision(
         if replay is not None:
             return replay
 
-    # P7: lock the aggregate pair before any mutation (FOR UPDATE).
+    # P7：任何 mutation 前先锁定 aggregate pair（FOR UPDATE）。
     item = _lock_work_item(db, work_item_id)
     run = _lock_run(db, item.workflow_id)
 
@@ -482,7 +482,7 @@ def submit_decision(
             db.add(decision_row)
             db.flush()
     except IntegrityError:
-        # Unique uq_work_item_decision_work_item_id: a concurrent approval won.
+        # 唯一约束 uq_work_item_decision_work_item_id 表示并发 approval 已有胜者。
         raise ConflictError(
             f"work item {work_item_id} already has a decision; concurrent approval rejected"
         ) from None
@@ -501,8 +501,8 @@ def submit_decision(
 
     is_dbos = run.orchestration_engine == "dbos"
     if is_dbos:
-        # v2: the workflow applies the continuation after DBOS.recv; the
-        # worker relays this event via DBOS.send (durable decision message).
+        # v2：workflow 在 DBOS.recv 后应用 continuation；
+        # worker 通过 DBOS.send relay 此 event（durable decision message）。
         emit_event(
             db,
             event_type="workflow.decision_recorded",
