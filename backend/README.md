@@ -1,5 +1,8 @@
 # commerce-orchestrator backend
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+
 FastAPI + DBOS backend for the Commerce Orchestrator sandbox. The backend owns command acceptance, workflow/read APIs, durable decision messaging, typed external effects, canonical reconciliation and the Commerce responsibility/authority specialization.
 
 Odoo 19 remains the authoritative business/accounting ledger for Odoo-owned facts; Shopify is the first external channel. Commerce PostgreSQL owns orchestration, effect, reconciliation, responsibility and audit facts.

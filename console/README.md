@@ -1,5 +1,8 @@
 # Operations Console
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+
 Next.js 16 + React 19 + TypeScript operations console for Commerce Orchestrator. The console is an internal inspection/request surface over the FastAPI backend; it is deliberately **non-authoritative**.
 
 It can request decisions and display responsibility/authority facts, but it does not mint or infer execution authority.

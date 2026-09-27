@@ -1,5 +1,8 @@
 # ADR 0016: Listing Integrity Steward as a persistent-responsibility experiment
 
+[English](0016-listing-integrity-steward-experiment.md) | [简体中文](0016-listing-integrity-steward-experiment.zh-CN.md)
+
+
 - Status: Experimental
 - Milestone: C20
 - Scope: No schema migration, no new effect authority, no change to existing listing publication authorization profiles

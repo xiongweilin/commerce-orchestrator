@@ -1,5 +1,8 @@
 # Commerce persistent-responsibility runtime boundary
 
+[English](persistent-responsibility-runtime.md) | [简体中文](persistent-responsibility-runtime.zh-CN.md)
+
+
 Commerce consumes `agent-kernel` at the exact revision declared in
 `docs/contracts/responsibility-compatibility.toml`.
 

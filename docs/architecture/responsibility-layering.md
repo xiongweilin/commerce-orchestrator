@@ -1,5 +1,8 @@
 # Responsibility Layering
 
+[English](responsibility-layering.md) | [简体中文](responsibility-layering.zh-CN.md)
+
+
 This architecture adds a semantic/responsibility plane to Commerce Orchestrator without replacing DBOS, the existing Commerce domain state machines, or external fact ownership.
 
 The current implementation is additive:
