@@ -68,7 +68,7 @@ def analyze_row(row: dict, max_attempts: int) -> dict:
                 "attempt_errors": attempt_errors,
                 "analysis": result.model_dump(mode="json"),
             }
-        except Exception as exc:  # the cache records dependency failures verbatim
+        except Exception as exc:  # cache 会原样记录 dependency failure
             error = f"{type(exc).__name__}: {exc}"
             attempt_errors.append(error)
             if attempt < max_attempts:
