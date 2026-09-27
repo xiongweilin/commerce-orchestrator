@@ -48,8 +48,8 @@ def _accept(
         db=db,
         command_type=command_type,
     )
-    # The wire contract always reports the asynchronous acceptance status;
-    # the internal run status is observable via GET /v1/workflows/{id}.
+    # Wire contract 始终报告 asynchronous acceptance status；
+    # internal run status 可通过 GET /v1/workflows/{id} 观察。
     return AcceptedResponse.model_validate(result.model_dump())
 
 
