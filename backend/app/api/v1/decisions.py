@@ -43,7 +43,7 @@ AUTHORIZED_DECISION_SCOPE_PREFIX = "authorized-decision:"
 
 
 class WorkItemDecisionResponse(BaseModel):
-    """已提交 work item decision 的结果。"""
+    """Result of a submitted work item decision."""
 
     workItemId: uuid.UUID
     status: str
