@@ -145,7 +145,7 @@ def get_workflow(db, workflow_id: uuid.UUID | str) -> dict[str, Any]:
 
 
 def get_work_item(db, work_item_id: uuid.UUID) -> WorkItem:
-    from app.services.approvals import get_work_item as _get  # re-export convenience
+    from app.services.approvals import get_work_item as _get  # 便于 re-export
 
     return _get(db, work_item_id)
 
@@ -180,7 +180,7 @@ def list_workflows(
         .all()
     )
 
-    # currentStep: a run with pending human work items waits for approval.
+    # currentStep：存在 pending human work item 的 run 会等待 approval。
     run_ids = [run.id for run in runs]
     awaiting: set[uuid.UUID] = set()
     if run_ids:
@@ -215,7 +215,7 @@ def list_workflows(
 
 
 # ---------------------------------------------------------------------------
-# Idempotency machinery (WP6 API semantics; WP4 takes over the service side)
+# Idempotency machinery（WP6 API semantics；service side 后续由 WP4 接管）
 # ---------------------------------------------------------------------------
 
 
@@ -286,7 +286,7 @@ def complete_idempotency(record: IdempotencyRecord, *, result: dict[str, Any]) -
 
 
 # ---------------------------------------------------------------------------
-# WP4 contract facades (fixed signatures; interim delegation to v1 services)
+# WP4 contract facade（签名固定；过渡期 delegate 给 v1 service）
 # ---------------------------------------------------------------------------
 
 
