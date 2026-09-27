@@ -127,7 +127,7 @@ class OdooConnector:
         self._owns_client = client is None
 
     # ------------------------------------------------------------------ #
-    # Configuration and HTTP plumbing
+    # 配置与 HTTP 基础连接
     # ------------------------------------------------------------------ #
 
     def _require_configured(self) -> None:
@@ -222,16 +222,16 @@ class OdooConnector:
                 f"(HTTP {status}): {message}"
             )
         if status == 429:
-            # 429 is returned before the request was processed: the per-call
-            # transaction did not run, so the effect was definitively NOT
-            # applied — retrying the same intent is safe.
+            # 429 表示请求在处理前就被拒绝：本次调用的
+            # transaction 尚未执行，因此可以确定 effect 没有
+            # 应用；重试同一 intent 是安全的。
             raise RetryableEffectError(
                 f"Odoo {model}/{method} rate limited (HTTP 429) before processing; "
                 "the effect was not applied — retry is safe"
             )
         if error_body is not None:
-            # A parseable Odoo error means the per-call transaction rolled
-            # back: the effect was definitively NOT applied.
+            # 可解析的 Odoo error 表示本次调用 transaction 已
+            # 回滚，因此可以确定 effect 没有应用。
             message = truncate(str(error_body.get("message", "")), 2000)
             name = error_body.get("name", "OdooError")
             logger.warning("odoo_api_error", model=model, method=method, status=status, name=name)
@@ -274,7 +274,7 @@ class OdooConnector:
         if odoo_id is not None:
             remote_reference = str(odoo_id)
         elif isinstance(result, list) and len(result) == 1:
-            # JSON-2 create returns the new record id list, e.g. [12].
+            # JSON-2 create 返回新 record id 列表，例如 [12]。
             remote_reference = str(result[0])
         else:
             remote_reference = str(result)
@@ -284,7 +284,7 @@ class OdooConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Read helpers (idempotency read-backs and reconciliation reads)
+    # Read helper（用于 idempotency read-back 和 reconciliation read）
     # ------------------------------------------------------------------ #
 
     def _search(
@@ -356,7 +356,7 @@ class OdooConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Connectivity / auth probe (read-only, P0 gate)
+    # 连通性 / 认证探测（只读，P0 gate）
     # ------------------------------------------------------------------ #
 
     def probe(self) -> dict[str, Any]:
@@ -388,7 +388,7 @@ class OdooConnector:
         }
 
     # ------------------------------------------------------------------ #
-    # Product
+    # 商品
     # ------------------------------------------------------------------ #
 
     def create_product(
@@ -439,7 +439,7 @@ class OdooConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Sales orders
+    # 销售订单
     # ------------------------------------------------------------------ #
 
     def create_sale_order(
@@ -496,7 +496,7 @@ class OdooConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Inventory / stock
+    # 库存
     # ------------------------------------------------------------------ #
 
     def create_stock_move(
@@ -522,7 +522,7 @@ class OdooConnector:
             return values
         items = values.get("items") or []
         if not items:
-            # No business fields: keep the raw values (marker replay path).
+            # 没有业务字段时保留原始值（marker replay path）。
             return values
         partner = self._ensure_partner(str(values.get("partner_name") or "Shopify Customer"))
         order_lines = []
@@ -678,7 +678,7 @@ class OdooConnector:
         )
         if not pickings:
             return None
-        # Prefer an in-progress incoming picking; fall back to any row.
+        # 优先选择进行中的 incoming picking；否则回退到任意 row。
         return next((p for p in pickings if p.get("state") != "done"), pickings[0])
 
     def update_quantity(
@@ -742,7 +742,7 @@ class OdooConnector:
         )
 
     # ------------------------------------------------------------------ #
-    # Invoices / credit notes / bills
+    # 发票 / 贷项通知单 / 账单
     # ------------------------------------------------------------------ #
 
     def create_invoice(
@@ -1029,7 +1029,7 @@ class OdooConnector:
         return body
 
     # ------------------------------------------------------------------ #
-    # Reconciliation reads (read-only, never state-changing)
+    # Reconciliation read（只读，绝不改变状态）
     # ------------------------------------------------------------------ #
 
     def read_records(
